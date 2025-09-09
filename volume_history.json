@@ -1,0 +1,30 @@
+{
+  "ANGEL ONE": [
+    {
+      "date": "2025-09-08",
+      "totalVolume": 5116750,
+      "timestamp": 1757357839621
+    }
+  ],
+  "ADITYA BIRLA CAPITAL": [
+    {
+      "date": "2025-09-09",
+      "totalVolume": 0,
+      "timestamp": 1757389034230
+    }
+  ],
+  "ASHOK LEYLAND": [
+    {
+      "date": "2025-09-09",
+      "totalVolume": 0,
+      "timestamp": 1757389121987
+    }
+  ],
+  "MAX HEALTHCARE INS": [
+    {
+      "date": "2025-09-09",
+      "totalVolume": 1790082,
+      "timestamp": 1757418108922
+    }
+  ]
+}
