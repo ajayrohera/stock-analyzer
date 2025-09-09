@@ -1,14 +1,32 @@
-// This is the final version with volume analysis and percentage change
+// This is the Vercel-compatible version with Redis
 
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { KiteConnect, Instrument } from 'kiteconnect';
-import fs from 'fs/promises';
-import path from 'path';
 
-const tokenPath = path.join(process.cwd(), 'kite_token.json');
-const instrumentsPath = path.join(process.cwd(), 'instruments.json');
-const volumeHistoryPath = path.join(process.cwd(), 'volume_history.json');
+// Redis client (Vercel compatible)
+const redis = {
+  get: async (key: string) => {
+    const response = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${key}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+      },
+    });
+    const data = await response.json();
+    return data.result;
+  },
+  set: async (key: string, value: any) => {
+    const response = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/set/${key}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(value),
+    });
+    return response.json();
+  },
+};
 
 // --- HELPER TYPES ---
 interface QuoteData {
@@ -30,14 +48,6 @@ interface LtpQuote {
 }
 interface InstrumentWithUnderlying extends Instrument {
   underlying?: any;
-}
-
-interface VolumeHistory {
-  [symbol: string]: {
-    date: string;
-    totalVolume: number;
-    timestamp: number;
-  }[];
 }
 
 // Helper functions
@@ -64,18 +74,18 @@ const isMarketOpen = (): boolean => {
   return timeInMinutes >= marketOpenTime && timeInMinutes <= marketCloseTime;
 };
 
-// Volume history functions
-async function loadVolumeHistory(): Promise<VolumeHistory> {
+// Redis-based volume history functions
+async function loadVolumeHistory(): Promise<Record<string, any>> {
   try {
-    const data = await fs.readFile(volumeHistoryPath, 'utf-8');
-    return JSON.parse(data);
+    const history = await redis.get('volume_history');
+    return history ? JSON.parse(history) : {};
   } catch (error) {
     return {};
   }
 }
 
-async function saveVolumeHistory(history: VolumeHistory): Promise<void> {
-  await fs.writeFile(volumeHistoryPath, JSON.stringify(history, null, 2));
+async function saveVolumeHistory(history: Record<string, any>): Promise<void> {
+  await redis.set('volume_history', JSON.stringify(history));
 }
 
 async function updateVolumeHistory(symbol: string, totalVolume: number): Promise<void> {
@@ -86,9 +96,9 @@ async function updateVolumeHistory(symbol: string, totalVolume: number): Promise
   if (!history[symbol]) history[symbol] = [];
   
   const twentyDaysAgo = Date.now() - (20 * 24 * 60 * 60 * 1000);
-  history[symbol] = history[symbol].filter(entry => entry.timestamp > twentyDaysAgo);
+  history[symbol] = history[symbol].filter((entry: any) => entry.timestamp > twentyDaysAgo);
   
-  const todayEntry = history[symbol].find(entry => entry.date === today);
+  const todayEntry = history[symbol].find((entry: any) => entry.date === today);
   if (todayEntry) {
     todayEntry.totalVolume = totalVolume;
     todayEntry.timestamp = timestamp;
@@ -107,9 +117,9 @@ async function calculateVolumeMetrics(symbol: string, todayVolume: number): Prom
   const history = await loadVolumeHistory();
   const symbolHistory = history[symbol] || [];
   
-  const historicalData = symbolHistory.filter(entry => entry.date !== new Date().toISOString().split('T')[0]);
+  const historicalData = symbolHistory.filter((entry: any) => entry.date !== new Date().toISOString().split('T')[0]);
   const avg20DayVolume = historicalData.length > 0 
-    ? historicalData.reduce((sum, entry) => sum + entry.totalVolume, 0) / historicalData.length
+    ? historicalData.reduce((sum: number, entry: any) => sum + entry.totalVolume, 0) / historicalData.length
     : 0;
   
   const todayVolumePercentage = avg20DayVolume > 0 
@@ -147,14 +157,18 @@ export async function POST(request: Request) {
     const { symbol: displayName } = body;
     if (!displayName) return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
 
-    // Google Sheets logic
+    // Google Sheets logic with environment variables
     const auth = new google.auth.GoogleAuth({ 
-      keyFile: path.join(process.cwd(), 'credentials.json'), 
+      credentials: {
+        client_email: process.env.GOOGLE_CLIENT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      },
       scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly' 
     });
+    
     const sheets = google.sheets({ version: 'v4', auth });
     const sheetResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU',
+      spreadsheetId: process.env.GOOGLE_SHEET_ID || '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU',
       range: 'stocks!A2:C',
     });
     
@@ -168,12 +182,24 @@ export async function POST(request: Request) {
     const underlyingToken = convertToNumber(row[2]);
     if (underlyingToken === 0) return NextResponse.json({ error: `Invalid token format in sheet: ${row[2]}` }, { status: 400 });
 
-    // Kite connection
-    const tokenData = JSON.parse(await fs.readFile(tokenPath, 'utf-8'));
+    // Kite connection with Redis token storage
+    let tokenData;
+    try {
+      const storedToken = await redis.get('kite_token');
+      tokenData = storedToken ? JSON.parse(storedToken) : null;
+    } catch (error) {
+      console.error('Error reading token from Redis:', error);
+      return NextResponse.json({ error: 'Token storage error' }, { status: 500 });
+    }
+
+    if (!tokenData || !tokenData.accessToken) {
+      return NextResponse.json({ error: 'Kite token not found. Please authenticate first.' }, { status: 401 });
+    }
+
     const kc = new KiteConnect({ api_key: apiKey });
     kc.setAccessToken(tokenData.accessToken);
 
-    // Instruments data logic
+    // Instruments data logic with Redis
     let allInstruments: InstrumentWithUnderlying[];
     try {
       const marketOpen = isMarketOpen();
@@ -181,10 +207,9 @@ export async function POST(request: Request) {
 
       if (marketOpen) {
         try {
-          const fileStats = await fs.stat(instrumentsPath);
-          const fileDate = new Date(fileStats.mtime);
-          const now = new Date();
-          shouldRefresh = (now.getTime() - fileDate.getTime()) > (15 * 60 * 1000);
+          const lastUpdated = await redis.get('instruments_last_updated');
+          const lastUpdatedTime = lastUpdated ? parseInt(lastUpdated) : 0;
+          shouldRefresh = (Date.now() - lastUpdatedTime) > (15 * 60 * 1000);
         } catch (error) {
           shouldRefresh = true;
         }
@@ -192,19 +217,26 @@ export async function POST(request: Request) {
 
       if (shouldRefresh) {
         allInstruments = await kc.getInstruments();
-        await fs.writeFile(instrumentsPath, JSON.stringify(allInstruments, null, 2));
+        await redis.set('instruments_data', JSON.stringify(allInstruments));
+        await redis.set('instruments_last_updated', Date.now().toString());
       } else {
         try {
-          allInstruments = JSON.parse(await fs.readFile(instrumentsPath, 'utf-8'));
+          const instrumentsData = await redis.get('instruments_data');
+          allInstruments = instrumentsData ? JSON.parse(instrumentsData) : [];
+          if (allInstruments.length === 0) {
+            allInstruments = await kc.getInstruments();
+            await redis.set('instruments_data', JSON.stringify(allInstruments));
+          }
         } catch (error) {
           allInstruments = await kc.getInstruments();
-          await fs.writeFile(instrumentsPath, JSON.stringify(allInstruments, null, 2));
+          await redis.set('instruments_data', JSON.stringify(allInstruments));
         }
       }
     } catch (error) {
       console.error('Error fetching instruments:', error);
       try {
-        allInstruments = JSON.parse(await fs.readFile(instrumentsPath, 'utf-8'));
+        const instrumentsData = await redis.get('instruments_data');
+        allInstruments = instrumentsData ? JSON.parse(instrumentsData) : [];
       } catch {
         return NextResponse.json({ error: 'Could not fetch instruments data' }, { status: 500 });
       }

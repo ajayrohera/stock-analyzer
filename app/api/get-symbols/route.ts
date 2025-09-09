@@ -1,4 +1,4 @@
-// This is the new code for app/api/get-symbols/route.ts
+// This is the final and correct code for app/api/get-symbols/route.ts
 
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
@@ -15,8 +15,8 @@ export async function GET() {
 
     // 2. Fetch the data from your sheet
     const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU', // <--- IMPORTANT: PASTE YOUR SHEET ID HERE
-      range: 'stocks!A2:A', // Fetches all rows from Column A, starting from the second row
+      spreadsheetId: '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU', // Your Sheet ID is correct
+      range: 'stocks!A2:A',
     });
 
     const values = response.data.values;
@@ -28,8 +28,9 @@ export async function GET() {
     const symbols = values.map(row => row[0]);
     return NextResponse.json(symbols);
 
-  } catch (error: any) {
-    console.error("Error fetching from Google Sheets:", error);
+  } catch (error: unknown) { // <-- THIS IS THE FIX: Use 'unknown' instead of 'any'
+    const err = error as Error; // Safely cast the unknown error to a standard Error
+    console.error("Error fetching symbol list from Google Sheets:", err.message);
     return NextResponse.json({ error: 'Failed to load symbol list from Google Sheets.' }, { status: 500 });
   }
 }
