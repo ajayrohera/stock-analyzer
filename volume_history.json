@@ -24,7 +24,92 @@
     {
       "date": "2025-09-09",
       "totalVolume": 1790082,
-      "timestamp": 1757434693676
+      "timestamp": 1757437217240
+    },
+    {
+      "date": "2025-09-10",
+      "totalVolume": 3661895,
+      "timestamp": 1757519343038
+    },
+    {
+      "date": "2025-09-11",
+      "totalVolume": 1837622,
+      "timestamp": 1757591402340
+    }
+  ],
+  "ABB INDIA": [
+    {
+      "date": "2025-09-10",
+      "totalVolume": 75,
+      "timestamp": 1757475043096
+    }
+  ],
+  "360 ONE WAM": [
+    {
+      "date": "2025-09-10",
+      "totalVolume": 34,
+      "timestamp": 1757475029868
+    },
+    {
+      "date": "2025-09-11",
+      "totalVolume": 81803,
+      "timestamp": 1757567200075
+    }
+  ],
+  "ASTRAL": [
+    {
+      "date": "2025-09-10",
+      "totalVolume": 1085,
+      "timestamp": 1757475096597
+    }
+  ],
+  "UPL": [
+    {
+      "date": "2025-09-10",
+      "totalVolume": 2051,
+      "timestamp": 1757475113427
+    }
+  ],
+  "TITAGARH RAIL SYSTEMS": [
+    {
+      "date": "2025-09-10",
+      "totalVolume": 11640,
+      "timestamp": 1757475132787
+    }
+  ],
+  "TUBE INVEST OF INDIA": [
+    {
+      "date": "2025-09-10",
+      "totalVolume": 43308,
+      "timestamp": 1757476135181
+    }
+  ],
+  "KFIN TECHNOLOGIES": [
+    {
+      "date": "2025-09-10",
+      "totalVolume": 762476,
+      "timestamp": 1757508031847
+    }
+  ],
+  "LIFE INSURA CORP OF INDIA": [
+    {
+      "date": "2025-09-11",
+      "totalVolume": 273628,
+      "timestamp": 1757566870104
+    }
+  ],
+  "CONTAINER CORP OF IND": [
+    {
+      "date": "2025-09-11",
+      "totalVolume": 584677,
+      "timestamp": 1757566967314
+    }
+  ],
+  "ADANI ENERGY SOLUTION": [
+    {
+      "date": "2025-09-11",
+      "totalVolume": 540613,
+      "timestamp": 1757567296629
     }
   ]
 }
