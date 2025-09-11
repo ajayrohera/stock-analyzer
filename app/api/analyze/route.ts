@@ -1,15 +1,8 @@
-// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts
-
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { KiteConnect, Instrument } from 'kiteconnect';
+import { KiteConnect } from 'kiteconnect';
 import { kv } from '@vercel/kv';
-import fs from 'fs/promises';
-import path from 'path';
 
-const tokenPath = path.join(process.cwd(), 'kite_token.json');
-
-// --- HELPER TYPES ---
 interface QuoteData {
     [key: string]: { 
         instrument_token: number; 
@@ -24,11 +17,18 @@ interface QuoteData {
         };
     }
 }
+
 interface LtpQuote {
     [key: string]: { instrument_token: number; last_price: number; }
 }
 
-// --- MAIN API FUNCTION ---
+interface Instrument {
+    tradingsymbol: string;
+    strike: number;
+    instrument_type: string;
+    expiry: string;
+}
+
 export async function POST(request: Request) {
   try {
     const apiKey = process.env.KITE_API_KEY;
@@ -43,13 +43,22 @@ export async function POST(request: Request) {
     }
 
     // --- Google Sheets Logic ---
-    const auth = new google.auth.GoogleAuth({ 
-      keyFile: path.join(process.cwd(), 'credentials.json'), 
-      scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly' 
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        type: 'service_account',
+        project_id: process.env.GOOGLE_PROJECT_ID,
+        private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        client_email: process.env.GOOGLE_CLIENT_EMAIL,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        
+      },
+      scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly'
     });
+    
     const sheets = google.sheets({ version: 'v4', auth });
     const sheetResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU', // <--- PASTE YOUR SHEET ID HERE
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
       range: 'stocks!A2:B',
     });
     
@@ -64,11 +73,15 @@ export async function POST(request: Request) {
     const tradingSymbol = row[1];
 
     // --- Kite Connection ---
-    const tokenData = JSON.parse(await fs.readFile(tokenPath, 'utf-8'));
+    const tokenData = await kv.get<{ accessToken: string }>('kite_token');
+    if (!tokenData) {
+      return NextResponse.json({ error: 'Kite token not found. Please run the login script.' }, { status: 401 });
+    }
+
     const kc = new KiteConnect({ api_key: apiKey });
     kc.setAccessToken(tokenData.accessToken);
 
-    // --- KEY CHANGE: Read the small, pre-filtered cache from the cloud ---
+    // --- Read options cache from KV ---
     const optionsCache = await kv.get<{ [key: string]: Instrument[] }>('options_cache');
     if (!optionsCache) {
       return NextResponse.json({ error: 'Options cache is empty. Please run the population script.' }, { status: 500 });
@@ -89,7 +102,7 @@ export async function POST(request: Request) {
     const instrumentTokens = optionsChain.map(o => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
 
-    // --- Calculation Logic ---
+    // --- Calculation Logic (keep this part the same) ---
     let totalCallOI = 0, totalPutOI = 0, highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
     let totalCallVolume = 0, totalPutVolume = 0;
     let otmCallOI = 0, otmPutOI = 0;
