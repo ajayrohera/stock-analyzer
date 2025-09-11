@@ -1,4 +1,4 @@
-// This is the updated version with Change in OI analysis
+// This is the updated version with percentage change and volume analysis
 
 'use client';
 
@@ -53,25 +53,29 @@ type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
 const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
 
-const isAnalysisResult = (data: any): data is AnalysisResult => {
+const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   try {
+    const typedData = data as AnalysisResult;
     return (
-      data &&
-      typeof data.symbol === 'string' && typeof data.pcr === 'number' &&
-      typeof data.volumePcr === 'number' && typeof data.maxPain === 'number' &&
-      typeof data.resistance === 'number' && typeof data.support === 'number' &&
-      typeof data.sentiment === 'string' && typeof data.expiryDate === 'string' &&
-      typeof data.supportStrength === 'string' && typeof data.resistanceStrength === 'string' &&
-      typeof data.ltp === 'number' && typeof data.lastRefreshed === 'string' &&
+      typedData &&
+      typeof typedData.symbol === 'string' && typeof typedData.pcr === 'number' &&
+      typeof typedData.volumePcr === 'number' && typeof typedData.maxPain === 'number' &&
+      typeof typedData.resistance === 'number' && typeof typedData.support === 'number' &&
+      typeof typedData.sentiment === 'string' && typeof typedData.expiryDate === 'string' &&
+      typeof typedData.supportStrength === 'string' && typeof typedData.resistanceStrength === 'string' &&
+      typeof typedData.ltp === 'number' && typeof typedData.lastRefreshed === 'string' &&
       // NEW: Validation for oiAnalysis
-      data.oiAnalysis && Array.isArray(data.oiAnalysis.calls) && Array.isArray(data.oiAnalysis.puts) && typeof data.oiAnalysis.summary === 'string'
+      typedData.oiAnalysis && Array.isArray(typedData.oiAnalysis.calls) && Array.isArray(typedData.oiAnalysis.puts) && typeof typedData.oiAnalysis.summary === 'string'
     );
-  } catch (error) { console.error('Validation error:', error); return false; }
+  } catch (error) { 
+    console.error('Validation error:', error); 
+    return false; 
+  }
 };
 
 const getNextWorkingDay = (currentDate: Date): string => {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  let nextDay = new Date(currentDate);
+  const nextDay = new Date(currentDate);
   do {
     nextDay.setDate(nextDay.getDate() + 1);
     const nextDayKey = `${nextDay.getUTCFullYear()}-${String(nextDay.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDay.getUTCDate()).padStart(2, '0')}`;
@@ -101,9 +105,15 @@ const ErrorToast = React.memo(({ error }: { error: AppError }) => (
     <div className="flex items-start"><XCircle size={20} className="mr-2 flex-shrink-0 mt-0.5" /><p className="text-sm">{error.message}</p></div>
   </div> 
 ));
+ErrorToast.displayName = 'ErrorToast';
 
 const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sentiment, sentimentColor }: { 
-  title: string, value: number | string, color?: string, tooltip?: string, sentiment?: string, sentimentColor?: string 
+  title: string; 
+  value: number | string; 
+  color?: string; 
+  tooltip?: string; 
+  sentiment?: string; 
+  sentimentColor?: string; 
 }) => ( 
   <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
     <div className="flex items-center justify-center text-sm text-gray-400">
@@ -123,6 +133,7 @@ const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sent
     )}
   </div>
 ));
+StatCard.displayName = 'StatCard';
 
 const SupportResistanceCard = React.memo(({ type, value, strength }: { type: 'Support' | 'Resistance', value: number, strength: string }) => { 
   const isSupport = type === 'Support'; 
@@ -138,6 +149,7 @@ const SupportResistanceCard = React.memo(({ type, value, strength }: { type: 'Su
     </div> 
   ); 
 });
+SupportResistanceCard.displayName = 'SupportResistanceCard';
 
 const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => { 
   const isBullish = sentiment.includes('Bullish'); 
@@ -164,16 +176,18 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
     </div> 
   ); 
 });
+SentimentCard.displayName = 'SentimentCard';
 
 const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
   <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
-    <div className="inline-block p-4 bg-gray-900/50 rounded-full mb-4">
-      {React.cloneElement(icon as any, { className: "h-8 w-8 text-brand-cyan" })}
+    <div className="inline-block p-4 bg-gray-900/50 rounded-full mb-4 text-brand-cyan">
+      {icon}
     </div>
     <h3 className="text-xl font-bold mb-2 text-white">{title}</h3>
     <p className="text-gray-400">{description}</p>
   </div> 
 ));
+FeatureCard.displayName = 'FeatureCard';
 
 // VolumeCard component
 const VolumeCard = React.memo(({ 
@@ -218,7 +232,7 @@ const VolumeCard = React.memo(({
         <div className="relative group ml-1">
           <Info size={14} className="cursor-pointer" />
           <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-            Compares today's volume against 20-day average. Percentage shows progress vs daily average. Estimated projects full day volume.
+            Compares today&apos;s volume against 20-day average. Percentage shows progress vs daily average. Estimated projects full day volume.
           </div>
         </div>
       </div>
@@ -247,6 +261,7 @@ const VolumeCard = React.memo(({
     </div>
   );
 });
+VolumeCard.displayName = 'VolumeCard';
 
 // MarketHoursOnlyCard component
 const MarketHoursOnlyCard = React.memo(({ title }: { title: string }) => (
@@ -257,6 +272,7 @@ const MarketHoursOnlyCard = React.memo(({ title }: { title: string }) => (
     <p className="text-gray-400 text-sm mt-2">Data available during market hours only</p>
   </div>
 ));
+MarketHoursOnlyCard.displayName = 'MarketHoursOnlyCard';
 
 // NEW: OIChangeRow component for displaying individual strike changes
 const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
@@ -278,11 +294,12 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
     </div>
   );
 });
+OIChangeRow.displayName = 'OIChangeRow';
 
 // NEW: OIAnalysisCard component
 const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
-  oiAnalysis: AnalysisResult['oiAnalysis'], 
-  marketStatus: MarketStatus 
+  oiAnalysis: AnalysisResult['oiAnalysis']; 
+  marketStatus: MarketStatus; 
 }) => {
   if (marketStatus !== 'OPEN') {
     return (
@@ -343,6 +360,7 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
     </div>
   );
 });
+OIAnalysisCard.displayName = 'OIAnalysisCard';
 
 export default function Home() {
   const [symbolList, setSymbolList] = useState<string[]>([]);
@@ -356,7 +374,7 @@ export default function Home() {
   const [loadingState, setLoadingState] = useState<LoadingState>('IDLE');
   const [lastRequestTime, setLastRequestTime] = useState(0);
   const [isCooldown, setIsCooldown] = useState(false);
-  const [apiError, setApiError] = useState<string>('');
+  const [apiError, setApiError] = useState('');
 
   useEffect(() => { 
     const savedSymbol = localStorage.getItem('selectedSymbol'); 
@@ -455,8 +473,9 @@ export default function Home() {
           const savedSymbol = localStorage.getItem('selectedSymbol'); 
           setSelectedSymbol(savedSymbol && data.includes(savedSymbol) ? savedSymbol : data.includes('NIFTY') ? 'NIFTY' : data[0]); 
         } 
-      } catch (e: any) { 
-        addError(e.message === 'TOKEN_EXPIRED' ? 'API token has expired. Please contact support.' : e.message || "Could not load symbol list.", e.message === 'TOKEN_EXPIRED' ? 'TOKEN_EXPIRED' : 'NETWORK'); 
+      } catch (error) { 
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        addError(errorMessage === 'TOKEN_EXPIRED' ? 'API token has expired. Please contact support.' : errorMessage || "Could not load symbol list.", errorMessage === 'TOKEN_EXPIRED' ? 'TOKEN_EXPIRED' : 'NETWORK'); 
       } finally { 
         setLoadingState('IDLE'); 
       } 
@@ -485,12 +504,12 @@ export default function Home() {
       if (!isAnalysisResult(data)) throw new Error('Invalid response format from server.'); 
       setResults(data); 
       setLastRequestTime(Date.now()); 
-    } catch (e: any) { 
+    } catch (error) { 
       const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
         TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
         SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
       }; 
-      const errorDetails = errorMap[e.message] || { type: e.message.includes('HTTP') ? 'NETWORK' : 'SERVER', message: e.message }; 
+      const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER' as const, message: error.message } : { type: 'UNKNOWN' as const, message: 'Unknown error occurred' };
       setApiError(errorDetails.message); 
       addError(errorDetails.message, errorDetails.type); 
     } 
