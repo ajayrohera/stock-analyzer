@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     });
     const sheets = google.sheets({ version: 'v4', auth });
     const sheetResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: 'YOUR_SPREADSHEET_ID', // <--- PASTE YOUR SHEET ID HERE
+      spreadsheetId: '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU', // <--- PASTE YOUR SHEET ID HERE
       range: 'stocks!A2:C',
     });
 
