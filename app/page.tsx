@@ -1,11 +1,18 @@
-// This is the corrected version with percentage change and volume analysis
+// This is the updated version with Change in OI analysis
 
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw } from 'lucide-react';
+import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 
 // --- HELPER TYPES ---
+type OiChange = {
+  strike: number;
+  changeOi: number;     // The net change in Open Interest
+  totalOi: number;      // The total Open Interest at this strike
+  type: 'CALL' | 'PUT'; // Whether this change is for a Call or a Put
+};
+
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -20,12 +27,20 @@ type AnalysisResult = {
   ltp: number;
   lastRefreshed: string;
   rsi?: number;
-  // NEW: Volume metrics and percentage change
+  // Volume metrics and percentage change
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
-  changePercent?: number; // Today's percentage change
+  changePercent?: number;
+
+  // NEW: Change in OI data for key levels
+  oiAnalysis: {
+    calls: OiChange[];    // Top N strikes with highest CALL OI change
+    puts: OiChange[];     // Top N strikes with highest PUT OI change
+    summary: string;      // Auto-generated summary of the activity
+  };
 };
+
 type MarketStatus = 'OPEN' | 'CLOSED' | 'UNKNOWN';
 type AppError = {
   message: string;
@@ -47,7 +62,9 @@ const isAnalysisResult = (data: any): data is AnalysisResult => {
       typeof data.resistance === 'number' && typeof data.support === 'number' &&
       typeof data.sentiment === 'string' && typeof data.expiryDate === 'string' &&
       typeof data.supportStrength === 'string' && typeof data.resistanceStrength === 'string' &&
-      typeof data.ltp === 'number' && typeof data.lastRefreshed === 'string'
+      typeof data.ltp === 'number' && typeof data.lastRefreshed === 'string' &&
+      // NEW: Validation for oiAnalysis
+      data.oiAnalysis && Array.isArray(data.oiAnalysis.calls) && Array.isArray(data.oiAnalysis.puts) && typeof data.oiAnalysis.summary === 'string'
     );
   } catch (error) { console.error('Validation error:', error); return false; }
 };
@@ -158,15 +175,17 @@ const FeatureCard = React.memo(({ icon, title, description }: { icon: React.Reac
   </div> 
 ));
 
-// NEW: VolumeCard component
+// VolumeCard component
 const VolumeCard = React.memo(({ 
   avg20DayVolume, 
   todayVolumePercentage, 
-  estimatedTodayVolume 
+  estimatedTodayVolume,
+  marketStatus
 }: { 
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
+  marketStatus: MarketStatus;
 }) => {
   const formatVolume = (volume: number) => {
     if (volume >= 1000000) return `${(volume / 1000000).toFixed(1)}M`;
@@ -180,6 +199,17 @@ const VolumeCard = React.memo(({
     if (percentage > 50) return 'text-orange-400';
     return 'text-red-400';
   };
+
+  if (marketStatus !== 'OPEN') {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+        <div className="flex items-center justify-center text-sm text-gray-400">
+          <span>Volume Analysis</span>
+        </div>
+        <p className="text-gray-400 text-sm mt-2">Data available during market hours only</p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
@@ -213,6 +243,102 @@ const VolumeCard = React.memo(({
       
       {(!avg20DayVolume && !todayVolumePercentage && !estimatedTodayVolume) && (
         <p className="text-gray-400 text-sm mt-2">Volume data not available</p>
+      )}
+    </div>
+  );
+});
+
+// MarketHoursOnlyCard component
+const MarketHoursOnlyCard = React.memo(({ title }: { title: string }) => (
+  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+    <div className="flex items-center justify-center text-sm text-gray-400">
+      <span>{title}</span>
+    </div>
+    <p className="text-gray-400 text-sm mt-2">Data available during market hours only</p>
+  </div>
+));
+
+// NEW: OIChangeRow component for displaying individual strike changes
+const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
+  const isCall = type === 'CALL';
+  const isPositive = changeOi > 0;
+  
+  return (
+    <div className="flex justify-between items-center py-2 border-b border-gray-700 last:border-b-0">
+      <div className="flex items-center">
+        <span className={`w-16 font-mono ${isCall ? 'text-green-400' : 'text-red-400'}`}>
+          {strike}
+        </span>
+        <span className={`flex items-center ml-2 ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
+          {isPositive ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+          <span className="ml-1">{Math.abs(changeOi).toLocaleString()}</span>
+        </span>
+      </div>
+      <span className="text-gray-400 text-sm">{totalOi.toLocaleString()}</span>
+    </div>
+  );
+});
+
+// NEW: OIAnalysisCard component
+const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
+  oiAnalysis: AnalysisResult['oiAnalysis'], 
+  marketStatus: MarketStatus 
+}) => {
+  if (marketStatus !== 'OPEN') {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
+        <div className="flex items-center justify-center text-sm text-gray-400 mb-2">
+          <span>Open Interest Analysis</span>
+        </div>
+        <p className="text-gray-400 text-sm text-center">Data available during market hours only</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
+      <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
+        <span>Open Interest Analysis</span>
+        <div className="relative group ml-1">
+          <Info size={14} className="cursor-pointer" />
+          <div className="absolute bottom-full mb-2 w-80 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+            Shows the largest changes in Open Interest at key strike prices. Call OI increase suggests bullish bets, Put OI increase suggests hedging or bearish positioning.
+          </div>
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <h4 className="text-green-400 font-semibold mb-2 text-center">Call OI Changes</h4>
+          <div className="max-h-40 overflow-y-auto">
+            {oiAnalysis.calls.length > 0 ? (
+              oiAnalysis.calls.map((item, index) => (
+                <OIChangeRow key={`call-${index}`} {...item} />
+              ))
+            ) : (
+              <p className="text-gray-400 text-sm text-center py-2">No significant call OI changes</p>
+            )}
+          </div>
+        </div>
+        
+        <div>
+          <h4 className="text-red-400 font-semibold mb-2 text-center">Put OI Changes</h4>
+          <div className="max-h-40 overflow-y-auto">
+            {oiAnalysis.puts.length > 0 ? (
+              oiAnalysis.puts.map((item, index) => (
+                <OIChangeRow key={`put-${index}`} {...item} />
+              ))
+            ) : (
+              <p className="text-gray-400 text-sm text-center py-2">No significant put OI changes</p>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      {oiAnalysis.summary && (
+        <div className="mt-4 p-3 bg-gray-800/50 rounded-lg">
+          <p className="text-sm text-gray-300">{oiAnalysis.summary}</p>
+        </div>
       )}
     </div>
   );
@@ -441,7 +567,7 @@ export default function Home() {
           {apiError && (<div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-center"><div className="flex items-center justify-center text-red-300"><XCircle size={16} className="mr-2" /><span className="text-sm">{apiError}</span></div></div>)}
         </section>
 
-        <section id="results" className="mt-12 w-full max-w-4xl mx-auto min-h-[100px]">
+        <section id="results" className="mt-12 w-full max-w-6xl mx-auto min-h-[100px]">
           {isLoading && (<div className="flex flex-col items-center justify-center p-8"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div><p className="text-brand-cyan text-lg">{loadingState === 'ANALYZING' ? 'Querying the chain, please wait...' : 'Refreshing data...'}</p></div>)}
           
           {results && (
@@ -463,21 +589,37 @@ export default function Home() {
                 </button>
               </div>
               
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 mb-6">
                 <SupportResistanceCard type="Support" value={results.support} strength={results.supportStrength} />
                 <SupportResistanceCard type="Resistance" value={results.resistance} strength={results.resistanceStrength} />
+                
                 <VolumeCard 
                   avg20DayVolume={results.avg20DayVolume}
                   todayVolumePercentage={results.todayVolumePercentage}
                   estimatedTodayVolume={results.estimatedTodayVolume}
+                  marketStatus={marketStatus}
                 />
-                <StatCard title="OI PCR Ratio" value={results.pcr} sentiment={oiPcrSentiment?.sentiment} sentimentColor={oiPcrSentiment?.color} />
-                <StatCard title="Volume PCR" value={results.volumePcr} sentiment={volumePcrSentiment?.sentiment} sentimentColor={volumePcrSentiment?.color} />
+                
+                {marketStatus === 'OPEN' ? (
+                  <>
+                    <StatCard title="OI PCR Ratio" value={results.pcr} sentiment={oiPcrSentiment?.sentiment} sentimentColor={oiPcrSentiment?.color} />
+                    <StatCard title="Volume PCR" value={results.volumePcr} sentiment={volumePcrSentiment?.sentiment} sentimentColor={volumePcrSentiment?.color} />
+                  </>
+                ) : (
+                  <>
+                    <MarketHoursOnlyCard title="OI PCR Ratio" />
+                    <MarketHoursOnlyCard title="Volume PCR" />
+                  </>
+                )}
+                
                 <SentimentCard sentiment={results.sentiment} />
                 {results.rsi !== undefined && (
                   <StatCard title="RSI" value={results.rsi} sentiment={rsiSentiment?.sentiment} sentimentColor={rsiSentiment?.color} tooltip="Relative Strength Index. Values below 30 indicate oversold conditions (bullish), above 70 indicate overbought conditions (bearish)." />
                 )}
               </div>
+
+              {/* NEW: Open Interest Analysis Section */}
+              <OIAnalysisCard oiAnalysis={results.oiAnalysis} marketStatus={marketStatus} />
             </div>
           )}
         </section>

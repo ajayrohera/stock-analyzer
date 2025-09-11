@@ -1,32 +1,14 @@
-// This is the Vercel-compatible version with Redis
+// This is the updated version with Open Interest analysis
 
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { KiteConnect, Instrument } from 'kiteconnect';
+import fs from 'fs/promises';
+import path from 'path';
 
-// Redis client (Vercel compatible)
-const redis = {
-  get: async (key: string) => {
-    const response = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${key}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
-      },
-    });
-    const data = await response.json();
-    return data.result;
-  },
-  set: async (key: string, value: any) => {
-    const response = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/set/${key}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(value),
-    });
-    return response.json();
-  },
-};
+const tokenPath = path.join(process.cwd(), 'kite_token.json');
+const instrumentsPath = path.join(process.cwd(), 'instruments.json');
+const volumeHistoryPath = path.join(process.cwd(), 'volume_history.json');
 
 // --- HELPER TYPES ---
 interface QuoteData {
@@ -41,6 +23,7 @@ interface QuoteData {
             low: number;
             close: number;
         };
+        change?: number; // NEW: Added change field for OI change tracking
     }
 }
 interface LtpQuote {
@@ -48,6 +31,25 @@ interface LtpQuote {
 }
 interface InstrumentWithUnderlying extends Instrument {
   underlying?: any;
+}
+
+interface VolumeHistory {
+  [symbol: string]: {
+    date: string;
+    totalVolume: number;
+    timestamp: number;
+  }[];
+}
+
+// NEW: Interface for OI history tracking
+interface OIHistory {
+  [symbol: string]: {
+    [strike: string]: {
+      ce_oi: number;
+      pe_oi: number;
+      timestamp: number;
+    }[]
+  };
 }
 
 // Helper functions
@@ -74,18 +76,18 @@ const isMarketOpen = (): boolean => {
   return timeInMinutes >= marketOpenTime && timeInMinutes <= marketCloseTime;
 };
 
-// Redis-based volume history functions
-async function loadVolumeHistory(): Promise<Record<string, any>> {
+// Volume history functions
+async function loadVolumeHistory(): Promise<VolumeHistory> {
   try {
-    const history = await redis.get('volume_history');
-    return history ? JSON.parse(history) : {};
+    const data = await fs.readFile(volumeHistoryPath, 'utf-8');
+    return JSON.parse(data);
   } catch (error) {
     return {};
   }
 }
 
-async function saveVolumeHistory(history: Record<string, any>): Promise<void> {
-  await redis.set('volume_history', JSON.stringify(history));
+async function saveVolumeHistory(history: VolumeHistory): Promise<void> {
+  await fs.writeFile(volumeHistoryPath, JSON.stringify(history, null, 2));
 }
 
 async function updateVolumeHistory(symbol: string, totalVolume: number): Promise<void> {
@@ -96,9 +98,9 @@ async function updateVolumeHistory(symbol: string, totalVolume: number): Promise
   if (!history[symbol]) history[symbol] = [];
   
   const twentyDaysAgo = Date.now() - (20 * 24 * 60 * 60 * 1000);
-  history[symbol] = history[symbol].filter((entry: any) => entry.timestamp > twentyDaysAgo);
+  history[symbol] = history[symbol].filter(entry => entry.timestamp > twentyDaysAgo);
   
-  const todayEntry = history[symbol].find((entry: any) => entry.date === today);
+  const todayEntry = history[symbol].find(entry => entry.date === today);
   if (todayEntry) {
     todayEntry.totalVolume = totalVolume;
     todayEntry.timestamp = timestamp;
@@ -117,9 +119,9 @@ async function calculateVolumeMetrics(symbol: string, todayVolume: number): Prom
   const history = await loadVolumeHistory();
   const symbolHistory = history[symbol] || [];
   
-  const historicalData = symbolHistory.filter((entry: any) => entry.date !== new Date().toISOString().split('T')[0]);
+  const historicalData = symbolHistory.filter(entry => entry.date !== new Date().toISOString().split('T')[0]);
   const avg20DayVolume = historicalData.length > 0 
-    ? historicalData.reduce((sum: number, entry: any) => sum + entry.totalVolume, 0) / historicalData.length
+    ? historicalData.reduce((sum, entry) => sum + entry.totalVolume, 0) / historicalData.length
     : 0;
   
   const todayVolumePercentage = avg20DayVolume > 0 
@@ -147,6 +149,117 @@ async function calculateVolumeMetrics(symbol: string, todayVolume: number): Prom
   };
 }
 
+// NEW: OI History functions
+async function loadOIHistory(): Promise<OIHistory> {
+  try {
+    const data = await fs.readFile(path.join(process.cwd(), 'oi_history.json'), 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    return {};
+  }
+}
+
+async function saveOIHistory(history: OIHistory): Promise<void> {
+  await fs.writeFile(path.join(process.cwd(), 'oi_history.json'), JSON.stringify(history, null, 2));
+}
+
+async function updateOIHistory(symbol: string, strike: number, ce_oi: number, pe_oi: number): Promise<void> {
+  const history = await loadOIHistory();
+  const timestamp = Date.now();
+  
+  if (!history[symbol]) history[symbol] = {};
+  if (!history[symbol][strike]) history[symbol][strike] = [];
+  
+  // Keep only the last 5 readings (about 15-30 minutes of data)
+  if (history[symbol][strike].length >= 5) {
+    history[symbol][strike].shift();
+  }
+  
+  history[symbol][strike].push({ ce_oi, pe_oi, timestamp });
+  await saveOIHistory(history);
+}
+
+async function calculateOIChanges(symbol: string, currentOIByStrike: Record<number, { ce_oi: number, pe_oi: number }>): Promise<{
+  calls: Array<{ strike: number; changeOi: number; totalOi: number; type: 'CALL' }>;
+  puts: Array<{ strike: number; changeOi: number; totalOi: number; type: 'PUT' }>;
+  summary: string;
+}> {
+  const history = await loadOIHistory();
+  const symbolHistory = history[symbol] || {};
+  
+  const callChanges: Array<{ strike: number; changeOi: number; totalOi: number; type: 'CALL' }> = [];
+  const putChanges: Array<{ strike: number; changeOi: number; totalOi: number; type: 'PUT' }> = [];
+  
+  // Calculate changes for each strike
+  for (const [strikeStr, currentData] of Object.entries(currentOIByStrike)) {
+    const strike = parseInt(strikeStr);
+    const historicalReadings = symbolHistory[strike] || [];
+    
+    if (historicalReadings.length > 0) {
+      const previousReading = historicalReadings[historicalReadings.length - 1];
+      const ceChange = currentData.ce_oi - previousReading.ce_oi;
+      const peChange = currentData.pe_oi - previousReading.pe_oi;
+      
+      if (ceChange !== 0) {
+        callChanges.push({
+          strike,
+          changeOi: ceChange,
+          totalOi: currentData.ce_oi,
+          type: 'CALL'
+        });
+      }
+      
+      if (peChange !== 0) {
+        putChanges.push({
+          strike,
+          changeOi: peChange,
+          totalOi: currentData.pe_oi,
+          type: 'PUT'
+        });
+      }
+      
+      // Update history with current data
+      await updateOIHistory(symbol, strike, currentData.ce_oi, currentData.pe_oi);
+    } else {
+      // First time seeing this strike, initialize history
+      await updateOIHistory(symbol, strike, currentData.ce_oi, currentData.pe_oi);
+    }
+  }
+  
+  // Sort by absolute change and take top 5
+  callChanges.sort((a, b) => Math.abs(b.changeOi) - Math.abs(a.changeOi));
+  putChanges.sort((a, b) => Math.abs(b.changeOi) - Math.abs(a.changeOi));
+  
+  const topCallChanges = callChanges.slice(0, 5);
+  const topPutChanges = putChanges.slice(0, 5);
+  
+  // Generate summary
+  let summary = "No significant OI changes detected.";
+  
+  if (topCallChanges.length > 0 || topPutChanges.length > 0) {
+    const callIncrease = topCallChanges.filter(c => c.changeOi > 0).length;
+    const callDecrease = topCallChanges.filter(c => c.changeOi < 0).length;
+    const putIncrease = topPutChanges.filter(p => p.changeOi > 0).length;
+    const putDecrease = topPutChanges.filter(p => p.changeOi < 0).length;
+    
+    if (callIncrease > putIncrease && callDecrease < putDecrease) {
+      summary = "Bullish bias: Call buying and Put unwinding detected.";
+    } else if (putIncrease > callIncrease && putDecrease < callDecrease) {
+      summary = "Bearish bias: Put buying and Call unwinding detected.";
+    } else if (callIncrease > 0 && putIncrease > 0) {
+      summary = "Mixed activity: Both Call and Put buying detected.";
+    } else if (callDecrease > 0 && putDecrease > 0) {
+      summary = "Unwinding: Both Call and Put positions being closed.";
+    }
+  }
+  
+  return {
+    calls: topCallChanges,
+    puts: topPutChanges,
+    summary
+  };
+}
+
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
   try {
@@ -157,18 +270,14 @@ export async function POST(request: Request) {
     const { symbol: displayName } = body;
     if (!displayName) return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
 
-    // Google Sheets logic with environment variables
+    // Google Sheets logic
     const auth = new google.auth.GoogleAuth({ 
-      credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      },
+      keyFile: path.join(process.cwd(), 'credentials.json'), 
       scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly' 
     });
-    
     const sheets = google.sheets({ version: 'v4', auth });
     const sheetResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID || '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU',
+      spreadsheetId: '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU',
       range: 'stocks!A2:C',
     });
     
@@ -182,24 +291,12 @@ export async function POST(request: Request) {
     const underlyingToken = convertToNumber(row[2]);
     if (underlyingToken === 0) return NextResponse.json({ error: `Invalid token format in sheet: ${row[2]}` }, { status: 400 });
 
-    // Kite connection with Redis token storage
-    let tokenData;
-    try {
-      const storedToken = await redis.get('kite_token');
-      tokenData = storedToken ? JSON.parse(storedToken) : null;
-    } catch (error) {
-      console.error('Error reading token from Redis:', error);
-      return NextResponse.json({ error: 'Token storage error' }, { status: 500 });
-    }
-
-    if (!tokenData || !tokenData.accessToken) {
-      return NextResponse.json({ error: 'Kite token not found. Please authenticate first.' }, { status: 401 });
-    }
-
+    // Kite connection
+    const tokenData = JSON.parse(await fs.readFile(tokenPath, 'utf-8'));
     const kc = new KiteConnect({ api_key: apiKey });
     kc.setAccessToken(tokenData.accessToken);
 
-    // Instruments data logic with Redis
+    // Instruments data logic
     let allInstruments: InstrumentWithUnderlying[];
     try {
       const marketOpen = isMarketOpen();
@@ -207,9 +304,10 @@ export async function POST(request: Request) {
 
       if (marketOpen) {
         try {
-          const lastUpdated = await redis.get('instruments_last_updated');
-          const lastUpdatedTime = lastUpdated ? parseInt(lastUpdated) : 0;
-          shouldRefresh = (Date.now() - lastUpdatedTime) > (15 * 60 * 1000);
+          const fileStats = await fs.stat(instrumentsPath);
+          const fileDate = new Date(fileStats.mtime);
+          const now = new Date();
+          shouldRefresh = (now.getTime() - fileDate.getTime()) > (15 * 60 * 1000);
         } catch (error) {
           shouldRefresh = true;
         }
@@ -217,26 +315,19 @@ export async function POST(request: Request) {
 
       if (shouldRefresh) {
         allInstruments = await kc.getInstruments();
-        await redis.set('instruments_data', JSON.stringify(allInstruments));
-        await redis.set('instruments_last_updated', Date.now().toString());
+        await fs.writeFile(instrumentsPath, JSON.stringify(allInstruments, null, 2));
       } else {
         try {
-          const instrumentsData = await redis.get('instruments_data');
-          allInstruments = instrumentsData ? JSON.parse(instrumentsData) : [];
-          if (allInstruments.length === 0) {
-            allInstruments = await kc.getInstruments();
-            await redis.set('instruments_data', JSON.stringify(allInstruments));
-          }
+          allInstruments = JSON.parse(await fs.readFile(instrumentsPath, 'utf-8'));
         } catch (error) {
           allInstruments = await kc.getInstruments();
-          await redis.set('instruments_data', JSON.stringify(allInstruments));
+          await fs.writeFile(instrumentsPath, JSON.stringify(allInstruments, null, 2));
         }
       }
     } catch (error) {
       console.error('Error fetching instruments:', error);
       try {
-        const instrumentsData = await redis.get('instruments_data');
-        allInstruments = instrumentsData ? JSON.parse(instrumentsData) : [];
+        allInstruments = JSON.parse(await fs.readFile(instrumentsPath, 'utf-8'));
       } catch {
         return NextResponse.json({ error: 'Could not fetch instruments data' }, { status: 500 });
       }
@@ -415,6 +506,9 @@ export async function POST(request: Request) {
     await updateVolumeHistory(displayName, underlyingVolume);
     const volumeMetrics = await calculateVolumeMetrics(displayName, underlyingVolume);
     
+    // NEW: Calculate OI changes
+    const oiAnalysis = await calculateOIChanges(displayName, optionsByStrike);
+    
     // Response data
     const responseData = {
         symbol: displayName.toUpperCase(), 
@@ -432,7 +526,9 @@ export async function POST(request: Request) {
         changePercent: parseFloat(changePercent.toFixed(2)),
         avg20DayVolume: volumeMetrics.avg20DayVolume,
         todayVolumePercentage: volumeMetrics.todayVolumePercentage,
-        estimatedTodayVolume: volumeMetrics.estimatedTodayVolume
+        estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
+        // NEW: OI Analysis data
+        oiAnalysis
     };
     
     return NextResponse.json(responseData);
