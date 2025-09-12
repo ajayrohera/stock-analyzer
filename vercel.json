@@ -13,5 +13,10 @@
     "app/api/cron/update-volume/route.ts": {
       "maxDuration": 60
     }
+  },
+  "build": {
+    "env": {
+      "NODE_OPTIONS": "--max_old_space_size=4096"
+    }
   }
 }
