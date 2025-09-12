@@ -158,22 +158,22 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
   if (isBullish) color = 'text-green-400'; 
   if (isBearish) color = 'text-red-500'; 
   return ( 
-    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
-      <div className="flex items-center justify-center text-sm text-gray-400">
-        <span>SMART Sentiment</span>
-        <div className="relative group ml-1">
-          <Info size={14} className="cursor-pointer" />
-          <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-            This is a sophisticated sentiment analysis based on the Put-Call Ratio and the concentration of Open Interest at key Out-of-the-Money (OTM) strike prices.
-          </div>
+  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+    <div className="flex items-center justify-center text-sm text-gray-400">
+      <span>SMART Sentiment</span>
+      <div className="relative group ml-1">
+        <Info size={14} className="cursor-pointer" />
+        <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+          This is a sophisticated sentiment analysis based on the Put-Call Ratio and the concentration of Open Interest at key Out-of-the-Money (OTM) strike prices.
         </div>
       </div>
-      <div className={`flex items-center justify-center text-2xl font-bold ${color}`}>
-        {isBullish && <CheckCircle2 size={24} className="mr-2" />}
-        {isBearish && <XCircle size={24} className="mr-2" />}
-        <span>{sentiment}</span>
-      </div>
-    </div> 
+    </div>
+    <div className={`flex items-center justify-center text-2xl font-bold ${color}`}>
+      {isBullish && <CheckCircle2 size={24} className="mr-2" />}
+      {isBearish && <XCircle size={24} className="mr-2" />}
+      <span>{sentiment}</span>
+    </div>
+  </div> 
   ); 
 });
 SentimentCard.displayName = 'SentimentCard';
@@ -189,7 +189,7 @@ const FeatureCard = React.memo(({ icon, title, description }: { icon: React.Reac
 ));
 FeatureCard.displayName = 'FeatureCard';
 
-// VolumeCard component with pre-market support
+// VolumeCard component - always show data but with appropriate messages
 const VolumeCard = React.memo(({ 
   avg20DayVolume, 
   todayVolumePercentage, 
@@ -219,6 +219,12 @@ const VolumeCard = React.memo(({
       <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
         <div className="flex items-center justify-center text-sm text-gray-400">
           <span>Volume Analysis</span>
+          <div className="relative group ml-1">
+            <Info size={14} className="cursor-pointer" />
+            <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+              Compares today&apos;s volume against 20-day average. Percentage shows progress vs daily average. Estimated projects full day volume.
+            </div>
+          </div>
         </div>
         <p className="text-yellow-400 text-sm mt-2">Pre-market: Data from previous close</p>
         {avg20DayVolume !== undefined && (
@@ -226,17 +232,6 @@ const VolumeCard = React.memo(({
             20D Avg: {formatVolume(avg20DayVolume)}
           </p>
         )}
-      </div>
-    );
-  }
-
-  if (marketStatus !== 'OPEN') {
-    return (
-      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
-        <div className="flex items-center justify-center text-sm text-gray-400">
-          <span>Volume Analysis</span>
-        </div>
-        <p className="text-gray-400 text-sm mt-2">Data available during market hours only</p>
       </div>
     );
   }
@@ -259,16 +254,20 @@ const VolumeCard = React.memo(({
         </p>
       )}
       
-      {todayVolumePercentage !== undefined && (
+      {todayVolumePercentage !== undefined && marketStatus === 'OPEN' && (
         <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
           {todayVolumePercentage.toFixed(1)}% of Avg
         </p>
       )}
       
-      {estimatedTodayVolume !== undefined && (
+      {estimatedTodayVolume !== undefined && marketStatus === 'OPEN' && (
         <p className="text-md text-gray-300 mt-2">
           Est. Today: {formatVolume(estimatedTodayVolume)}
         </p>
+      )}
+      
+      {marketStatus !== 'OPEN' && (
+        <p className="text-gray-400 text-sm mt-2">Live volume data available during market hours only</p>
       )}
       
       {(!avg20DayVolume && !todayVolumePercentage && !estimatedTodayVolume) && (
@@ -279,20 +278,42 @@ const VolumeCard = React.memo(({
 });
 VolumeCard.displayName = 'VolumeCard';
 
-// MarketHoursOnlyCard component with pre-market support
-const MarketHoursOnlyCard = React.memo(({ title, marketStatus }: { title: string, marketStatus: MarketStatus }) => (
+// PCRStatCard component for OI PCR and Volume PCR
+const PCRStatCard = React.memo(({ 
+  title, 
+  value, 
+  marketStatus,
+  sentiment,
+  sentimentColor 
+}: { 
+  title: string; 
+  value: number;
+  marketStatus: MarketStatus;
+  sentiment?: string; 
+  sentimentColor?: string; 
+}) => (
   <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
     <div className="flex items-center justify-center text-sm text-gray-400">
       <span>{title}</span>
+      <div className="relative group ml-1">
+        <Info size={14} className="cursor-pointer" />
+        <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+          {title === 'OI PCR Ratio' 
+            ? 'Put-Call Ratio based on Open Interest. Values above 1.1 are bullish, below 0.9 are bearish.'
+            : 'Put-Call Ratio based on trading volumes. Values above 1.1 are bullish, below 0.9 are bearish.'}
+        </div>
+      </div>
     </div>
-    {marketStatus === 'PRE_MARKET' ? (
-      <p className="text-yellow-400 text-sm mt-2">Pre-market: Data from previous close</p>
-    ) : (
-      <p className="text-gray-400 text-sm mt-2">Data available during market hours only</p>
+    <p className={`text-3xl font-bold text-white`}>{value.toFixed(2)}</p>
+    {sentiment && sentimentColor && marketStatus !== 'PRE_MARKET' && (
+      <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
+    )}
+    {marketStatus === 'PRE_MARKET' && (
+      <p className="text-yellow-400 text-xs mt-1">Pre-market: Data from previous close</p>
     )}
   </div>
 ));
-MarketHoursOnlyCard.displayName = 'MarketHoursOnlyCard';
+PCRStatCard.displayName = 'PCRStatCard';
 
 // NEW: OIChangeRow component for displaying individual strike changes
 const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
@@ -302,7 +323,7 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
   return (
     <div className="flex justify-between items-center py-2 border-b border-gray-700 last:border-b-0">
       <div className="flex items-center">
-        <span className={`w-16 font-mongo ${isCall ? 'text-green-400' : 'text-red-400'}`}>
+        <span className={`w-16 font-mono ${isCall ? 'text-green-400' : 'text-red-400'}`}>
           {strike}
         </span>
         <span className={`flex items-center ml-2 ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
@@ -316,7 +337,7 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
 });
 OIChangeRow.displayName = 'OIChangeRow';
 
-// NEW: OIAnalysisCard component with pre-market support
+// NEW: OIAnalysisCard component
 const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
   oiAnalysis?: AnalysisResult['oiAnalysis'];
   marketStatus: MarketStatus; 
@@ -334,17 +355,6 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
           </div>
         </div>
         <p className="text-yellow-400 text-sm text-center">Pre-market: OI data from previous close</p>
-      </div>
-    );
-  }
-
-  if (marketStatus !== 'OPEN') {
-    return (
-      <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
-        <div className="flex items-center justify-center text-sm text-gray-400 mb-2">
-          <span>Open Interest Analysis</span>
-        </div>
-        <p className="text-gray-400 text-sm text-center">Data available during market hours only</p>
       </div>
     );
   }
@@ -455,7 +465,7 @@ export default function Home() {
   useEffect(() => { 
     if (lastRequestTime > 0) { 
       setIsCooldown(true); 
-      const timer = setTimeout(() => setIsCooldown(false), 10000); // Increased to 10 seconds
+      const timer = setTimeout(() => setIsCooldown(false), 10000);
       return () => clearTimeout(timer); 
     } 
   }, [lastRequestTime]);
@@ -558,7 +568,7 @@ export default function Home() {
 
   const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
     if (isCooldown) { 
-      addError('Please wait 10 seconds before making another request.', 'VALIDATION'); // Updated message
+      addError('Please wait 10 seconds before making another request.', 'VALIDATION');
       return; 
     } 
     if (!symbolToAnalyze) return; 
@@ -604,7 +614,7 @@ export default function Home() {
   }, [selectedSymbol, isLoading, performAnalysis]);
 
   const handleRefreshCard = useCallback(() => { 
-    if (!results || refreshingCard || isCooldown) return; // Added isCooldown check
+    if (!results || refreshingCard || isCooldown) return;
     setRefreshingCard(true); 
     setLoadingState('REFRESHING'); 
     performAnalysis(results.symbol).finally(() => { 
@@ -670,7 +680,7 @@ export default function Home() {
           </div>
           {apiError && (<div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-center"><div className="flex items-center justify-center text-red-300"><XCircle size={16} className="mr-2" /><span className="text-sm">{apiError}</span></div></div>)}
           {/* Only show cooldown message if there are results (meaning a request was made) */}
-          {isCooldown && results && (
+          {isCooldown && lastRequestTime > 0 && (
             <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-700/50 rounded-lg text-center">
               <div className="flex items-center justify-center text-yellow-300">
                 <Clock size={14} className="mr-2" />
@@ -718,17 +728,21 @@ export default function Home() {
                   marketStatus={marketStatus}
                 />
                 
-                {marketStatus === 'OPEN' || marketStatus === 'PRE_MARKET' ? (
-                  <>
-                    <StatCard title="OI PCR Ratio" value={results.pcr} sentiment={oiPcrSentiment?.sentiment} sentimentColor={oiPcrSentiment?.color} />
-                    <StatCard title="Volume PCR" value={results.volumePcr} sentiment={volumePcrSentiment?.sentiment} sentimentColor={volumePcrSentiment?.color} />
-                  </>
-                ) : (
-                  <>
-                    <MarketHoursOnlyCard title="OI PCR Ratio" marketStatus={marketStatus} />
-                    <MarketHoursOnlyCard title="Volume PCR" marketStatus={marketStatus} />
-                  </>
-                )}
+                <PCRStatCard 
+                  title="OI PCR Ratio" 
+                  value={results.pcr} 
+                  marketStatus={marketStatus}
+                  sentiment={oiPcrSentiment?.sentiment} 
+                  sentimentColor={oiPcrSentiment?.color} 
+                />
+                
+                <PCRStatCard 
+                  title="Volume PCR" 
+                  value={results.volumePcr} 
+                  marketStatus={marketStatus}
+                  sentiment={volumePcrSentiment?.sentiment} 
+                  sentimentColor={volumePcrSentiment?.color} 
+                />
                 
                 <SentimentCard sentiment={results.sentiment} />
                 {results.rsi !== undefined && (
