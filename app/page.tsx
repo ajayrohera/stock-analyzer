@@ -1,141 +1,3 @@
-// This is the updated version with percentage change and volume analysis
-// Triggering the final deployment
-
-'use client';
-
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
-
-// --- HELPER TYPES ---
-type OiChange = {
-  strike: number;
-  changeOi: number;     // The net change in Open Interest
-  totalOi: number;      // The total Open Interest at this strike
-  type: 'CALL' | 'PUT'; // Whether this change is for a Call or a Put
-};
-
-type AnalysisResult = {
-  symbol: string; 
-  pcr: number; 
-  volumePcr: number;
-  maxPain: number; 
-  resistance: number; 
-  support: number; 
-  sentiment: string;
-  expiryDate: string; 
-  supportStrength: string; 
-  resistanceStrength: string;
-  ltp: number;
-  lastRefreshed: string;
-  rsi?: number;
-  // Volume metrics and percentage change
-  avg20DayVolume?: number;
-  todayVolumePercentage?: number;
-  estimatedTodayVolume?: number;
-  changePercent?: number;
-
-  // NEW: Change in OI data for key levels (make optional)
-  oiAnalysis?: {
-    calls: OiChange[];    // Top N strikes with highest CALL OI change
-    puts: OiChange[];     // Top N strikes with highest PUT OI change
-    summary: string;      // Auto-generated summary of the activity
-  };
-};
-
-type MarketStatus = 'OPEN' | 'CLOSED' | 'UNKNOWN';
-type AppError = {
-  message: string;
-  type: 'NETWORK' | 'SERVER' | 'VALIDATION' | 'UNKNOWN' | 'TOKEN_EXPIRED' | 'SYMBOL_NOT_FOUND';
-  timestamp: Date;
-};
-type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
-
-// --- CONSTANTS AND HELPERS ---
-const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
-const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
-
-const isAnalysisResult = (data: unknown): data is AnalysisResult => {
-  try {
-    const typedData = data as AnalysisResult;
-    return (
-      typedData &&
-      typeof typedData.symbol === 'string' && typeof typedData.pcr === 'number' &&
-      typeof typedData.volumePcr === 'number' && typeof typedData.maxPain === 'number' &&
-      typeof typedData.resistance === 'number' && typeof typedData.support === 'number' &&
-      typeof typedData.sentiment === 'string' && typeof typedData.expiryDate === 'string' &&
-      typeof typedData.supportStrength === 'string' && typeof typedData.resistanceStrength === 'string' &&
-      typeof typedData.ltp === 'number' && typeof typedData.lastRefreshed === 'string' &&
-      // REMOVE oiAnalysis validation since it's not in the API response
-      true
-    );
-  } catch (error) { 
-    console.error('Validation error:', error); 
-    return false; 
-  }
-};
-
-const getNextWorkingDay = (currentDate: Date): string => {
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const nextDay = new Date(currentDate);
-  do {
-    nextDay.setDate(nextDay.getDate() + 1);
-    const nextDayKey = `${nextDay.getUTCFullYear()}-${String(nextDay.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDay.getUTCDate()).padStart(2, '0')}`;
-    if (nextDay.getUTCDay() !== 0 && nextDay.getUTCDay() !== 6 && !marketHolidays2025.has(nextDayKey)) return days[nextDay.getUTCDay()];
-  } while (true);
-};
-
-const getPcrSentiment = (pcrValue: number): { sentiment: 'Bullish' | 'Bearish' | 'Neutral', color: string } => {
-  if (pcrValue > 1.1) return { sentiment: 'Bullish', color: 'text-green-400' };
-  if (pcrValue < 0.9) return { sentiment: 'Bearish', color: 'text-red-500' };
-  return { sentiment: 'Neutral', color: 'text-gray-400' };
-};
-
-const getRsiSentiment = (rsiValue: number): { sentiment: 'Bullish' | 'Bearish' | 'Neutral', color: string } => {
-  if (rsiValue < 30) return { sentiment: 'Bullish', color: 'text-green-400' }; // Oversold
-  if (rsiValue > 70) return { sentiment: 'Bearish', color: 'text-red-500' }; // Overbought
-  return { sentiment: 'Neutral', color: 'text-gray-400' }; // Neutral zone
-};
-
-// --- HELPER COMPONENTS ---
-const ErrorToast = React.memo(({ error }: { error: AppError }) => ( 
-  <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg border-l-4 ${ 
-    error.type === 'NETWORK' ? 'border-red-500 bg-red-900/50' : 
-    error.type === 'SERVER' ? 'border-orange-500 bg-orange-900/50' : 
-    'border-gray-500 bg-gray-900/50' 
-  } backdrop-blur-sm z-50 max-w-md`}>
-    <div className="flex items-start"><XCircle size={20} className="mr-2 flex-shrink-0 mt-0.5" /><p className="text-sm">{error.message}</p></div>
-  </div> 
-));
-ErrorToast.displayName = 'ErrorToast';
-
-const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sentiment, sentimentColor }: { 
-  title: string; 
-  value: number | string; 
-  color?: string; 
-  tooltip?: string; 
-  sentiment?: string; 
-  sentimentColor?: string; 
-}) => ( 
-  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
-    <div className="flex items-center justify-center text-sm text-gray-400">
-      <span>{title}</span>
-      {tooltip && (
-        <div className="relative group ml-1">
-          <Info size={14} className="cursor-pointer" />
-          <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-            {tooltip}
-          </div>
-        </div>
-      )}
-    </div>
-    <p className={`text-3xl font-bold ${color}`}>{typeof value === 'number' ? value.toFixed(2) : value}</p>
-    {sentiment && sentimentColor && (
-      <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
-    )}
-  </div>
-));
-StatCard.displayName = 'StatCard';
-
 const SupportResistanceCard = React.memo(({ type, value, strength }: { type: 'Support' | 'Resistance', value: number, strength: string }) => { 
   const isSupport = type === 'Support'; 
   const color = isSupport ? 'text-green-400' : 'text-red-500'; 
@@ -190,7 +52,7 @@ const FeatureCard = React.memo(({ icon, title, description }: { icon: React.Reac
 ));
 FeatureCard.displayName = 'FeatureCard';
 
-// VolumeCard component
+// VolumeCard component with pre-market support
 const VolumeCard = React.memo(({ 
   avg20DayVolume, 
   todayVolumePercentage, 
@@ -214,6 +76,22 @@ const VolumeCard = React.memo(({
     if (percentage > 50) return 'text-orange-400';
     return 'text-red-400';
   };
+
+  if (marketStatus === 'PRE_MARKET') {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+        <div className="flex items-center justify-center text-sm text-gray-400">
+          <span>Volume Analysis</span>
+        </div>
+        <p className="text-yellow-400 text-sm mt-2">Pre-market: Data from previous close</p>
+        {avg20DayVolume !== undefined && (
+          <p className="text-lg font-semibold text-white mt-2">
+            20D Avg: {formatVolume(avg20DayVolume)}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   if (marketStatus !== 'OPEN') {
     return (
@@ -264,13 +142,17 @@ const VolumeCard = React.memo(({
 });
 VolumeCard.displayName = 'VolumeCard';
 
-// MarketHoursOnlyCard component
-const MarketHoursOnlyCard = React.memo(({ title }: { title: string }) => (
+// MarketHoursOnlyCard component with pre-market support
+const MarketHoursOnlyCard = React.memo(({ title, marketStatus }: { title: string, marketStatus: MarketStatus }) => (
   <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
     <div className="flex items-center justify-center text-sm text-gray-400">
       <span>{title}</span>
     </div>
-    <p className="text-gray-400 text-sm mt-2">Data available during market hours only</p>
+    {marketStatus === 'PRE_MARKET' ? (
+      <p className="text-yellow-400 text-sm mt-2">Pre-market: Data from previous close</p>
+    ) : (
+      <p className="text-gray-400 text-sm mt-2">Data available during market hours only</p>
+    )}
   </div>
 ));
 MarketHoursOnlyCard.displayName = 'MarketHoursOnlyCard';
@@ -283,7 +165,7 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
   return (
     <div className="flex justify-between items-center py-2 border-b border-gray-700 last:border-b-0">
       <div className="flex items-center">
-        <span className={`w-16 font-mono ${isCall ? 'text-green-400' : 'text-red-400'}`}>
+        <span className={`w-16 font-mongo ${isCall ? 'text-green-400' : 'text-red-400'}`}>
           {strike}
         </span>
         <span className={`flex items-center ml-2 ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
@@ -297,11 +179,28 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
 });
 OIChangeRow.displayName = 'OIChangeRow';
 
-// NEW: OIAnalysisCard component (updated to handle missing oiAnalysis)
+// NEW: OIAnalysisCard component with pre-market support
 const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
-  oiAnalysis?: AnalysisResult['oiAnalysis'];  // Make optional
+  oiAnalysis?: AnalysisResult['oiAnalysis'];
   marketStatus: MarketStatus; 
 }) => {
+  if (marketStatus === 'PRE_MARKET') {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
+        <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
+          <span>Open Interest Analysis</span>
+          <div className="relative group ml-1">
+            <Info size={14} className="cursor-pointer" />
+            <div className="absolute bottom-full mb-2 w-80 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+              Shows the largest changes in Open Interest at key strike prices. Call OI increase suggests bullish bets, Put OI increase suggests hedging or bearish positioning.
+            </div>
+          </div>
+        </div>
+        <p className="text-yellow-400 text-sm text-center">Pre-market: OI data from previous close</p>
+      </div>
+    );
+  }
+
   if (marketStatus !== 'OPEN') {
     return (
       <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
@@ -419,7 +318,7 @@ export default function Home() {
   useEffect(() => { 
     if (lastRequestTime > 0) { 
       setIsCooldown(true); 
-      const timer = setTimeout(() => setIsCooldown(false), 3000); 
+      const timer = setTimeout(() => setIsCooldown(false), 10000); // Increased to 10 seconds
       return () => clearTimeout(timer); 
     } 
   }, [lastRequestTime]);
@@ -461,25 +360,39 @@ export default function Home() {
       const now = new Date(); 
       const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); 
       const todayKey = `${istTime.getUTCFullYear()}-${String(istTime.getUTCMonth() + 1).padStart(2, '0')}-${String(istTime.getUTCDate()).padStart(2, '0')}`; 
+      
+      // Check for holidays first
       if (marketHolidays2025.has(todayKey)) { 
         setMarketStatus('CLOSED'); 
         setMarketMessage(`Market closed for ${marketHolidaysWithNames[todayKey]}. Opens ${getNextWorkingDay(istTime)} at 9:15 AM`); 
         return; 
       } 
+      
       const day = istTime.getUTCDay(); 
+      // Check for weekends
       if (day === 0 || day === 6) { 
         setMarketStatus('CLOSED'); 
         setMarketMessage(`Market closed for weekend. Opens Monday at 9:15 AM`); 
         return; 
       } 
+      
       const timeInMinutes = istTime.getUTCHours() * 60 + istTime.getUTCMinutes(); 
-      if (timeInMinutes >= 555 && timeInMinutes <= 930) { 
-        setMarketStatus('OPEN'); 
-        setMarketMessage('Market is open'); 
-      } else { 
-        setMarketStatus('CLOSED'); 
-        setMarketMessage(`Market closed. Opens ${getNextMarketOpenTime(now)}`); 
-      } 
+      
+      // Pre-market (9:00 AM to 9:15 AM)
+      if (timeInMinutes >= 540 && timeInMinutes < 555) {
+        setMarketStatus('PRE_MARKET');
+        setMarketMessage('Pre-market hours: Data from previous close. Live data available at 9:15 AM');
+      }
+      // Market hours (9:15 AM to 3:30 PM)
+      else if (timeInMinutes >= 555 && timeInMinutes <= 930) {
+        setMarketStatus('OPEN');
+        setMarketMessage('Market is open');
+      }
+      // Closed
+      else {
+        setMarketStatus('CLOSED');
+        setMarketMessage(`Market closed. Showing data from last trading session. Opens ${getNextMarketOpenTime(now)}`);
+      }
     };
 
     const fetchSymbols = async () => { 
@@ -506,41 +419,41 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [fetchWithRetry, addError, getNextMarketOpenTime, selectedSymbol]);
 
- const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
-  if (isCooldown) { 
-    addError('Please wait 3 seconds before making another request.', 'VALIDATION'); 
-    return; 
-  } 
-  if (!symbolToAnalyze) return; 
-  setApiError(''); 
-  try { 
-    const response = await fetchWithRetry('/api/analyze', { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ symbol: symbolToAnalyze }), 
-    }); 
-    const data = await response.json(); 
-    
-    // DEBUG LOGGING - ADD THESE LINES
-    console.log('🔍 API Response from /api/analyze:', data);
-    console.log('✅ Is valid result:', isAnalysisResult(data));
-    if (!isAnalysisResult(data)) {
-      console.log('❌ Validation failed. Data structure:', JSON.stringify(data, null, 2));
-      throw new Error('Invalid response format from server.');
-    }
-    
-    setResults(data); 
-    setLastRequestTime(Date.now()); 
-  } catch (error) { 
-    const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
-      TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
-      SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
-    }; 
-    const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER' as const, message: error.message } : { type: 'UNKNOWN' as const, message: 'Unknown error occurred' };
-    setApiError(errorDetails.message); 
-    addError(errorDetails.message, errorDetails.type); 
-  } 
-}, [isCooldown, fetchWithRetry, addError]);
+  const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
+    if (isCooldown) { 
+      addError('Please wait 10 seconds before making another request.', 'VALIDATION'); // Updated message
+      return; 
+    } 
+    if (!symbolToAnalyze) return; 
+    setApiError(''); 
+    try { 
+      const response = await fetchWithRetry('/api/analyze', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ symbol: symbolToAnalyze }), 
+      }); 
+      const data = await response.json(); 
+      
+      // DEBUG LOGGING
+      console.log('🔍 API Response from /api/analyze:', data);
+      console.log('✅ Is valid result:', isAnalysisResult(data));
+      if (!isAnalysisResult(data)) {
+        console.log('❌ Validation failed. Data structure:', JSON.stringify(data, null, 2));
+        throw new Error('Invalid response format from server.');
+      }
+      
+      setResults(data); 
+      setLastRequestTime(Date.now()); 
+    } catch (error) { 
+      const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
+        TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
+        SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
+      }; 
+      const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER' as const, message: error.message } : { type: 'UNKNOWN' as const, message: 'Unknown error occurred' };
+      setApiError(errorDetails.message); 
+      addError(errorDetails.message, errorDetails.type); 
+    } 
+  }, [isCooldown, fetchWithRetry, addError]);
 
   const handleAnalyze = useCallback(() => { 
     if (isLoading) return; 
@@ -554,14 +467,14 @@ export default function Home() {
   }, [selectedSymbol, isLoading, performAnalysis]);
 
   const handleRefreshCard = useCallback(() => { 
-    if (!results || refreshingCard) return; 
+    if (!results || refreshingCard || isCooldown) return; // Added isCooldown check
     setRefreshingCard(true); 
     setLoadingState('REFRESHING'); 
     performAnalysis(results.symbol).finally(() => { 
       setRefreshingCard(false); 
       setLoadingState('IDLE'); 
     }); 
-  }, [results, refreshingCard, performAnalysis]);
+  }, [results, refreshingCard, isCooldown, performAnalysis]);
 
   const errorToasts = useMemo(() => 
     errors.slice(0, 3).map((error, index) => <ErrorToast key={`${error.timestamp.getTime()}-${index}`} error={error} />)
@@ -594,7 +507,15 @@ export default function Home() {
         <section className="w-full max-w-2xl mx-auto p-6 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10">
           {marketStatus !== 'UNKNOWN' && (
             <div className="flex items-center justify-center mb-4 text-sm flex-col">
-              <div className="flex items-center"><Clock size={16} className="mr-2" /><span className={marketStatus === 'OPEN' ? 'text-green-400' : 'text-red-400'}>Market is currently {marketStatus}</span></div>
+              <div className="flex items-center">
+                <Clock size={16} className="mr-2" />
+                <span className={
+                  marketStatus === 'OPEN' ? 'text-green-400' : 
+                  marketStatus === 'PRE_MARKET' ? 'text-yellow-400' : 'text-red-400'
+                }>
+                  {marketStatus === 'PRE_MARKET' ? 'Pre-Market' : `Market is ${marketStatus.toLowerCase()}`}
+                </span>
+              </div>
               <p className="text-gray-400 text-xs mt-1">{marketMessage}</p>
             </div>
           )}
@@ -604,13 +525,21 @@ export default function Home() {
             <button 
               className="absolute right-2 bg-brand-cyan hover:bg-cyan-500 text-brand-dark font-bold py-2.5 px-6 rounded-lg transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" 
               onClick={handleAnalyze} 
-              disabled={isLoading || !selectedSymbol || symbolList.length === 0}
-              title="Analyze selected symbol"
+              disabled={isLoading || !selectedSymbol || symbolList.length === 0 || isCooldown}
+              title={isCooldown ? 'Please wait 10 seconds' : 'Analyze selected symbol'}
             >
               {isLoading ? 'Analyzing...' : 'Analyze'}
             </button>
           </div>
           {apiError && (<div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-center"><div className="flex items-center justify-center text-red-300"><XCircle size={16} className="mr-2" /><span className="text-sm">{apiError}</span></div></div>)}
+          {isCooldown && (
+            <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-700/50 rounded-lg text-center">
+              <div className="flex items-center justify-center text-yellow-300">
+                <Clock size={14} className="mr-2" />
+                <span className="text-sm">Please wait 10 seconds before next request</span>
+              </div>
+            </div>
+          )}
         </section>
 
         <section id="results" className="mt-12 w-full max-w-6xl mx-auto min-h-[100px]">
@@ -622,7 +551,7 @@ export default function Home() {
               <p className="text-center text-gray-400 mb-1">Expiry Date: {results.expiryDate}</p>
               <div className="flex items-center justify-center mb-6">
                 <span className="text-white font-bold">
-                  CMP: {results.ltp}
+                  {marketStatus === 'PRE_MARKET' ? 'Previous Close: ' : 'CMP: '}{results.ltp}
                   {results.changePercent !== undefined && (
                     <span className={results.changePercent >= 0 ? 'text-green-400' : 'text-red-500'}>
                       {` (${results.changePercent > 0 ? '+' : ''}${results.changePercent.toFixed(2)}%)`}
@@ -630,7 +559,12 @@ export default function Home() {
                   )}
                 </span>
                 <span className="text-gray-500 ml-2">(last refreshed {results.lastRefreshed})</span>
-                <button onClick={handleRefreshCard} disabled={refreshingCard || isCooldown} className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50" title={isCooldown ? 'Please wait 3 seconds' : 'Refresh data'}>
+                <button 
+                  onClick={handleRefreshCard} 
+                  disabled={refreshingCard || isCooldown} 
+                  className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50" 
+                  title={isCooldown ? 'Please wait 10 seconds' : 'Refresh data'}
+                >
                   <RefreshCw size={14} className={refreshingCard ? 'animate-spin' : ''} />
                 </button>
               </div>
@@ -646,15 +580,15 @@ export default function Home() {
                   marketStatus={marketStatus}
                 />
                 
-                {marketStatus === 'OPEN' ? (
+                {marketStatus === 'OPEN' || marketStatus === 'PRE_MARKET' ? (
                   <>
                     <StatCard title="OI PCR Ratio" value={results.pcr} sentiment={oiPcrSentiment?.sentiment} sentimentColor={oiPcrSentiment?.color} />
                     <StatCard title="Volume PCR" value={results.volumePcr} sentiment={volumePcrSentiment?.sentiment} sentimentColor={volumePcrSentiment?.color} />
                   </>
                 ) : (
                   <>
-                    <MarketHoursOnlyCard title="OI PCR Ratio" />
-                    <MarketHoursOnlyCard title="Volume PCR" />
+                    <MarketHoursOnlyCard title="OI PCR Ratio" marketStatus={marketStatus} />
+                    <MarketHoursOnlyCard title="Volume PCR" marketStatus={marketStatus} />
                   </>
                 )}
                 
