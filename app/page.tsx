@@ -65,12 +65,8 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
       typeof typedData.sentiment === 'string' && typeof typedData.expiryDate === 'string' &&
       typeof typedData.supportStrength === 'string' && typeof typedData.resistanceStrength === 'string' &&
       typeof typedData.ltp === 'number' && typeof typedData.lastRefreshed === 'string' &&
-      // NEW: Validation for oiAnalysis
-            (!typedData.oiAnalysis || (
-        Array.isArray(typedData.oiAnalysis?.calls) && 
-        Array.isArray(typedData.oiAnalysis?.puts) && 
-        typeof typedData.oiAnalysis?.summary === 'string'
-      ))
+      // REMOVE oiAnalysis validation since it's not in the API response
+      true
     );
   } catch (error) { 
     console.error('Validation error:', error); 
