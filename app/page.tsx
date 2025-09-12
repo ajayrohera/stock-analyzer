@@ -385,7 +385,7 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
           <Info size={14} className="cursor-pointer" />
           <div className="absolute bottom-full mb-2 w-80 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
             Shows the largest changes in Open Interest at key strike prices. Call OI increase suggests bullish bets, Put OI increase suggests hedging or bearish positioning.
-          </div>
+            </div>
         </div>
       </div>
       
@@ -461,14 +461,6 @@ export default function Home() {
       return () => clearTimeout(timer); 
     } 
   }, [errors]);
-  
-  useEffect(() => { 
-    if (lastRequestTime > 0) { 
-      setIsCooldown(true); 
-      const timer = setTimeout(() => setIsCooldown(false), 10000);
-      return () => clearTimeout(timer); 
-    } 
-  }, [lastRequestTime]);
 
   const fetchWithRetry = useCallback(async (url: string, options: RequestInit = {}, retries = 2): Promise<Response> => { 
     try { 
@@ -567,7 +559,9 @@ export default function Home() {
   }, [fetchWithRetry, addError, getNextMarketOpenTime, selectedSymbol]);
 
   const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
-    if (isCooldown) { 
+    const currentTime = Date.now();
+    // Check if we're in cooldown period (within 10 seconds of last request)
+    if (lastRequestTime > 0 && currentTime - lastRequestTime < 10000) {
       addError('Please wait 10 seconds before making another request.', 'VALIDATION');
       return; 
     } 
@@ -590,7 +584,11 @@ export default function Home() {
       }
       
       setResults(data); 
-      setLastRequestTime(Date.now()); 
+      setLastRequestTime(currentTime); 
+      
+      // Set cooldown state and clear it after 10 seconds
+      setIsCooldown(true);
+      setTimeout(() => setIsCooldown(false), 10000);
     } catch (error) { 
       const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
         TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
@@ -600,7 +598,7 @@ export default function Home() {
       setApiError(errorDetails.message); 
       addError(errorDetails.message, errorDetails.type); 
     } 
-  }, [isCooldown, fetchWithRetry, addError]);
+  }, [lastRequestTime, fetchWithRetry, addError]);
 
   const handleAnalyze = useCallback(() => { 
     if (isLoading) return; 
@@ -614,14 +612,14 @@ export default function Home() {
   }, [selectedSymbol, isLoading, performAnalysis]);
 
   const handleRefreshCard = useCallback(() => { 
-    if (!results || refreshingCard || isCooldown) return;
+    if (!results || refreshingCard) return;
     setRefreshingCard(true); 
     setLoadingState('REFRESHING'); 
     performAnalysis(results.symbol).finally(() => { 
       setRefreshingCard(false); 
       setLoadingState('IDLE'); 
     }); 
-  }, [results, refreshingCard, isCooldown, performAnalysis]);
+  }, [results, refreshingCard, performAnalysis]);
 
   const errorToasts = useMemo(() => 
     errors.slice(0, 3).map((error, index) => <ErrorToast key={`${error.timestamp.getTime()}-${index}`} error={error} />)
@@ -672,26 +670,17 @@ export default function Home() {
             <button 
               className="absolute right-2 bg-brand-cyan hover:bg-cyan-500 text-brand-dark font-bold py-2.5 px-6 rounded-lg transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" 
               onClick={handleAnalyze} 
-              disabled={isLoading || !selectedSymbol || symbolList.length === 0 || isCooldown}
-              title={isCooldown ? 'Please wait 10 seconds' : 'Analyze selected symbol'}
+              disabled={isLoading || !selectedSymbol || symbolList.length === 0}
+              title="Analyze selected symbol"
             >
               {isLoading ? 'Analyzing...' : 'Analyze'}
             </button>
           </div>
           {apiError && (<div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-center"><div className="flex items-center justify-center text-red-300"><XCircle size={16} className="mr-2" /><span className="text-sm">{apiError}</span></div></div>)}
-          {/* Only show cooldown message if there are results (meaning a request was made) */}
-          {isCooldown && lastRequestTime > 0 && (
-            <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-700/50 rounded-lg text-center">
-              <div className="flex items-center justify-center text-yellow-300">
-                <Clock size={14} className="mr-2" />
-                <span className="text-sm">Please wait 10 seconds before next request</span>
-              </div>
-            </div>
-          )}
         </section>
 
         <section id="results" className="mt-12 w-full max-w-6xl mx-auto min-h-[100px]">
-          {isLoading && (<div className="flex flex-col items-center justify-center p-8"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div><p className="text-brand-cyan text-lg">{loadingState === 'ANALYZING' ? 'Querying the chain, please wait...' : 'Refreshing data...'}</p></div>)}
+                    {isLoading && (<div className="flex flex-col items-center justify-center p-8"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div><p className="text-brand-cyan text-lg">{loadingState === 'ANALYZING' ? 'Querying the chain, please wait...' : 'Refreshing data...'}</p></div>)}
           
           {results && (
             <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl shadow-2xl text-left animate-fade-in">
@@ -709,9 +698,9 @@ export default function Home() {
                 <span className="text-gray-500 ml-2">(last refreshed {results.lastRefreshed})</span>
                 <button 
                   onClick={handleRefreshCard} 
-                  disabled={refreshingCard || isCooldown} 
+                  disabled={refreshingCard} 
                   className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50" 
-                  title={isCooldown ? 'Please wait 10 seconds' : 'Refresh data'}
+                  title="Refresh data"
                 >
                   <RefreshCw size={14} className={refreshingCard ? 'animate-spin' : ''} />
                 </button>
