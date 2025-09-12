@@ -34,8 +34,8 @@ type AnalysisResult = {
   estimatedTodayVolume?: number;
   changePercent?: number;
 
-  // NEW: Change in OI data for key levels
-  oiAnalysis: {
+  // NEW: Change in OI data for key levels (make optional)
+  oiAnalysis?: {
     calls: OiChange[];    // Top N strikes with highest CALL OI change
     puts: OiChange[];     // Top N strikes with highest PUT OI change
     summary: string;      // Auto-generated summary of the activity
@@ -297,9 +297,9 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
 });
 OIChangeRow.displayName = 'OIChangeRow';
 
-// NEW: OIAnalysisCard component
+// NEW: OIAnalysisCard component (updated to handle missing oiAnalysis)
 const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
-  oiAnalysis: AnalysisResult['oiAnalysis']; 
+  oiAnalysis?: AnalysisResult['oiAnalysis'];  // Make optional
   marketStatus: MarketStatus; 
 }) => {
   if (marketStatus !== 'OPEN') {
@@ -309,6 +309,24 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
           <span>Open Interest Analysis</span>
         </div>
         <p className="text-gray-400 text-sm text-center">Data available during market hours only</p>
+      </div>
+    );
+  }
+
+  // Handle missing oiAnalysis
+  if (!oiAnalysis) {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
+        <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
+          <span>Open Interest Analysis</span>
+          <div className="relative group ml-1">
+            <Info size={14} className="cursor-pointer" />
+            <div className="absolute bottom-full mb-2 w-80 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+              Shows the largest changes in Open Interest at key strike prices. Call OI increase suggests bullish bets, Put OI increase suggests hedging or bearish positioning.
+            </div>
+          </div>
+        </div>
+        <p className="text-gray-400 text-sm text-center">Open Interest data not available</p>
       </div>
     );
   }
