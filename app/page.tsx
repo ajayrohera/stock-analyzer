@@ -66,7 +66,11 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
       typeof typedData.supportStrength === 'string' && typeof typedData.resistanceStrength === 'string' &&
       typeof typedData.ltp === 'number' && typeof typedData.lastRefreshed === 'string' &&
       // NEW: Validation for oiAnalysis
-      typedData.oiAnalysis && Array.isArray(typedData.oiAnalysis.calls) && Array.isArray(typedData.oiAnalysis.puts) && typeof typedData.oiAnalysis.summary === 'string'
+            (!typedData.oiAnalysis || (
+        Array.isArray(typedData.oiAnalysis?.calls) && 
+        Array.isArray(typedData.oiAnalysis?.puts) && 
+        typeof typedData.oiAnalysis?.summary === 'string'
+      ))
     );
   } catch (error) { 
     console.error('Validation error:', error); 
@@ -569,7 +573,7 @@ export default function Home() {
       {errorToasts}
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <section className="text-center py-16">
-          <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine (debug)</h1>
+          <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine (debug2)</h1>
           <p className="text-lg md:text-xl text-gray-400 max-w-3xl mx-auto">Leverage options data to uncover market sentiment, identify key support and resistance levels, and make smarter trading decisions.</p>
         </section>
 
