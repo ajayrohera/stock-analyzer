@@ -587,7 +587,7 @@ export default function Home() {
       {errorToasts}
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <section className="text-center py-16">
-          <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine (debug2)</h1>
+          <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine</h1>
           <p className="text-lg md:text-xl text-gray-400 max-w-3xl mx-auto">Leverage options data to uncover market sentiment, identify key support and resistance levels, and make smarter trading decisions.</p>
         </section>
 
