@@ -151,8 +151,6 @@ const SupportResistanceCard = React.memo(({ type, value, strength }: { type: 'Su
 });
 SupportResistanceCard.displayName = 'SupportResistanceCard';
 
-
-
 const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => { 
   const isBullish = sentiment.includes('Bullish'); 
   const isBearish = sentiment.includes('Bearish'); 
@@ -671,7 +669,8 @@ export default function Home() {
             </button>
           </div>
           {apiError && (<div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-center"><div className="flex items-center justify-center text-red-300"><XCircle size={16} className="mr-2" /><span className="text-sm">{apiError}</span></div></div>)}
-          {isCooldown && (
+          {/* Only show cooldown message if there are results (meaning a request was made) */}
+          {isCooldown && results && (
             <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-700/50 rounded-lg text-center">
               <div className="flex items-center justify-center text-yellow-300">
                 <Clock size={14} className="mr-2" />
