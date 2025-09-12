@@ -1,5 +1,4 @@
 {
-  
   "crons": [
     {
       "path": "/api/cron/update-volume",
