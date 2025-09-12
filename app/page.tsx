@@ -190,6 +190,7 @@ const FeatureCard = React.memo(({ icon, title, description }: { icon: React.Reac
 FeatureCard.displayName = 'FeatureCard';
 
 // VolumeCard component - always show data but with appropriate messages
+// VolumeCard component - show data even during off-market hours
 const VolumeCard = React.memo(({ 
   avg20DayVolume, 
   todayVolumePercentage, 
@@ -254,20 +255,20 @@ const VolumeCard = React.memo(({
         </p>
       )}
       
-      {todayVolumePercentage !== undefined && marketStatus === 'OPEN' && (
+      {todayVolumePercentage !== undefined && (
         <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
           {todayVolumePercentage.toFixed(1)}% of Avg
         </p>
       )}
       
-      {estimatedTodayVolume !== undefined && marketStatus === 'OPEN' && (
+      {estimatedTodayVolume !== undefined && (
         <p className="text-md text-gray-300 mt-2">
           Est. Today: {formatVolume(estimatedTodayVolume)}
         </p>
       )}
       
       {marketStatus !== 'OPEN' && (
-        <p className="text-gray-400 text-sm mt-2">Live volume data available during market hours only</p>
+        <p className="text-gray-400 text-xs mt-2">Data from previous trading session</p>
       )}
       
       {(!avg20DayVolume && !todayVolumePercentage && !estimatedTodayVolume) && (
