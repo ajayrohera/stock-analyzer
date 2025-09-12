@@ -1,3 +1,140 @@
+// This is the updated version with pre-market support and 10-second cooldown
+
+'use client';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
+
+// --- HELPER TYPES ---
+type OiChange = {
+  strike: number;
+  changeOi: number;     // The net change in Open Interest
+  totalOi: number;      // The total Open Interest at this strike
+  type: 'CALL' | 'PUT'; // Whether this change is for a Call or a Put
+};
+
+type AnalysisResult = {
+  symbol: string; 
+  pcr: number; 
+  volumePcr: number;
+  maxPain: number; 
+  resistance: number; 
+  support: number; 
+  sentiment: string;
+  expiryDate: string; 
+  supportStrength: string; 
+  resistanceStrength: string;
+  ltp: number;
+  lastRefreshed: string;
+  rsi?: number;
+  // Volume metrics and percentage change
+  avg20DayVolume?: number;
+  todayVolumePercentage?: number;
+  estimatedTodayVolume?: number;
+  changePercent?: number;
+
+  // NEW: Change in OI data for key levels (make optional)
+  oiAnalysis?: {
+    calls: OiChange[];    // Top N strikes with highest CALL OI change
+    puts: OiChange[];     // Top N strikes with highest PUT OI change
+    summary: string;      // Auto-generated summary of the activity
+  };
+};
+
+type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
+type AppError = {
+  message: string;
+  type: 'NETWORK' | 'SERVER' | 'VALIDATION' | 'UNKNOWN' | 'TOKEN_EXPIRED' | 'SYMBOL_NOT_FOUND';
+  timestamp: Date;
+};
+type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
+
+// --- CONSTANTS AND HELPERS ---
+const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
+const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
+
+const isAnalysisResult = (data: unknown): data is AnalysisResult => {
+  try {
+    const typedData = data as AnalysisResult;
+    return (
+      typedData &&
+      typeof typedData.symbol === 'string' && typeof typedData.pcr === 'number' &&
+      typeof typedData.volumePcr === 'number' && typeof typedData.maxPain === 'number' &&
+      typeof typedData.resistance === 'number' && typeof typedData.support === 'number' &&
+      typeof typedData.sentiment === 'string' && typeof typedData.expiryDate === 'string' &&
+      typeof typedData.supportStrength === 'string' && typeof typedData.resistanceStrength === 'string' &&
+      typeof typedData.ltp === 'number' && typeof typedData.lastRefreshed === 'string' &&
+      // REMOVE oiAnalysis validation since it's not in the API response
+      true
+    );
+  } catch (error) { 
+    console.error('Validation error:', error); 
+    return false; 
+  }
+};
+
+const getNextWorkingDay = (currentDate: Date): string => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const nextDay = new Date(currentDate);
+  do {
+    nextDay.setDate(nextDay.getDate() + 1);
+    const nextDayKey = `${nextDay.getUTCFullYear()}-${String(nextDay.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDay.getUTCDate()).padStart(2, '0')}`;
+    if (nextDay.getUTCDay() !== 0 && nextDay.getUTCDay() !== 6 && !marketHolidays2025.has(nextDayKey)) return days[nextDay.getUTCDay()];
+  } while (true);
+};
+
+const getPcrSentiment = (pcrValue: number): { sentiment: 'Bullish' | 'Bearish' | 'Neutral', color: string } => {
+  if (pcrValue > 1.1) return { sentiment: 'Bullish', color: 'text-green-400' };
+  if (pcrValue < 0.9) return { sentiment: 'Bearish', color: 'text-red-500' };
+  return { sentiment: 'Neutral', color: 'text-gray-400' };
+};
+
+const getRsiSentiment = (rsiValue: number): { sentiment: 'Bullish' | 'Bearish' | 'Neutral', color: string } => {
+  if (rsiValue < 30) return { sentiment: 'Bullish', color: 'text-green-400' }; // Oversold
+  if (rsiValue > 70) return { sentiment: 'Bearish', color: 'text-red-500' }; // Overbought
+  return { sentiment: 'Neutral', color: 'text-gray-400' }; // Neutral zone
+};
+
+// --- HELPER COMPONENTS ---
+const ErrorToast = React.memo(({ error }: { error: AppError }) => ( 
+  <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg border-l-4 ${ 
+    error.type === 'NETWORK' ? 'border-red-500 bg-red-900/50' : 
+    error.type === 'SERVER' ? 'border-orange-500 bg-orange-900/50' : 
+    'border-gray-500 bg-gray-900/50' 
+  } backdrop-blur-sm z-50 max-w-md`}>
+    <div className="flex items-start"><XCircle size={20} className="mr-2 flex-shrink-0 mt-0.5" /><p className="text-sm">{error.message}</p></div>
+  </div> 
+));
+ErrorToast.displayName = 'ErrorToast';
+
+const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sentiment, sentimentColor }: { 
+  title: string; 
+  value: number | string; 
+  color?: string; 
+  tooltip?: string; 
+  sentiment?: string; 
+  sentimentColor?: string; 
+}) => ( 
+  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+    <div className="flex items-center justify-center text-sm text-gray-400">
+      <span>{title}</span>
+      {tooltip && (
+        <div className="relative group ml-1">
+          <Info size={14} className="cursor-pointer" />
+          <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+            {tooltip}
+          </div>
+        </div>
+      )}
+    </div>
+    <p className={`text-3xl font-bold ${color}`}>{typeof value === 'number' ? value.toFixed(2) : value}</p>
+    {sentiment && sentimentColor && (
+      <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
+    )}
+  </div>
+));
+StatCard.displayName = 'StatCard';
+
 const SupportResistanceCard = React.memo(({ type, value, strength }: { type: 'Support' | 'Resistance', value: number, strength: string }) => { 
   const isSupport = type === 'Support'; 
   const color = isSupport ? 'text-green-400' : 'text-red-500'; 
@@ -13,6 +150,8 @@ const SupportResistanceCard = React.memo(({ type, value, strength }: { type: 'Su
   ); 
 });
 SupportResistanceCard.displayName = 'SupportResistanceCard';
+
+
 
 const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => { 
   const isBullish = sentiment.includes('Bullish'); 
