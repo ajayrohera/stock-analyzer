@@ -438,7 +438,7 @@ export default function Home() {
   const [errors, setErrors] = useState<AppError[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>('IDLE');
   const [lastRequestTime, setLastRequestTime] = useState(0);
-  const [isCooldown, setIsCooldown] = useState(false);
+  const [cooldownMessage, setCooldownMessage] = useState('');
   const [apiError, setApiError] = useState('');
 
   useEffect(() => { 
@@ -562,11 +562,14 @@ export default function Home() {
     const currentTime = Date.now();
     // Check if we're in cooldown period (within 10 seconds of last request)
     if (lastRequestTime > 0 && currentTime - lastRequestTime < 10000) {
-      addError('Please wait 10 seconds before making another request.', 'VALIDATION');
+      setCooldownMessage('Please wait 10 seconds before making another request.');
+      setTimeout(() => setCooldownMessage(''), 3000); // Clear message after 3 seconds
       return; 
     } 
+    
     if (!symbolToAnalyze) return; 
     setApiError(''); 
+    setCooldownMessage('');
     try { 
       const response = await fetchWithRetry('/api/analyze', { 
         method: 'POST', 
@@ -585,10 +588,6 @@ export default function Home() {
       
       setResults(data); 
       setLastRequestTime(currentTime); 
-      
-      // Set cooldown state and clear it after 10 seconds
-      setIsCooldown(true);
-      setTimeout(() => setIsCooldown(false), 10000);
     } catch (error) { 
       const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
         TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
@@ -604,7 +603,7 @@ export default function Home() {
     if (isLoading) return; 
     setIsLoading(true); 
     setLoadingState('ANALYZING'); 
-    setResults(null); 
+    // Don't clear results on cooldown - keep showing current data
     performAnalysis(selectedSymbol).finally(() => { 
       setIsLoading(false); 
       setLoadingState('IDLE'); 
@@ -628,6 +627,7 @@ export default function Home() {
   const handleSymbolChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => { 
     setSelectedSymbol(e.target.value); 
     setApiError(''); 
+    setCooldownMessage('');
   }, []);
 
   const { oiPcrSentiment, volumePcrSentiment, rsiSentiment } = useMemo(() => { 
@@ -645,7 +645,7 @@ export default function Home() {
       {errorToasts}
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <section className="text-center py-16">
-          <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine</h1>
+                    <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine</h1>
           <p className="text-lg md:text-xl text-gray-400 max-w-3xl mx-auto">Leverage options data to uncover market sentiment, identify key support and resistance levels, and make smarter trading decisions.</p>
         </section>
 
@@ -676,11 +676,34 @@ export default function Home() {
               {isLoading ? 'Analyzing...' : 'Analyze'}
             </button>
           </div>
+          
+          {/* Cooldown message - shown below stock list box in yellow */}
+          {cooldownMessage && (
+            <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-700/50 rounded-lg text-center">
+              <div className="flex items-center justify-center text-yellow-300">
+                <Clock size={14} className="mr-2" />
+                <span className="text-sm">{cooldownMessage}</span>
+              </div>
+            </div>
+          )}
+          
           {apiError && (<div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-center"><div className="flex items-center justify-center text-red-300"><XCircle size={16} className="mr-2" /><span className="text-sm">{apiError}</span></div></div>)}
         </section>
 
         <section id="results" className="mt-12 w-full max-w-6xl mx-auto min-h-[100px]">
-                    {isLoading && (<div className="flex flex-col items-center justify-center p-8"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div><p className="text-brand-cyan text-lg">{loadingState === 'ANALYZING' ? 'Querying the chain, please wait...' : 'Refreshing data...'}</p></div>)}
+          {isLoading && loadingState === 'ANALYZING' && !results && (
+            <div className="flex flex-col items-center justify-center p-8">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div>
+              <p className="text-brand-cyan text-lg">Querying the chain, please wait...</p>
+            </div>
+          )}
+          
+          {isLoading && loadingState === 'REFRESHING' && results && (
+            <div className="flex flex-col items-center justify-center p-4">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-cyan mb-2"></div>
+              <p className="text-brand-cyan text-sm">Refreshing data...</p>
+            </div>
+          )}
           
           {results && (
             <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl shadow-2xl text-left animate-fade-in">
