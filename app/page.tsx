@@ -502,6 +502,23 @@ export default function Home() {
         body: JSON.stringify({ symbol: symbolToAnalyze }), 
       }); 
       const data = await response.json(); 
+
+
+    // ADD DEBUG LOGGING:
+    console.log('API Response:', data);
+    console.log('Is valid result:', isAnalysisResult(data));
+    
+    if (!isAnalysisResult(data)) throw new Error('Invalid response format from server.'); 
+    setResults(data); 
+    setLastRequestTime(Date.now()); 
+  } catch (error) { 
+    // error handling
+  } 
+}, [isCooldown, fetchWithRetry, addError]);
+
+
+
+
       if (!isAnalysisResult(data)) throw new Error('Invalid response format from server.'); 
       setResults(data); 
       setLastRequestTime(Date.now()); 
