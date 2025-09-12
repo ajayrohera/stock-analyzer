@@ -488,33 +488,41 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [fetchWithRetry, addError, getNextMarketOpenTime, selectedSymbol]);
 
-  const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
-    if (isCooldown) { 
-      addError('Please wait 3 seconds before making another request.', 'VALIDATION'); 
-      return; 
-    } 
-    if (!symbolToAnalyze) return; 
-    setApiError(''); 
-    try { 
-      const response = await fetchWithRetry('/api/analyze', { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ symbol: symbolToAnalyze }), 
-      }); 
-      const data = await response.json(); 
-      if (!isAnalysisResult(data)) throw new Error('Invalid response format from server.'); 
-      setResults(data); 
-      setLastRequestTime(Date.now()); 
-    } catch (error) { 
-      const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
-        TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
-        SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
-      }; 
-      const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER' as const, message: error.message } : { type: 'UNKNOWN' as const, message: 'Unknown error occurred' };
-      setApiError(errorDetails.message); 
-      addError(errorDetails.message, errorDetails.type); 
-    } 
-  }, [isCooldown, fetchWithRetry, addError]);
+ const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
+  if (isCooldown) { 
+    addError('Please wait 3 seconds before making another request.', 'VALIDATION'); 
+    return; 
+  } 
+  if (!symbolToAnalyze) return; 
+  setApiError(''); 
+  try { 
+    const response = await fetchWithRetry('/api/analyze', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ symbol: symbolToAnalyze }), 
+    }); 
+    const data = await response.json(); 
+    
+    // DEBUG LOGGING - ADD THESE LINES
+    console.log('🔍 API Response from /api/analyze:', data);
+    console.log('✅ Is valid result:', isAnalysisResult(data));
+    if (!isAnalysisResult(data)) {
+      console.log('❌ Validation failed. Data structure:', JSON.stringify(data, null, 2));
+      throw new Error('Invalid response format from server.');
+    }
+    
+    setResults(data); 
+    setLastRequestTime(Date.now()); 
+  } catch (error) { 
+    const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
+      TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
+      SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
+    }; 
+    const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER' as const, message: error.message } : { type: 'UNKNOWN' as const, message: 'Unknown error occurred' };
+    setApiError(errorDetails.message); 
+    addError(errorDetails.message, errorDetails.type); 
+  } 
+}, [isCooldown, fetchWithRetry, addError]);
 
   const handleAnalyze = useCallback(() => { 
     if (isLoading) return; 
