@@ -1,13 +1,5 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/update-volume",
-      "schedule": "30 10 * * 1-5"
-    }
-  ],
-  "env": {
-    "CRON_SECRET": "@CRON_SECRET"
-  },
+
   "functions": {
     "app/api/cron/update-volume/route.ts": {
       "maxDuration": 60
