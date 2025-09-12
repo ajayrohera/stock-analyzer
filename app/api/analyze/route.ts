@@ -1,10 +1,11 @@
+// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts
 
-//nothing
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { KiteConnect } from 'kiteconnect';
-import { kv } from '@vercel/kv';
+import { createClient } from 'redis';
 
+// --- HELPER TYPES ---
 interface QuoteData {
     [key: string]: { 
         instrument_token: number; 
@@ -19,7 +20,6 @@ interface QuoteData {
         };
     }
 }
-
 interface LtpQuote {
     [key: string]: { instrument_token: number; last_price: number; }
 }
@@ -31,6 +31,15 @@ interface Instrument {
     expiry: string;
 }
 
+// Initialize Redis client
+const redis = createClient({
+  url: process.env.REDIS_URL,
+});
+
+// Connect to Redis
+redis.connect().catch(console.error);
+
+// --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
   try {
     const apiKey = process.env.KITE_API_KEY;
@@ -53,7 +62,6 @@ export async function POST(request: Request) {
         private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
         client_email: process.env.GOOGLE_CLIENT_EMAIL,
         client_id: process.env.GOOGLE_CLIENT_ID,
-        
       },
       scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly'
     });
@@ -75,21 +83,22 @@ export async function POST(request: Request) {
     const tradingSymbol = row[1];
 
     // --- Kite Connection ---
-    const tokenData = await kv.get<{ accessToken: string }>('kite_token');
+    const tokenData = await redis.get('kite_token');
     if (!tokenData) {
       return NextResponse.json({ error: 'Kite token not found. Please run the login script.' }, { status: 401 });
     }
 
     const kc = new KiteConnect({ api_key: apiKey });
-    kc.setAccessToken(tokenData.accessToken);
+    kc.setAccessToken(JSON.parse(tokenData as string).accessToken);
 
-    // --- Read options cache from KV ---
-    const optionsCache = await kv.get<{ [key: string]: Instrument[] }>('options_cache');
+    // --- Read options cache from Redis ---
+    const optionsCache = await redis.get('options_cache');
     if (!optionsCache) {
       return NextResponse.json({ error: 'Options cache is empty. Please run the population script.' }, { status: 500 });
     }
 
-    const optionsChain = optionsCache[tradingSymbol];
+    const parsedOptionsCache = JSON.parse(optionsCache as string);
+    const optionsChain = parsedOptionsCache[tradingSymbol];
     if (!optionsChain || optionsChain.length === 0) {
         return NextResponse.json({ error: `Options data for '${tradingSymbol}' not found in cache.` }, { status: 404 });
     }
@@ -101,10 +110,10 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Could not fetch live price for '${tradingSymbol}'.` }, { status: 404 });
     }
     
-    const instrumentTokens = optionsChain.map(o => `NFO:${o.tradingsymbol}`);
+    const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
 
-    // --- Calculation Logic (keep this part the same) ---
+    // --- Calculation Logic ---
     let totalCallOI = 0, totalPutOI = 0, highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
     let totalCallVolume = 0, totalPutVolume = 0;
     let otmCallOI = 0, otmPutOI = 0;
