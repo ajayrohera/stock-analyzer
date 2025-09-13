@@ -31,5 +31,11 @@
     "postcss": "^8.4.31",
     "tailwindcss": "^3.4.1",
     "typescript": "^5"
+  },
+  "type": "module",
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
   }
 }
+

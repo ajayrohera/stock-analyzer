@@ -42,6 +42,7 @@ next-env.d.ts
 kite_token.json
 instruments.json
 credentials.json
+volume_history.json
 
 # Local Environment
 .env.local
