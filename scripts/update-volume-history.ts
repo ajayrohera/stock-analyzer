@@ -1,4 +1,4 @@
-// scripts/update-volume-history.ts.
+// scripts/update-volume-history.ts
 import { KiteConnect } from 'kiteconnect';
 import fs from 'fs/promises';
 import path from 'path';
