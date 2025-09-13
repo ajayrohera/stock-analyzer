@@ -53,8 +53,16 @@ async function refreshAccessToken(kc: any, tokenData: any): Promise<any> {
   }
 }
 
+// In your update-volume-history.ts, modify getAllSymbols function
 async function getAllSymbols(): Promise<string[]> {
   try {
+    // For production (Vercel), use a hardcoded list or different approach
+    if (process.env.NODE_ENV === 'production') {
+      // Return a default set of symbols for production
+      return ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TATASTEEL', 'INFY'];
+    }
+    
+    // For development, use Google Sheets
     const auth = new google.auth.GoogleAuth({ 
       keyFile: path.join(process.cwd(), 'credentials.json'), 
       scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly' 
@@ -68,9 +76,9 @@ async function getAllSymbols(): Promise<string[]> {
     
     return response.data.values?.flat().filter(Boolean) || [];
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    console.error('❌ Error fetching symbols from sheet:', errorMessage);
-    return [];
+    console.error('Error fetching symbols, using default set:', error);
+    // Fallback to default symbols
+    return ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TATASTEEL', 'INFY'];
   }
 }
 
