@@ -9,5 +9,11 @@
     "env": {
       "NODE_OPTIONS": "--max_old_space_size=4096"
     }
-  }
+  },
+    "crons": [
+    {
+      "path": "/api/cron/update-volume",
+      "schedule": "30 16 * * *"
+    }
+  ]
 }

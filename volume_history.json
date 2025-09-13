@@ -61,6 +61,11 @@
       "date": "2025-09-10",
       "totalVolume": 1085,
       "timestamp": 1757475096597
+    },
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
     }
   ],
   "UPL": [
@@ -68,6 +73,11 @@
       "date": "2025-09-10",
       "totalVolume": 2051,
       "timestamp": 1757475113427
+    },
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
     }
   ],
   "TITAGARH RAIL SYSTEMS": [
@@ -110,6 +120,167 @@
       "date": "2025-09-11",
       "totalVolume": 540613,
       "timestamp": 1757567296629
+    }
+  ],
+  "BHEL": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "BIOCON": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "BSE": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "CIPLA": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "COFORGE": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "CYIENT": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "DELHIVERY": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "DLF": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "HFCL": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "ITC": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "LUPIN": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "MARICO": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "MPHASIS": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "NCC": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "NHPC": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "NMDC": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "NTPC": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "SIEMENS": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "SJVN": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "SRF": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "TRENT": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "VOLTAS": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
+    }
+  ],
+  "WIPRO": [
+    {
+      "date": "2025-09-13",
+      "totalVolume": 0,
+      "timestamp": 1757755056118
     }
   ]
 }
