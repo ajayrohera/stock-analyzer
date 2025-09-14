@@ -34,39 +34,50 @@ async function getRedisClient() {
   }
 }
 
+// FALLBACK: Get token from environment variable
+function getTokenFromEnv() {
+  try {
+    const envToken = process.env.KITE_TOKEN_DATA;
+    if (!envToken) return null;
+    
+    return JSON.parse(envToken);
+  } catch (error) {
+    console.error('Failed to parse token from env:', error);
+    return null;
+  }
+}
+
 export async function GET() {
   let redisClient = null;
 
   try {
-    // First, check if Redis is configured
-    if (!process.env.REDIS_URL) {
-      return NextResponse.json({
-        status: 'error',
-        message: 'REDIS_URL not configured in environment variables',
-        suggestion: 'Set REDIS_URL in Vercel dashboard → Settings → Environment Variables'
-      }, { status: 500 });
-    }
-
+    // First try Redis
     redisClient = await getRedisClient();
-    if (!redisClient) {
-      return NextResponse.json({
-        status: 'error',
-        message: 'Failed to connect to Redis',
-        redisUrl: process.env.REDIS_URL ? 'Present' : 'Missing'
-      }, { status: 500 });
+    let tokenData = null;
+
+    if (redisClient) {
+      const tokenDataStr = await redisClient.get('kite_token');
+      if (tokenDataStr) {
+        tokenData = JSON.parse(tokenDataStr);
+      }
     }
 
-    const tokenDataStr = await redisClient.get('kite_token');
-    
-    if (!tokenDataStr) {
+    // FALLBACK: If Redis fails or no token, try environment variable
+    if (!tokenData) {
+      tokenData = getTokenFromEnv();
+      if (tokenData) {
+        console.log('⚠️ Using token from environment variable fallback');
+      }
+    }
+
+    if (!tokenData) {
       return NextResponse.json({
         status: 'error',
-        message: 'No token found in Redis storage',
-        suggestion: 'Run: npx ts-node scripts/instant-auth.ts YOUR_TOKEN'
+        message: 'No token found in Redis or environment variables',
+        suggestion: 'Run authentication and set KITE_TOKEN_DATA environment variable'
       }, { status: 404 });
     }
 
-    const tokenData = JSON.parse(tokenDataStr);
     const loginTime = tokenData.loginTime || 0;
     const currentTime = Date.now();
     const tokenAgeHours = Math.floor((currentTime - loginTime) / (1000 * 60 * 60));
@@ -80,16 +91,15 @@ export async function GET() {
       tokenCreated: new Date(loginTime).toISOString(),
       willExpireIn: `${24 - tokenAgeHours} hours`,
       isFresh: tokenAgeHours < 4,
-      storage: 'redis'
+      storage: redisClient ? 'redis' : 'env_fallback' // Show source
     });
     
   } catch (error) {
     console.error('Token status error:', error);
     return NextResponse.json({
       status: 'error',
-      message: 'Failed to read token from Redis',
-      error: error instanceof Error ? error.message : 'Unknown error',
-      redisUrl: process.env.REDIS_URL ? 'Configured' : 'Not configured'
+      message: 'Failed to read token',
+      error: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   } finally {
     if (redisClient) {

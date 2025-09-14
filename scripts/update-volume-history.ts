@@ -1,6 +1,6 @@
 // scripts/update-volume-history.ts
 import { KiteConnect } from 'kiteconnect';
-import redis from 'redis'; // Default import
+import redis from 'redis';
 import fs from 'fs/promises';
 import path from 'path';
 import { google } from 'googleapis';
@@ -26,6 +26,19 @@ async function safeReadJson(filePath: string): Promise<any> {
   }
 }
 
+// Fallback: Get token from environment variable
+function getTokenFromEnv() {
+  try {
+    const envToken = process.env.KITE_TOKEN_DATA;
+    if (!envToken) return null;
+    
+    return JSON.parse(envToken);
+  } catch (error) {
+    console.error('Failed to parse token from env:', error);
+    return null;
+  }
+}
+
 // Helper function to refresh token
 async function refreshAccessToken(kc: any, tokenData: any): Promise<any> {
   try {
@@ -43,18 +56,23 @@ async function refreshAccessToken(kc: any, tokenData: any): Promise<any> {
       loginTime: Date.now()
     };
     
-    // Update Redis with new token
-    const redisClient = redis.createClient({
-      url: process.env.REDIS_URL as string,
-      password: process.env.REDIS_PASSWORD as string
-    });
+    // Try to update Redis if available
+    try {
+      const redisClient = redis.createClient({
+        url: process.env.REDIS_URL as string,
+        password: process.env.REDIS_PASSWORD as string
+      });
 
-    redisClient.on('error', (err: any) => console.log('Redis Client Error', err));
-    await redisClient.connect();
-    await redisClient.setEx('kite_token', 24 * 60 * 60, JSON.stringify(newTokenData));
-    await redisClient.quit();
+      redisClient.on('error', (err) => console.log('Redis Client Error', err));
+      await redisClient.connect();
+      await redisClient.setEx('kite_token', 24 * 60 * 60, JSON.stringify(newTokenData));
+      await redisClient.quit();
+      console.log('✅ Token refreshed and saved to Redis');
+    } catch (redisError) {
+      console.log('⚠️ Could not save to Redis, using local update');
+      // Continue without Redis
+    }
     
-    console.log('✅ Token refreshed and saved to Redis');
     return newTokenData;
   } catch (error) {
     console.error('❌ Token refresh failed:', error);
@@ -88,30 +106,50 @@ async function getAllSymbols(): Promise<string[]> {
 }
 
 async function updateVolumeHistory() {
-  let redisClient: any = null;
+  let redisClient = null;
 
   try {
     const apiKey = process.env.KITE_API_KEY;
     if (!apiKey) throw new Error('KITE_API_KEY not set');
     
-    // Connect to Redis
-    redisClient = redis.createClient({
-      url: process.env.REDIS_URL as string,
-      password: process.env.REDIS_PASSWORD as string
-    });
+    let tokenData = null;
 
-    redisClient.on('error', (err: any) => console.log('Redis Client Error', err));
-    await redisClient.connect();
-    console.log('✅ Connected to Redis');
+    // Try to connect to Redis first
+    try {
+      redisClient = redis.createClient({
+        url: process.env.REDIS_URL as string,
+        password: process.env.REDIS_PASSWORD as string
+      });
 
-    // Get token from Redis
-    const tokenDataStr = await redisClient.get('kite_token');
-    if (!tokenDataStr) {
-      throw new Error('No access token found in Redis. Please run authenticate.ts first');
+      redisClient.on('error', (err) => console.log('Redis Client Error', err));
+      await redisClient.connect();
+      console.log('✅ Connected to Redis');
+
+      // Try to get token from Redis
+      const tokenDataStr = await redisClient.get('kite_token');
+      if (tokenDataStr) {
+        tokenData = JSON.parse(tokenDataStr);
+        console.log('🔑 Token loaded from Redis');
+      }
+    } catch (redisError) {
+      console.log('⚠️ Redis connection failed, trying environment variable...');
     }
 
-    const tokenData = JSON.parse(tokenDataStr);
-    console.log('🔑 Token loaded from Redis');
+    // FALLBACK: If Redis fails or no token found, try environment variable
+    if (!tokenData) {
+      tokenData = getTokenFromEnv();
+      if (tokenData) {
+        console.log('🔑 Token loaded from environment variable fallback');
+      }
+    }
+
+    if (!tokenData) {
+      throw new Error('No access token found in Redis or environment variables. Please run authenticate.ts first');
+    }
+
+    if (!tokenData.accessToken) {
+      throw new Error('Invalid token data: access token missing');
+    }
 
     // Get all symbols to track
     const symbols = await getAllSymbols();
