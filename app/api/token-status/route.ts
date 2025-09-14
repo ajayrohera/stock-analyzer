@@ -1,27 +1,68 @@
 // app/api/token-status/route.ts
 import { NextResponse } from 'next/server';
-import redis from 'redis'; // Default import
 
-export async function GET() {
-  let redisClient: any = null;
+let redis: any = null;
+
+async function initializeRedis() {
+  if (!redis) {
+    try {
+      redis = (await import('redis')).default;
+    } catch (error) {
+      console.error('Failed to import redis:', error);
+      return null;
+    }
+  }
+  return redis;
+}
+
+async function getRedisClient() {
+  const redis = await initializeRedis();
+  if (!redis) return null;
 
   try {
-    // Create Redis client
-    redisClient = redis.createClient({
-      url: process.env.REDIS_URL!,
-      password: process.env.REDIS_PASSWORD!
+    const client = redis.createClient({
+      url: process.env.REDIS_URL,
+      password: process.env.REDIS_PASSWORD
     });
 
-    redisClient.on('error', (err: any) => console.log('Redis Client Error', err));
-    await redisClient.connect();
+    client.on('error', (err: any) => console.log('Redis Client Error', err));
+    await client.connect();
+    return client;
+  } catch (error) {
+    console.error('Redis connection failed:', error);
+    return null;
+  }
+}
 
-    // Read from Redis
+export async function GET() {
+  let redisClient = null;
+
+  try {
+    // First, check if Redis is configured
+    if (!process.env.REDIS_URL) {
+      return NextResponse.json({
+        status: 'error',
+        message: 'REDIS_URL not configured in environment variables',
+        suggestion: 'Set REDIS_URL in Vercel dashboard → Settings → Environment Variables'
+      }, { status: 500 });
+    }
+
+    redisClient = await getRedisClient();
+    if (!redisClient) {
+      return NextResponse.json({
+        status: 'error',
+        message: 'Failed to connect to Redis',
+        redisUrl: process.env.REDIS_URL ? 'Present' : 'Missing'
+      }, { status: 500 });
+    }
+
     const tokenDataStr = await redisClient.get('kite_token');
     
     if (!tokenDataStr) {
       return NextResponse.json({
         status: 'error',
-        message: 'No token found in Redis storage'
+        message: 'No token found in Redis storage',
+        suggestion: 'Run: npx ts-node scripts/instant-auth.ts YOUR_TOKEN'
       }, { status: 404 });
     }
 
@@ -43,10 +84,12 @@ export async function GET() {
     });
     
   } catch (error) {
+    console.error('Token status error:', error);
     return NextResponse.json({
       status: 'error',
       message: 'Failed to read token from Redis',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      redisUrl: process.env.REDIS_URL ? 'Configured' : 'Not configured'
     }, { status: 500 });
   } finally {
     if (redisClient) {
