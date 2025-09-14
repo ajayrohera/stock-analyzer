@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
     config.externals.push('bufferutil', 'utf-8-validate');
     return config;
   },
-  // ADD THESE LINES TO IGNORE BUILD ERRORS
+  // ADD THESE LINES TO IGNORE BUILD ERRORS.
   eslint: {
     ignoreDuringBuilds: true,
   },
