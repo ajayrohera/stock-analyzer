@@ -1,16 +1,12 @@
-// scripts/update-volume-history.ts.
+// scripts/update-volume-history.ts
 import { KiteConnect } from 'kiteconnect';
 import fs from 'fs/promises';
 import path from 'path';
-import { google } from 'googleapis';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
 
-// ES module equivalent of __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+console.log('🔍 DEBUG: Script started');
 
-// Load environment variables from .env.local
+// Load environment variables
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
 const tokenPath = path.join(process.cwd(), 'kite_token.json');
@@ -22,89 +18,39 @@ async function safeReadJson(filePath: string): Promise<any> {
     const data = await fs.readFile(filePath, 'utf-8');
     return JSON.parse(data);
   } catch (error) {
+    console.log(`❌ Failed to read ${filePath}:`, error);
     return {};
   }
 }
 
-// Helper function to refresh token - using type assertion to avoid TypeScript errors
-async function refreshAccessToken(kc: any, tokenData: any): Promise<any> {
-  try {
-    console.log('🔄 Token expired, attempting refresh...');
-    
-    if (!process.env.KITE_API_SECRET) {
-      throw new Error('KITE_API_SECRET not set for token refresh');
-    }
-
-    // Use type assertion to access renewAccessToken method
-    const refreshResponse = await kc.renewAccessToken(tokenData.refreshToken, process.env.KITE_API_SECRET!);
-    
-    const newTokenData = {
-      accessToken: refreshResponse.access_token,
-      refreshToken: refreshResponse.refresh_token,
-      loginTime: Date.now()
-    };
-    
-    await fs.writeFile(tokenPath, JSON.stringify(newTokenData, null, 2));
-    console.log('✅ Token refreshed successfully');
-    return newTokenData;
-  } catch (error) {
-    console.error('❌ Token refresh failed:', error);
-    throw new Error('Token refresh failed. Please re-authenticate by running authenticate.ts');
-  }
-}
-
-// In your update-volume-history.ts, modify getAllSymbols function
 async function getAllSymbols(): Promise<string[]> {
-  try {
-    // For production (Vercel), use a hardcoded list or different approach
-    if (process.env.NODE_ENV === 'production') {
-      // Return a default set of symbols for production
-      return ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TATASTEEL', 'INFY'];
-    }
-    
-    // For development, use Google Sheets
-    const auth = new google.auth.GoogleAuth({ 
-      keyFile: path.join(process.cwd(), 'credentials.json'), 
-      scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly' 
-    });
-    
-    const sheets = google.sheets({ version: 'v4', auth });
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU',
-      range: 'stocks!A2:A',
-    });
-    
-    return response.data.values?.flat().filter(Boolean) || [];
-  } catch (error) {
-    console.error('Error fetching symbols, using default set:', error);
-    // Fallback to default symbols
-    return ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TATASTEEL', 'INFY'];
-  }
+  return ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TATASTEEL, INFY'];
 }
 
 async function updateVolumeHistory() {
   try {
+    console.log('🔍 DEBUG: Starting volume history update');
+    
     const apiKey = process.env.KITE_API_KEY;
     if (!apiKey) throw new Error('KITE_API_KEY not set');
     
-    // Get all symbols to track
-    const symbols = await getAllSymbols();
-    if (symbols.length === 0) throw new Error('No symbols found');
-    
-    console.log(`📊 Found ${symbols.length} symbols to update`);
-    
-    // Initialize KiteConnect
     const tokenData = await safeReadJson(tokenPath);
     if (!tokenData.accessToken) {
       throw new Error('No access token found. Please run authenticate.ts first');
     }
     
-    // Initialize with type assertion to avoid TypeScript errors
+    if (!tokenData.refreshToken) {
+      console.log('⚠️  WARNING: No refresh token found - token cannot be auto-refreshed');
+    }
+    
+    const symbols = await getAllSymbols();
+    console.log('📊 Updating volume data for:', symbols.join(', '));
+    
+    // Initialize KiteConnect
     const kc = new KiteConnect({
       api_key: apiKey
     }) as any;
     
-    // Set access token
     kc.setAccessToken(tokenData.accessToken);
     
     // Load existing history
@@ -121,22 +67,18 @@ async function updateVolumeHistory() {
         // Determine exchange based on symbol type
         const exchange = (symbol === 'NIFTY' || symbol === 'BANKNIFTY') ? 'NFO' : 'NSE';
         const tradingsymbol = symbol;
+        const instrumentId = `${exchange}:${tradingsymbol}`;
         
         let quote;
         try {
-          quote = await kc.getQuote([`${exchange}:${tradingsymbol}`]);
+          quote = await kc.getQuote([instrumentId]);
         } catch (error: any) {
-          // If token expired, refresh and retry
-          if (error.message.includes('token') || error.message.includes('expired') || error.message.includes('invalid') || error.message.includes('401')) {
-            const newTokenData = await refreshAccessToken(kc, tokenData);
-            kc.setAccessToken(newTokenData.accessToken);
-            quote = await kc.getQuote([`${exchange}:${tradingsymbol}`]);
-          } else {
-            throw error;
-          }
+          console.error(`❌ Failed to get quote for ${symbol}:`, error.message);
+          failedCount++;
+          continue;
         }
         
-        const data = quote[`${exchange}:${tradingsymbol}`];
+        const data = quote[instrumentId];
         
         if (data && data.volume !== undefined) {
           if (!history[symbol]) history[symbol] = [];
@@ -159,7 +101,7 @@ async function updateVolumeHistory() {
           process.stdout.write(`✅ ${symbol} `);
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error(`\n❌ Failed to update ${symbol}:`, errorMessage);
         failedCount++;
       }
@@ -173,21 +115,10 @@ async function updateVolumeHistory() {
     }
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    console.error('❌ Volume update failed:', errorMessage);
-    
-    // If it's a token error, we need manual reauthentication
-    if (errorMessage.includes('token') || errorMessage.includes('expired') || errorMessage.includes('invalid')) {
-      console.log('\n⚠️  Token needs manual refresh. Please run: npx ts-node scripts/authenticate.ts');
-    }
-    
-    process.exit(1);
+    console.error('❌ Error in updateVolumeHistory:', error);
   }
 }
 
-// ES module way to check if this is the main module
-if (import.meta.url === `file://${process.argv[1]}`) {
-  updateVolumeHistory();
-}
-
-export { updateVolumeHistory };
+// Simple execution
+console.log('🚀 Starting update process');
+updateVolumeHistory();
