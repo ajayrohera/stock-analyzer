@@ -15,5 +15,13 @@
       "path": "/api/cron/update-volume",
       "schedule": "30 16 * * *"
     }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "headers": {
+        "Cache-Control": "no-store, no-cache, must-revalidate"
+      }
+    }
   ]
 }
