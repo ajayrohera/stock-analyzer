@@ -1,17 +1,18 @@
 // app/api/token-status/route.ts
 import { NextResponse } from 'next/server';
-import { createClient } from 'redis';
+import redis from 'redis'; // Default import
 
 export async function GET() {
-  let redisClient;
+  let redisClient: any = null;
 
   try {
     // Create Redis client
-    redisClient = createClient({
+    redisClient = redis.createClient({
       url: process.env.REDIS_URL!,
       password: process.env.REDIS_PASSWORD!
     });
 
+    redisClient.on('error', (err: any) => console.log('Redis Client Error', err));
     await redisClient.connect();
 
     // Read from Redis
@@ -38,7 +39,7 @@ export async function GET() {
       tokenCreated: new Date(loginTime).toISOString(),
       willExpireIn: `${24 - tokenAgeHours} hours`,
       isFresh: tokenAgeHours < 4,
-      storage: 'redis' // Now using Redis!
+      storage: 'redis'
     });
     
   } catch (error) {

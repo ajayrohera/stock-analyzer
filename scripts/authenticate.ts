@@ -1,6 +1,6 @@
 // scripts/authenticate.ts
 import { KiteConnect } from 'kiteconnect';
-import { createClient, RedisClientType } from 'redis';
+import redis from 'redis'; // Default import
 import http from 'http';
 import url from 'url';
 import dotenv from 'dotenv';
@@ -17,16 +17,18 @@ if (!API_KEY) {
 }
 
 async function authenticate() {
-  let redisClient: RedisClientType | null = null;
+  let redisClient: any = null;
   let server: http.Server | null = null;
 
   try {
-    // Create Redis client with proper typing
-    redisClient = createClient({
+    // Create Redis client with default import
+    redisClient = redis.createClient({
       url: REDIS_URL as string,
       password: REDIS_PASSWORD as string
-    }) as RedisClientType;
+    });
 
+    redisClient.on('error', (err: any) => console.log('Redis Client Error', err));
+    
     await redisClient.connect();
     console.log('✅ Connected to Redis');
 
@@ -63,7 +65,7 @@ async function authenticate() {
             };
 
             // Save to Redis with 24-hour expiration
-            await redisClient!.setEx('kite_token', 24 * 60 * 60, JSON.stringify(tokenData));
+            await redisClient.setEx('kite_token', 24 * 60 * 60, JSON.stringify(tokenData));
             console.log('✅ Token saved to Redis with 24-hour expiration');
 
             res.writeHead(200, { 'Content-Type': 'text/html' });

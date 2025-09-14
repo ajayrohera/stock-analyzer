@@ -1,6 +1,6 @@
 // scripts/update-volume-history.ts
 import { KiteConnect } from 'kiteconnect';
-import { createClient, RedisClientType } from 'redis';
+import redis from 'redis'; // Default import
 import fs from 'fs/promises';
 import path from 'path';
 import { google } from 'googleapis';
@@ -44,11 +44,12 @@ async function refreshAccessToken(kc: any, tokenData: any): Promise<any> {
     };
     
     // Update Redis with new token
-    const redisClient = createClient({
+    const redisClient = redis.createClient({
       url: process.env.REDIS_URL as string,
       password: process.env.REDIS_PASSWORD as string
-    }) as RedisClientType;
-    
+    });
+
+    redisClient.on('error', (err: any) => console.log('Redis Client Error', err));
     await redisClient.connect();
     await redisClient.setEx('kite_token', 24 * 60 * 60, JSON.stringify(newTokenData));
     await redisClient.quit();
@@ -87,18 +88,19 @@ async function getAllSymbols(): Promise<string[]> {
 }
 
 async function updateVolumeHistory() {
-  let redisClient: RedisClientType | null = null;
+  let redisClient: any = null;
 
   try {
     const apiKey = process.env.KITE_API_KEY;
     if (!apiKey) throw new Error('KITE_API_KEY not set');
     
     // Connect to Redis
-    redisClient = createClient({
+    redisClient = redis.createClient({
       url: process.env.REDIS_URL as string,
       password: process.env.REDIS_PASSWORD as string
-    }) as RedisClientType;
-    
+    });
+
+    redisClient.on('error', (err: any) => console.log('Redis Client Error', err));
     await redisClient.connect();
     console.log('✅ Connected to Redis');
 
