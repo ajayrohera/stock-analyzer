@@ -107,7 +107,7 @@ async function updateVolumeHistory() {
       }
     }
     
-    // Save updated history
+    // Save updated history.
     await fs.writeFile(volumeHistoryPath, JSON.stringify(history, null, 2));
     console.log(`\n\n📈 Successfully updated volume history for ${updatedCount}/${symbols.length} symbols`);
     if (failedCount > 0) {
