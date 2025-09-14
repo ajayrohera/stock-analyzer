@@ -1,50 +1,55 @@
-// app/api/token-status/route.ts.
+// app/api/token-status/route.ts
 import { NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { createClient } from 'redis';
 
 export async function GET() {
+  let redisClient;
+
   try {
-    const tokenPath = path.join(process.cwd(), 'kite_token.json');
+    // Create Redis client
+    redisClient = createClient({
+      url: process.env.REDIS_URL!,
+      password: process.env.REDIS_PASSWORD!
+    });
+
+    await redisClient.connect();
+
+    // Read from Redis
+    const tokenDataStr = await redisClient.get('kite_token');
     
-    // Read the token file from Vercel's file system
-    let tokenData;
-    try {
-      const fileContent = await fs.readFile(tokenPath, 'utf-8');
-      tokenData = JSON.parse(fileContent);
-    } catch (error) {
+    if (!tokenDataStr) {
       return NextResponse.json({
         status: 'error',
-        message: 'Token file not found or invalid',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      }, { status: 500 });
+        message: 'No token found in Redis storage'
+      }, { status: 404 });
     }
 
-    // Check token age
+    const tokenData = JSON.parse(tokenDataStr);
     const loginTime = tokenData.loginTime || 0;
     const currentTime = Date.now();
     const tokenAgeHours = Math.floor((currentTime - loginTime) / (1000 * 60 * 60));
-    
-    // Check if token has refresh capability
-    const hasRefreshToken = !!tokenData.refreshToken;
-    
+
     return NextResponse.json({
       status: 'success',
       tokenExists: true,
       accessTokenPresent: !!tokenData.accessToken,
-      refreshTokenPresent: hasRefreshToken,
+      refreshTokenPresent: !!tokenData.refreshToken,
       tokenAgeHours: tokenAgeHours,
       tokenCreated: new Date(loginTime).toISOString(),
       willExpireIn: `${24 - tokenAgeHours} hours`,
-      isFresh: tokenAgeHours < 4, // Less than 4 hours old
-      fileLastModified: (await fs.stat(tokenPath)).mtime.toISOString()
+      isFresh: tokenAgeHours < 4,
+      storage: 'redis' // Now using Redis!
     });
     
   } catch (error) {
     return NextResponse.json({
       status: 'error',
-      message: 'Failed to check token status',
+      message: 'Failed to read token from Redis',
       error: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
+  } finally {
+    if (redisClient) {
+      await redisClient.quit();
+    }
   }
 }
