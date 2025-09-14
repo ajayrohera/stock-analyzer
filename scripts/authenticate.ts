@@ -5,7 +5,7 @@ import path from 'path';
 import readline from 'readline';
 import dotenv from 'dotenv';
 
-// Load environment variables from .env.local
+// Load environment variables
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
 const tokenPath = path.join(process.cwd(), 'kite_token.json');
@@ -13,26 +13,21 @@ const tokenPath = path.join(process.cwd(), 'kite_token.json');
 async function authenticate() {
   const apiKey = process.env.KITE_API_KEY;
   if (!apiKey) {
-    console.error('❌ KITE_API_KEY not set in environment variables');
-    console.error('💡 Make sure you have a .env.local file with KITE_API_KEY and KITE_API_SECRET');
+    console.error('❌ KITE_API_KEY not set');
     process.exit(1);
   }
 
   if (!process.env.KITE_API_SECRET) {
-    console.error('❌ KITE_API_SECRET not set in environment variables');
+    console.error('❌ KITE_API_SECRET not set');
     process.exit(1);
   }
 
   try {
-    // Initialize KiteConnect
-    const kc = new KiteConnect({
-      api_key: apiKey
-    });
+    const kc = new KiteConnect({ api_key: apiKey });
     
     console.log('🔗 Please visit this URL to authenticate:');
     console.log(kc.getLoginURL());
-    console.log('\n📋 After logging in, you will be redirected to a URL.');
-    console.log('💡 Copy the "request_token" parameter from that URL and paste it below.');
+    console.log('\n📋 After logging in, copy the "request_token" from the redirect URL');
     
     const rl = readline.createInterface({
       input: process.stdin,
@@ -41,8 +36,19 @@ async function authenticate() {
     
     rl.question('📝 Request token: ', async (requestToken) => {
       try {
-        // Use generateSession for initial authentication
+        console.log('🔄 Generating session...');
+        
+        // For kiteconnect v5.1.0, use generateSession
         const sessionData = await kc.generateSession(requestToken, process.env.KITE_API_SECRET!);
+        
+        console.log('✅ Session data received:', {
+          access_token_length: sessionData.access_token?.length,
+          refresh_token_length: sessionData.refresh_token?.length
+        });
+        
+        if (!sessionData.refresh_token) {
+          throw new Error('No refresh token received from Kite Connect');
+        }
         
         const tokenData = {
           accessToken: sessionData.access_token,
@@ -51,22 +57,15 @@ async function authenticate() {
         };
         
         await fs.writeFile(tokenPath, JSON.stringify(tokenData, null, 2));
-        console.log('\n✅ Authentication successful!');
-        console.log('✅ Token saved to:', tokenPath);
-        console.log('✅ Access Token:', sessionData.access_token.substring(0, 20) + '...');
-        console.log('✅ Refresh Token:', sessionData.refresh_token.substring(0, 20) + '...');
-        console.log('\n🚀 You can now run the volume update script.');
+        console.log('✅ Token saved successfully!');
+        console.log('✅ Access Token:', tokenData.accessToken.substring(0, 20) + '...');
+        console.log('✅ Refresh Token:', tokenData.refreshToken.substring(0, 20) + '...');
         
         rl.close();
         process.exit(0);
         
       } catch (error) {
-        console.error('\n❌ Authentication failed:');
-        if (error instanceof Error) {
-          console.error('Error:', error.message);
-        } else {
-          console.error('Unknown error:', error);
-        }
+        console.error('❌ Authentication failed:', error);
         rl.close();
         process.exit(1);
       }
@@ -78,8 +77,4 @@ async function authenticate() {
   }
 }
 
-// Run authentication
-authenticate().catch(error => {
-  console.error('Fatal error:', error);
-  process.exit(1);
-});
+authenticate().catch(console.error);
