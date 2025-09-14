@@ -93,7 +93,7 @@ async function authenticate() {
     });
 
     server.listen(3000, () => {
-      console.log('🌐 Authentication server running on http://localhost:3000');
+      console.log('🌐 Authentication server running on http://localhost:3001');
     });
 
   } catch (error: any) {

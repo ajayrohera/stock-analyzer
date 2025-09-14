@@ -34,7 +34,7 @@ async function getRedisClient() {
   }
 }
 
-// FALLBACK: Get token from environment variable
+// Fallback: Get token from environment variable
 function getTokenFromEnv() {
   try {
     const envToken = process.env.KITE_TOKEN_DATA;
@@ -47,27 +47,89 @@ function getTokenFromEnv() {
   }
 }
 
+// Validate token consistency between sources
+function validateTokenConsistency(redisToken: any, envToken: any): boolean {
+  if (redisToken && envToken) {
+    const redisAccess = redisToken.accessToken || '';
+    const envAccess = envToken.accessToken || '';
+    
+    if (redisAccess && envAccess && redisAccess !== envAccess) {
+      console.warn('⚠️ Token mismatch between Redis and environment variable');
+      console.warn('   Redis token:', redisAccess.substring(0, 10) + '...');
+      console.warn('   Env token:  ', envAccess.substring(0, 10) + '...');
+      
+      const redisTime = redisToken.loginTime || 0;
+      const envTime = envToken.loginTime || 0;
+      console.warn('   Redis token age:', Math.floor((Date.now() - redisTime) / (1000 * 60 * 60)) + 'h');
+      console.warn('   Env token age:  ', Math.floor((Date.now() - envTime) / (1000 * 60 * 60)) + 'h');
+      
+      return false;
+    }
+  }
+  return true;
+}
+
+// Synchronize tokens between sources
+async function synchronizeTokens(redisClient: any, redisToken: any, envToken: any) {
+  if (!redisToken || !envToken) return;
+  
+  const redisTime = redisToken.loginTime || 0;
+  const envTime = envToken.loginTime || 0;
+  
+  // If environment is newer, update Redis
+  if (envTime > redisTime + 60000 && redisClient) { // 1 minute threshold
+    try {
+      await redisClient.setEx('kite_token', 24 * 60 * 60, JSON.stringify(envToken));
+      console.log('🔄 Updated Redis with newer environment token');
+    } catch (error) {
+      console.log('⚠️ Could not update Redis with newer token:', error);
+    }
+  }
+}
+
 export async function GET() {
   let redisClient = null;
 
   try {
-    // First try Redis
-    redisClient = await getRedisClient();
-    let tokenData = null;
+    let redisToken = null;
+    let envToken = null;
 
+    // Try to get token from Redis first
+    redisClient = await getRedisClient();
     if (redisClient) {
       const tokenDataStr = await redisClient.get('kite_token');
       if (tokenDataStr) {
-        tokenData = JSON.parse(tokenDataStr);
+        redisToken = JSON.parse(tokenDataStr);
       }
     }
 
-    // FALLBACK: If Redis fails or no token, try environment variable
-    if (!tokenData) {
-      tokenData = getTokenFromEnv();
-      if (tokenData) {
-        console.log('⚠️ Using token from environment variable fallback');
+    // Fallback: Try environment variable
+    envToken = getTokenFromEnv();
+
+    // Validate consistency and synchronize if needed
+    if (redisToken && envToken) {
+      validateTokenConsistency(redisToken, envToken);
+      
+      if (redisClient) {
+        await synchronizeTokens(redisClient, redisToken, envToken);
       }
+    }
+
+    let tokenData = null;
+    let storageSource = 'unknown';
+
+    // Choose the appropriate token source
+    if (redisToken && envToken) {
+      const redisTime = redisToken.loginTime || 0;
+      const envTime = envToken.loginTime || 0;
+      tokenData = redisTime > envTime ? redisToken : envToken;
+      storageSource = redisTime > envTime ? 'redis' : 'env';
+    } else if (redisToken) {
+      tokenData = redisToken;
+      storageSource = 'redis';
+    } else if (envToken) {
+      tokenData = envToken;
+      storageSource = 'env';
     }
 
     if (!tokenData) {
@@ -91,7 +153,11 @@ export async function GET() {
       tokenCreated: new Date(loginTime).toISOString(),
       willExpireIn: `${24 - tokenAgeHours} hours`,
       isFresh: tokenAgeHours < 4,
-      storage: redisClient ? 'redis' : 'env_fallback' // Show source
+      storage: storageSource,
+      sourcesAvailable: {
+        redis: !!redisToken,
+        environment: !!envToken
+      }
     });
     
   } catch (error) {
@@ -99,7 +165,8 @@ export async function GET() {
     return NextResponse.json({
       status: 'error',
       message: 'Failed to read token',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      redisAvailable: !!redisClient
     }, { status: 500 });
   } finally {
     if (redisClient) {

@@ -39,6 +39,47 @@ function getTokenFromEnv() {
   }
 }
 
+// Validate token consistency between sources
+function validateTokenConsistency(redisToken: any, envToken: any): void {
+  if (redisToken && envToken) {
+    const redisAccess = redisToken.accessToken || '';
+    const envAccess = envToken.accessToken || '';
+    
+    if (redisAccess && envAccess && redisAccess !== envAccess) {
+      console.warn('⚠️ Token mismatch between Redis and environment variable');
+      
+      const redisTime = redisToken.loginTime || 0;
+      const envTime = envToken.loginTime || 0;
+      console.warn('   Redis token age:', Math.floor((Date.now() - redisTime) / (1000 * 60 * 60)) + 'h');
+      console.warn('   Env token age:  ', Math.floor((Date.now() - envTime) / (1000 * 60 * 60)) + 'h');
+      
+      if (redisTime > envTime) {
+        console.log('   Using Redis token (newer)');
+      } else {
+        console.log('   Using env token (newer)');
+      }
+    }
+  }
+}
+
+// Synchronize tokens between sources
+async function synchronizeTokens(redisClient: any, redisToken: any, envToken: any) {
+  if (!redisToken || !envToken) return;
+  
+  const redisTime = redisToken.loginTime || 0;
+  const envTime = envToken.loginTime || 0;
+  
+  // If environment is newer, update Redis
+  if (envTime > redisTime + 60000 && redisClient) { // 1 minute threshold
+    try {
+      await redisClient.setEx('kite_token', 24 * 60 * 60, JSON.stringify(envToken));
+      console.log('🔄 Updated Redis with newer environment token');
+    } catch (error) {
+      console.log('⚠️ Could not update Redis with newer token:', error);
+    }
+  }
+}
+
 // Helper function to refresh token
 async function refreshAccessToken(kc: any, tokenData: any): Promise<any> {
   try {
@@ -69,8 +110,7 @@ async function refreshAccessToken(kc: any, tokenData: any): Promise<any> {
       await redisClient.quit();
       console.log('✅ Token refreshed and saved to Redis');
     } catch (redisError) {
-      console.log('⚠️ Could not save to Redis, using local update');
-      // Continue without Redis
+      console.log('⚠️ Could not save to Redis, token refreshed in memory only');
     }
     
     return newTokenData;
@@ -112,6 +152,8 @@ async function updateVolumeHistory() {
     const apiKey = process.env.KITE_API_KEY;
     if (!apiKey) throw new Error('KITE_API_KEY not set');
     
+    let redisToken = null;
+    let envToken = null;
     let tokenData = null;
 
     // Try to connect to Redis first
@@ -128,19 +170,36 @@ async function updateVolumeHistory() {
       // Try to get token from Redis
       const tokenDataStr = await redisClient.get('kite_token');
       if (tokenDataStr) {
-        tokenData = JSON.parse(tokenDataStr);
-        console.log('🔑 Token loaded from Redis');
+        redisToken = JSON.parse(tokenDataStr);
       }
     } catch (redisError) {
       console.log('⚠️ Redis connection failed, trying environment variable...');
     }
 
-    // FALLBACK: If Redis fails or no token found, try environment variable
-    if (!tokenData) {
-      tokenData = getTokenFromEnv();
-      if (tokenData) {
-        console.log('🔑 Token loaded from environment variable fallback');
+    // Get environment token
+    envToken = getTokenFromEnv();
+
+    // Validate consistency and synchronize if needed
+    if (redisToken && envToken) {
+      validateTokenConsistency(redisToken, envToken);
+      
+      if (redisClient) {
+        await synchronizeTokens(redisClient, redisToken, envToken);
       }
+    }
+
+    // Choose the appropriate token source
+    if (redisToken && envToken) {
+      const redisTime = redisToken.loginTime || 0;
+      const envTime = envToken.loginTime || 0;
+      tokenData = redisTime > envTime ? redisToken : envToken;
+      console.log(`🔑 Using ${redisTime > envTime ? 'Redis' : 'environment'} token`);
+    } else if (redisToken) {
+      tokenData = redisToken;
+      console.log('🔑 Using Redis token');
+    } else if (envToken) {
+      tokenData = envToken;
+      console.log('🔑 Using environment token');
     }
 
     if (!tokenData) {
