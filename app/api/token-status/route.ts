@@ -87,6 +87,36 @@ async function synchronizeTokens(redisClient: any, redisToken: any, envToken: an
   }
 }
 
+// REAL validation with Kite servers - FIXED TYPES
+async function validateTokenWithKite(accessToken: string): Promise<{ isValid: boolean; error: string; user: string | null }> {
+  try {
+    const apiKey = process.env.KITE_API_KEY;
+    if (!apiKey) {
+      return { isValid: false, error: 'KITE_API_KEY not configured', user: null };
+    }
+
+    const { KiteConnect } = await import('kiteconnect');
+    const kc = new KiteConnect({ api_key: apiKey }) as any;
+    kc.setAccessToken(accessToken);
+
+    // Test with actual Kite API call
+    const profile = await kc.getProfile();
+    
+    return { 
+      isValid: true,
+      error: '',
+      user: profile.user_name || null
+    };
+    
+  } catch (error: any) {
+    return { 
+      isValid: false, 
+      error: error.message || 'Kite API validation failed',
+      user: null
+    };
+  }
+}
+
 export async function GET() {
   let redisClient = null;
 
@@ -136,13 +166,18 @@ export async function GET() {
       return NextResponse.json({
         status: 'error',
         message: 'No token found in Redis or environment variables',
-        suggestion: 'Run authentication and set KITE_TOKEN_DATA environment variable'
+        suggestion: 'Run authentication and set KITE_TOKEN_DATA environment variable',
+        timestamp: new Date().toISOString()
       }, { status: 404 });
     }
 
     const loginTime = tokenData.loginTime || 0;
     const currentTime = Date.now();
     const tokenAgeHours = Math.floor((currentTime - loginTime) / (1000 * 60 * 60));
+    const hoursUntilExpiry = Math.max(0, 24 - tokenAgeHours);
+
+    // REAL validation with Kite servers
+    const kiteValidation = await validateTokenWithKite(tokenData.accessToken || '');
 
     return NextResponse.json({
       status: 'success',
@@ -151,13 +186,19 @@ export async function GET() {
       refreshTokenPresent: !!tokenData.refreshToken,
       tokenAgeHours: tokenAgeHours,
       tokenCreated: new Date(loginTime).toISOString(),
-      willExpireIn: `${24 - tokenAgeHours} hours`,
+      willExpireIn: `${hoursUntilExpiry} hours`,
       isFresh: tokenAgeHours < 4,
       storage: storageSource,
       sourcesAvailable: {
         redis: !!redisToken,
         environment: !!envToken
-      }
+      },
+      // NEW: Real validation fields
+      kiteValidation: kiteValidation.isValid ? 'valid' : 'invalid',
+      actuallyValid: kiteValidation.isValid,
+      validationError: kiteValidation.error,
+      user: kiteValidation.user,
+      timestamp: new Date().toISOString()
     });
     
   } catch (error) {
@@ -166,7 +207,8 @@ export async function GET() {
       status: 'error',
       message: 'Failed to read token',
       error: error instanceof Error ? error.message : 'Unknown error',
-      redisAvailable: !!redisClient
+      redisAvailable: !!redisClient,
+      timestamp: new Date().toISOString()
     }, { status: 500 });
   } finally {
     if (redisClient) {

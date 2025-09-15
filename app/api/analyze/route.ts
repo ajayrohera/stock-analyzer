@@ -31,6 +31,29 @@ interface Instrument {
     expiry: string;
 }
 
+interface HistoricalData {
+  date: string;
+  totalVolume: number;
+  lastPrice?: number;
+  timestamp: number;
+}
+
+interface SupportResistanceLevel {
+  price: number;
+  strength: 'weak' | 'medium' | 'strong';
+  type: 'support' | 'resistance';
+}
+
+// Stock-specific psychological levels
+const psychologicalLevels: Record<string, number[]> = {
+  'LAURUSLABS': [800, 850, 860, 900, 950, 1000],
+  'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
+  'INFY': [1400, 1500, 1600, 1700, 1800],
+  'TATASTEEL': [120, 130, 140, 150, 160],
+  'NIFTY': [24000, 24500, 25000, 25500, 26000],
+  'BANKNIFTY': [52000, 53000, 54000, 55000, 56000],
+};
+
 // Initialize Redis client
 const redis = createClient({
   url: process.env.REDIS_URL,
@@ -38,6 +61,166 @@ const redis = createClient({
 
 // Connect to Redis
 redis.connect().catch(console.error);
+
+// --- HELPER FUNCTIONS ---
+async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
+  try {
+    const historyData = await redis.get('volume_history');
+    if (!historyData) return [];
+    
+    const history = JSON.parse(historyData as string);
+    return history[symbol] || [];
+  } catch (error) {
+    console.error('Error reading historical data:', error);
+    return [];
+  }
+}
+
+function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
+  if (!historicalData.length || !currentPrice) return 0;
+  
+  // Get the most recent previous day's data (excluding today if it exists)
+  const previousDays = historicalData.filter(entry => {
+    const entryDate = new Date(entry.date);
+    const today = new Date();
+    return entryDate.getDate() !== today.getDate() || 
+           entryDate.getMonth() !== today.getMonth() ||
+           entryDate.getFullYear() !== today.getFullYear();
+  });
+  
+  if (previousDays.length === 0) return 0;
+  
+  // Sort by date descending and get the latest previous close
+  previousDays.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const previousClose = previousDays[0]?.lastPrice;
+  
+  if (!previousClose) return 0;
+  
+  return ((currentPrice - previousClose) / previousClose) * 100;
+}
+
+function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
+  if (!historicalData.length) return {};
+  
+  // Calculate 20-day average volume (excluding today)
+  const recentData = historicalData
+    .filter(entry => entry.totalVolume > 0)
+    .slice(0, 20);
+  
+  if (recentData.length === 0) return {};
+  
+  const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
+  const avg20DayVolume = totalVolume / recentData.length;
+  
+  let todayVolumePercentage = 0;
+  let estimatedTodayVolume = 0;
+  
+  if (currentVolume && currentVolume > 0) {
+    // Calculate percentage of daily average (even if market is still open)
+    const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
+      (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25; // Default to full day if outside market hours
+    
+    const expectedDailyVolume = avg20DayVolume * (marketProgress / 6.25);
+    todayVolumePercentage = (currentVolume / expectedDailyVolume) * 100;
+    estimatedTodayVolume = currentVolume * (6.25 / marketProgress);
+  }
+  
+  return {
+    avg20DayVolume: Math.round(avg20DayVolume),
+    todayVolumePercentage: parseFloat(todayVolumePercentage.toFixed(1)),
+    estimatedTodayVolume: Math.round(estimatedTodayVolume)
+  };
+}
+
+function calculateSupportResistance(
+  history: HistoricalData[],
+  currentPrice: number
+): SupportResistanceLevel[] {
+  if (!history || history.length === 0 || !currentPrice) return [];
+  
+  const levels: SupportResistanceLevel[] = [];
+  const priceLevels = new Map<number, number>();
+  
+  // Analyze price levels with volume concentration
+  history.forEach(entry => {
+    if (entry.lastPrice) {
+      const roundedPrice = Math.round(entry.lastPrice / 5) * 5; // Group nearby prices
+      const volume = priceLevels.get(roundedPrice) || 0;
+      priceLevels.set(roundedPrice, volume + (entry.totalVolume || 0));
+    }
+  });
+  
+  // Convert to array and sort by volume
+  const sortedLevels = Array.from(priceLevels.entries())
+    .sort((a, b) => b[1] - a[1]) // Sort by volume descending
+    .slice(0, 10); // Top 10 levels
+  
+  // Classify as support or resistance
+  sortedLevels.forEach(([price, volume]) => {
+    const distancePercent = Math.abs((price - currentPrice) / currentPrice) * 100;
+    
+    // Only consider levels within 20% of current price
+    if (distancePercent <= 20) {
+      let strength: 'weak' | 'medium' | 'strong' = 'weak';
+      
+      // Determine strength based on volume percentile
+      const maxVolume = Math.max(...sortedLevels.map(l => l[1]));
+      const volumeRatio = volume / maxVolume;
+      
+      if (volumeRatio > 0.7) strength = 'strong';
+      else if (volumeRatio > 0.4) strength = 'medium';
+      
+      levels.push({
+        price,
+        strength,
+        type: price < currentPrice ? 'support' : 'resistance'
+      });
+    }
+  });
+  
+  return levels;
+}
+
+function calculateEnhancedSupportResistance(
+  symbol: string,
+  history: HistoricalData[],
+  currentPrice: number
+): SupportResistanceLevel[] {
+  const baseLevels = calculateSupportResistance(history, currentPrice);
+  
+  // Add psychological levels for this specific stock
+  const psychLevels = psychologicalLevels[symbol.toUpperCase()] || [];
+  const stockSpecificLevels: SupportResistanceLevel[] = [];
+  
+  psychLevels.forEach(level => {
+    const distancePercent = Math.abs(level - currentPrice) / currentPrice * 100;
+    if (distancePercent <= 20) { // Within 20% of current price
+      const existingLevel = baseLevels.find(l => Math.abs(l.price - level) <= 10);
+      
+      if (!existingLevel) {
+        stockSpecificLevels.push({
+          price: level,
+          strength: 'medium', // Psychological levels are usually medium strength
+          type: level < currentPrice ? 'support' : 'resistance'
+        });
+      } else {
+        // Enhance existing level if it's near a psychological level
+        existingLevel.strength = 'strong';
+      }
+    }
+  });
+  
+  // Merge and deduplicate levels
+  const allLevels = [...baseLevels, ...stockSpecificLevels];
+  const uniqueLevels = allLevels.filter((level, index, array) =>
+    index === array.findIndex(l => Math.abs(l.price - level.price) <= 5)
+  );
+  
+  // Sort by proximity to current price
+  return uniqueLevels
+    .sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice))
+    .slice(0, 5); // Return top 5 closest levels
+}
 
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
@@ -104,12 +287,21 @@ export async function POST(request: Request) {
     }
     
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
-    const ltpQuote: LtpQuote = await kc.getLTP([`${exchange}:${tradingSymbol}`]);
-    const ltp = ltpQuote[`${exchange}:${tradingSymbol}`]?.last_price || 0;
+
+    // Get quote data for the main symbol to get volume (FIXED: using getQuote instead of getLTP)
+    const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
+    const ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
+    const currentVolume = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.volume;
+
     if (ltp === 0) {
         return NextResponse.json({ error: `Could not fetch live price for '${tradingSymbol}'.` }, { status: 404 });
     }
     
+    // Get historical data for change percent and support/resistance
+    const historicalData = await getHistoricalData(displayName.toUpperCase());
+    const changePercent = calculateChangePercent(ltp, historicalData);
+    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume); // Pass currentVolume here
+
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
 
@@ -160,24 +352,33 @@ export async function POST(request: Request) {
         if (otmPuts.length > 0) support = otmPuts[otmPuts.length - 1];
     }
     
-    let supportStrength = "Weak";
-    if (support > 0) {
-        const putsAtSupport = optionsByStrike[support]?.pe_oi || 0;
-        const callsAtSupport = optionsByStrike[support]?.ce_oi || 1;
-        const ratio = putsAtSupport / callsAtSupport;
-        if (ratio > 3) supportStrength = "Very Strong"; else if (ratio > 1.5) supportStrength = "Strong"; else if (ratio > 1) supportStrength = "Moderate";
-    }
+    // Calculate enhanced support/resistance
+    const supportResistanceLevels = calculateEnhancedSupportResistance(
+      displayName.toUpperCase(),
+      historicalData,
+      ltp
+    );
     
-    let resistanceStrength = "Weak";
-    if (resistance > 0) {
-        const callsAtResistance = optionsByStrike[resistance]?.ce_oi || 0;
-        const putsAtResistance = optionsByStrike[resistance]?.pe_oi || 1;
-        const ratio = callsAtResistance / putsAtResistance;
-        if (ratio > 3) resistanceStrength = "Very Strong"; else if (ratio > 1.5) resistanceStrength = "Strong"; else if (ratio > 1) resistanceStrength = "Moderate";
-    }
+    const closestSupport = supportResistanceLevels
+      .filter(level => level.type === 'support')
+      .sort((a, b) => Math.abs(a.price - ltp) - Math.abs(b.price - ltp))[0];
+
+    const closestResistance = supportResistanceLevels
+      .filter(level => level.type === 'resistance')
+      .sort((a, b) => Math.abs(a.price - ltp) - Math.abs(b.price - ltp))[0];
+    
+    let sentiment = "Neutral";
+    const pcrIsBullish = totalCallOI > 0 ? totalPutOI / totalCallOI > 1.1 : false;
+    const pcrIsBearish = totalCallOI > 0 ? totalPutOI / totalCallOI < 0.9 : false;
+    const otmRatio = otmCallOI > 0 ? otmPutOI / otmCallOI : 0;
+    if (pcrIsBullish && otmRatio > 1.5) sentiment = "Strongly Bullish";
+    else if (pcrIsBearish && otmRatio < 0.75) sentiment = "Strongly Bearish";
+    else if (totalCallOI > 0 && totalPutOI / totalCallOI > 1.0) sentiment = "Slightly Bullish";
+    else if (totalCallOI > 0 && totalPutOI / totalCallOI < 1.0) sentiment = "Slightly Bearish";
     
     const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0;
     const volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+    
     let minLoss = Infinity, maxPain = 0;
     if (strikePrices.length > 0) {
         for (const expiryStrike of strikePrices) {
@@ -191,18 +392,8 @@ export async function POST(request: Request) {
         }
     }
     
-    let sentiment = "Neutral";
-    const pcrIsBullish = pcr > 1.1;
-    const pcrIsBearish = pcr < 0.9;
-    const otmRatio = otmCallOI > 0 ? otmPutOI / otmCallOI : 0;
-    if (pcrIsBullish && otmRatio > 1.5) sentiment = "Strongly Bullish";
-    else if (pcrIsBearish && otmRatio < 0.75) sentiment = "Strongly Bearish";
-    else if (pcr > 1.0) sentiment = "Slightly Bullish";
-    else if (pcr < 1.0) sentiment = "Slightly Bearish";
-    
     const nearestOption = optionsChain[0];
     const formattedExpiry = new Date(nearestOption.expiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-    const lastRefreshed = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
 
     // --- FINAL RESPONSE DATA ---
     const responseData = {
@@ -210,14 +401,21 @@ export async function POST(request: Request) {
         pcr: parseFloat(pcr.toFixed(2)), 
         volumePcr: parseFloat(volumePcr.toFixed(2)),
         maxPain, 
-        resistance, 
-        support, 
+        resistance: closestResistance?.price || resistance, 
+        support: closestSupport?.price || support, 
         sentiment, 
         expiryDate: formattedExpiry, 
-        supportStrength, 
-        resistanceStrength,
+        supportStrength: closestSupport?.strength || 'medium', 
+        resistanceStrength: closestResistance?.strength || 'medium',
         ltp: ltp,
-        lastRefreshed: lastRefreshed,
+        lastRefreshed: new Date().toLocaleTimeString('en-IN', { 
+          timeZone: 'Asia/Kolkata', 
+          hour: '2-digit', 
+          minute: '2-digit', 
+          hour12: true 
+        }),
+        changePercent: parseFloat(changePercent.toFixed(2)),
+        ...volumeMetrics
     };
     
     return NextResponse.json(responseData);
