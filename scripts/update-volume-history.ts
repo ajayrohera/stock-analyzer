@@ -145,6 +145,38 @@ async function getAllSymbols(): Promise<string[]> {
   }
 }
 
+// Extract OI data from quote response
+function extractOIData(data: any) {
+  const oiData: any = {};
+  
+  // Check various possible OI field names
+  if (data.oi !== undefined) {
+    oiData.openInterest = data.oi;
+  }
+  if (data.open_interest !== undefined) {
+    oiData.openInterest = data.open_interest;
+  }
+  if (data.openinterest !== undefined) {
+    oiData.openInterest = data.openinterest;
+  }
+  
+  // Additional useful fields
+  if (data.last_price !== undefined) {
+    oiData.lastPrice = data.last_price;
+  }
+  if (data.volume !== undefined) {
+    oiData.volume = data.volume;
+  }
+  if (data.change !== undefined) {
+    oiData.change = data.change;
+  }
+  if (data.avg_price !== undefined) {
+    oiData.averagePrice = data.avg_price;
+  }
+  
+  return oiData;
+}
+
 async function updateVolumeHistory() {
   let redisClient = null;
 
@@ -224,13 +256,22 @@ async function updateVolumeHistory() {
     kc.setAccessToken(tokenData.accessToken);
 
     // Load existing history
-    let history: Record<string, Array<{date: string, totalVolume: number, timestamp: number}>> = await safeReadJson(volumeHistoryPath);
+    let history: Record<string, Array<{
+      date: string;
+      totalVolume: number;
+      openInterest?: number;
+      lastPrice?: number;
+      change?: number;
+      averagePrice?: number;
+      timestamp: number;
+    }>> = await safeReadJson(volumeHistoryPath);
     
     // Fetch latest data for all symbols
     const today = new Date().toISOString().split('T')[0];
     const timestamp = Date.now();
     let updatedCount = 0;
     let failedCount = 0;
+    let oiDataCount = 0;
 
     for (const symbol of symbols) {
       try {
@@ -260,12 +301,34 @@ async function updateVolumeHistory() {
           // Remove old entry for today if it exists
           history[symbol] = history[symbol].filter(entry => entry.date !== today);
           
-          // Add new entry
-          history[symbol].push({
+          // Extract OI and other data
+          const oiData = extractOIData(data);
+          
+          // Create new entry
+          const newEntry: any = {
             date: today,
             totalVolume: data.volume,
             timestamp: timestamp
-          });
+          };
+          
+          // Add OI data if available
+          if (oiData.openInterest !== undefined) {
+            newEntry.openInterest = oiData.openInterest;
+            oiDataCount++;
+          }
+          
+          // Add other useful fields
+          if (oiData.lastPrice !== undefined) {
+            newEntry.lastPrice = oiData.lastPrice;
+          }
+          if (oiData.change !== undefined) {
+            newEntry.change = oiData.change;
+          }
+          if (oiData.averagePrice !== undefined) {
+            newEntry.averagePrice = oiData.averagePrice;
+          }
+          
+          history[symbol].push(newEntry);
           
           // Keep only last 20 days
           const twentyDaysAgo = timestamp - (20 * 24 * 60 * 60 * 1000);
@@ -283,7 +346,13 @@ async function updateVolumeHistory() {
     
     // Save updated history
     await fs.writeFile(volumeHistoryPath, JSON.stringify(history, null, 2));
+    
     console.log(`\n\n📈 Successfully updated volume history for ${updatedCount}/${symbols.length} symbols`);
+    if (oiDataCount > 0) {
+      console.log(`📊 OI data captured for ${oiDataCount} symbols`);
+    } else {
+      console.log('⚠️ No OI data found in API response');
+    }
     if (failedCount > 0) {
       console.log(`❌ Failed to update ${failedCount} symbols`);
     }
