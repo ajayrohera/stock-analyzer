@@ -220,14 +220,14 @@ function calculateEnhancedSupportResistance(
     const distancePercent = Math.abs(strike - currentPrice) / currentPrice * 100;
     
     if (distancePercent <= 15 && (oiData.ce_oi > 0 || oiData.pe_oi > 0)) {
-      const totalOI = oiData.ce_oi + oiData.pe_oi;
-      
-      // STRONG RESISTANCE: High call OI dominance (like Laurus Labs 900)
-      if (oiData.ce_oi > oiData.pe_oi * 2 && oiData.ce_oi > 100000) {
+      // STRONG RESISTANCE: High call OI dominance ABOVE current price
+      if (strike > currentPrice && oiData.ce_oi > oiData.pe_oi * 1.5 && oiData.ce_oi > 50000) {
         const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
         
-        if (existingLevel && existingLevel.type === 'resistance') {
-          existingLevel.strength = 'strong';
+        if (existingLevel) {
+          if (existingLevel.type === 'resistance') {
+            existingLevel.strength = 'strong';
+          }
         } else {
           baseLevels.push({
             price: strike,
@@ -237,16 +237,42 @@ function calculateEnhancedSupportResistance(
         }
       }
       
-      // STRONG SUPPORT: High put OI dominance
-      if (oiData.pe_oi > oiData.ce_oi * 2 && oiData.pe_oi > 100000) {
+      // STRONG SUPPORT: High put OI dominance BELOW current price
+      if (strike < currentPrice && oiData.pe_oi > oiData.ce_oi * 1.5 && oiData.pe_oi > 50000) {
         const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
         
-        if (existingLevel && existingLevel.type === 'support') {
-          existingLevel.strength = 'strong';
+        if (existingLevel) {
+          if (existingLevel.type === 'support') {
+            existingLevel.strength = 'strong';
+          }
         } else {
           baseLevels.push({
             price: strike,
             strength: 'strong',
+            type: 'support'
+          });
+        }
+      }
+      
+      // MEDIUM RESISTANCE: Moderate call OI dominance ABOVE current price
+      if (strike > currentPrice && oiData.ce_oi > oiData.pe_oi * 1.2 && oiData.ce_oi > 20000) {
+        const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
+        if (!existingLevel) {
+          baseLevels.push({
+            price: strike,
+            strength: 'medium',
+            type: 'resistance'
+          });
+        }
+      }
+      
+      // MEDIUM SUPPORT: Moderate put OI dominance BELOW current price
+      if (strike < currentPrice && oiData.pe_oi > oiData.ce_oi * 1.2 && oiData.pe_oi > 20000) {
+        const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
+        if (!existingLevel) {
+          baseLevels.push({
+            price: strike,
+            strength: 'medium',
             type: 'support'
           });
         }
