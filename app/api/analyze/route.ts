@@ -157,6 +157,90 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
+function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>): SupportResistanceLevel[] {
+  const resistanceLevels: SupportResistanceLevel[] = [];
+  const strikes = Object.keys(optionsByStrike).map(Number).sort((a, b) => a - b);
+  
+  for (const strike of strikes) {
+    if (strike > currentPrice) {
+      const { ce_oi, pe_oi } = optionsByStrike[strike];
+      
+      // Skip if insufficient OI
+      if (ce_oi < 25000 || pe_oi < 10000) continue;
+      
+      const oiRatio = pe_oi > 0 ? ce_oi / pe_oi : Infinity;
+      
+      // Check if this is a local maximum for call OI compared to adjacent strikes
+      const prevStrike = strikes.find(s => s === strike - 50);
+      const nextStrike = strikes.find(s => s === strike + 50);
+      const prevStrikeOI = prevStrike ? optionsByStrike[prevStrike]?.ce_oi || 0 : 0;
+      const nextStrikeOI = nextStrike ? optionsByStrike[nextStrike]?.ce_oi || 0 : 0;
+      
+      const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
+      
+      if (oiRatio >= 2 && ce_oi > 50000 && isLocalMax) {
+        let strength: 'weak' | 'medium' | 'strong' = 'medium';
+        
+        if (oiRatio >= 3 && ce_oi > 100000) {
+          strength = 'strong';
+        } else if (oiRatio < 2.5 || ce_oi < 75000) {
+          strength = 'weak';
+        }
+        
+        resistanceLevels.push({
+          price: strike,
+          strength,
+          type: 'resistance'
+        });
+      }
+    }
+  }
+  
+  return resistanceLevels.sort((a, b) => a.price - b.price);
+}
+
+function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>): SupportResistanceLevel[] {
+  const supportLevels: SupportResistanceLevel[] = [];
+  const strikes = Object.keys(optionsByStrike).map(Number).sort((a, b) => a - b);
+  
+  for (const strike of strikes) {
+    if (strike < currentPrice) {
+      const { ce_oi, pe_oi } = optionsByStrike[strike];
+      
+      // Skip if insufficient OI
+      if (pe_oi < 25000 || ce_oi < 10000) continue;
+      
+      const oiRatio = ce_oi > 0 ? pe_oi / ce_oi : Infinity;
+      
+      // Check if this is a local maximum for put OI compared to adjacent strikes
+      const prevStrike = strikes.find(s => s === strike - 50);
+      const nextStrike = strikes.find(s => s === strike + 50);
+      const prevStrikeOI = prevStrike ? optionsByStrike[prevStrike]?.pe_oi || 0 : 0;
+      const nextStrikeOI = nextStrike ? optionsByStrike[nextStrike]?.pe_oi || 0 : 0;
+      
+      const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
+      
+      if (oiRatio >= 2 && pe_oi > 50000 && isLocalMax) {
+        let strength: 'weak' | 'medium' | 'strong' = 'medium';
+        
+        if (oiRatio >= 3 && pe_oi > 100000) {
+          strength = 'strong';
+        } else if (oiRatio < 2.5 || pe_oi < 75000) {
+          strength = 'weak';
+        }
+        
+        supportLevels.push({
+          price: strike,
+          strength,
+          type: 'support'
+        });
+      }
+    }
+  }
+  
+  return supportLevels.sort((a, b) => b.price - a.price); // Sort descending for support
+}
+
 function calculateSupportResistance(
   history: HistoricalData[],
   currentPrice: number
@@ -214,69 +298,36 @@ function calculateEnhancedSupportResistance(
 ): SupportResistanceLevel[] {
   const baseLevels = calculateSupportResistance(history, currentPrice);
   
-  // ENHANCEMENT: Better OI-based resistance/support detection
-  Object.entries(optionsByStrike).forEach(([strikeStr, oiData]) => {
-    const strike = Number(strikeStr);
-    const distancePercent = Math.abs(strike - currentPrice) / currentPrice * 100;
-    
-    if (distancePercent <= 15 && (oiData.ce_oi > 0 || oiData.pe_oi > 0)) {
-      // STRONG RESISTANCE: High call OI dominance ABOVE current price
-      if (strike > currentPrice && oiData.ce_oi > oiData.pe_oi * 1.5 && oiData.ce_oi > 50000) {
-        const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
-        
-        if (existingLevel) {
-          if (existingLevel.type === 'resistance') {
-            existingLevel.strength = 'strong';
-          }
-        } else {
-          baseLevels.push({
-            price: strike,
-            strength: 'strong',
-            type: 'resistance'
-          });
+  // Find resistance and support levels based on OI data
+  const oiResistanceLevels = findResistanceLevels(currentPrice, optionsByStrike);
+  const oiSupportLevels = findSupportLevels(currentPrice, optionsByStrike);
+  
+  // Merge OI-based levels with base levels
+  oiResistanceLevels.forEach(oiLevel => {
+    const existingLevel = baseLevels.find(l => Math.abs(l.price - oiLevel.price) <= 10);
+    if (existingLevel) {
+      if (existingLevel.type === 'resistance') {
+        // Upgrade strength if OI indicates stronger resistance
+        if (oiLevel.strength === 'strong' || (oiLevel.strength === 'medium' && existingLevel.strength === 'weak')) {
+          existingLevel.strength = oiLevel.strength;
         }
       }
-      
-      // STRONG SUPPORT: High put OI dominance BELOW current price
-      if (strike < currentPrice && oiData.pe_oi > oiData.ce_oi * 1.5 && oiData.pe_oi > 50000) {
-        const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
-        
-        if (existingLevel) {
-          if (existingLevel.type === 'support') {
-            existingLevel.strength = 'strong';
-          }
-        } else {
-          baseLevels.push({
-            price: strike,
-            strength: 'strong',
-            type: 'support'
-          });
+    } else {
+      baseLevels.push(oiLevel);
+    }
+  });
+  
+  oiSupportLevels.forEach(oiLevel => {
+    const existingLevel = baseLevels.find(l => Math.abs(l.price - oiLevel.price) <= 10);
+    if (existingLevel) {
+      if (existingLevel.type === 'support') {
+        // Upgrade strength if OI indicates stronger support
+        if (oiLevel.strength === 'strong' || (oiLevel.strength === 'medium' && existingLevel.strength === 'weak')) {
+          existingLevel.strength = oiLevel.strength;
         }
       }
-      
-      // MEDIUM RESISTANCE: Moderate call OI dominance ABOVE current price
-      if (strike > currentPrice && oiData.ce_oi > oiData.pe_oi * 1.2 && oiData.ce_oi > 20000) {
-        const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
-        if (!existingLevel) {
-          baseLevels.push({
-            price: strike,
-            strength: 'medium',
-            type: 'resistance'
-          });
-        }
-      }
-      
-      // MEDIUM SUPPORT: Moderate put OI dominance BELOW current price
-      if (strike < currentPrice && oiData.pe_oi > oiData.ce_oi * 1.2 && oiData.pe_oi > 20000) {
-        const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
-        if (!existingLevel) {
-          baseLevels.push({
-            price: strike,
-            strength: 'medium',
-            type: 'support'
-          });
-        }
-      }
+    } else {
+      baseLevels.push(oiLevel);
     }
   });
   
