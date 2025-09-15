@@ -44,14 +44,11 @@ interface SupportResistanceLevel {
   type: 'support' | 'resistance';
 }
 
-// Stock-specific psychological levels
-const psychologicalLevels: Record<string, number[]> = {
-  'LAURUSLABS': [800, 850, 860, 900, 950, 1000],
-  'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
-  'INFY': [1400, 1500, 1600, 1700, 1800],
-  'TATASTEEL': [120, 130, 140, 150, 160],
+// Only keep major indices and exceptionally important stocks
+const specialPsychologicalLevels: Record<string, number[]> = {
   'NIFTY': [24000, 24500, 25000, 25500, 26000],
   'BANKNIFTY': [52000, 53000, 54000, 55000, 56000],
+  'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
 };
 
 // Initialize Redis client
@@ -74,6 +71,34 @@ async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
     console.error('Error reading historical data:', error);
     return [];
   }
+}
+
+function generatePsychologicalLevels(currentPrice: number): number[] {
+  const levels: number[] = [];
+  const priceRange = currentPrice * 0.2; // ±20% range
+  
+  // Generate round numbers based on price range
+  const increment = currentPrice > 1000 ? 100 : 50;
+  const start = Math.round((currentPrice - priceRange) / increment) * increment;
+  const end = Math.round((currentPrice + priceRange) / increment) * increment;
+  
+  for (let price = start; price <= end; price += increment) {
+    // Only include significant round numbers
+    if (price % 100 === 0 || (price % 50 === 0 && currentPrice < 500)) {
+      levels.push(price);
+    }
+  }
+  
+  return levels.filter(level => Math.abs(level - currentPrice) > increment);
+}
+
+function getPsychologicalLevels(symbol: string, currentPrice: number): number[] {
+  // Use special levels for major indices, generate dynamically for others
+  const upperSymbol = symbol.toUpperCase();
+  if (specialPsychologicalLevels[upperSymbol]) {
+    return specialPsychologicalLevels[upperSymbol];
+  }
+  return generatePsychologicalLevels(currentPrice);
 }
 
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
@@ -189,67 +214,68 @@ function calculateEnhancedSupportResistance(
 ): SupportResistanceLevel[] {
   const baseLevels = calculateSupportResistance(history, currentPrice);
   
-  // ENHANCEMENT: Add options OI data for more accurate resistance/support levels
+  // ENHANCEMENT: Better OI-based resistance/support detection
   Object.entries(optionsByStrike).forEach(([strikeStr, oiData]) => {
     const strike = Number(strikeStr);
     const distancePercent = Math.abs(strike - currentPrice) / currentPrice * 100;
     
-    if (distancePercent <= 20 && (oiData.ce_oi > 0 || oiData.pe_oi > 0)) {
+    if (distancePercent <= 15 && (oiData.ce_oi > 0 || oiData.pe_oi > 0)) {
       const totalOI = oiData.ce_oi + oiData.pe_oi;
-      const callOIRatio = oiData.ce_oi / totalOI;
-      const putOIRatio = oiData.pe_oi / totalOI;
       
-      const callOIDominance = callOIRatio > 0.6; // 60%+ calls
-      const putOIDominance = putOIRatio > 0.6;   // 60%+ puts
-      const significantOI = totalOI > 100000;    // Significant OI threshold
-      
-      if ((callOIDominance || putOIDominance) && significantOI) {
+      // STRONG RESISTANCE: High call OI dominance (like Laurus Labs 900)
+      if (oiData.ce_oi > oiData.pe_oi * 2 && oiData.ce_oi > 100000) {
         const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
         
-        if (existingLevel) {
-          // Enhance existing level with OI information
-          if (callOIDominance && existingLevel.type === 'resistance') {
-            existingLevel.strength = 'strong';
-          } else if (putOIDominance && existingLevel.type === 'support') {
-            existingLevel.strength = 'strong';
-          }
+        if (existingLevel && existingLevel.type === 'resistance') {
+          existingLevel.strength = 'strong';
         } else {
-          // Create new level based on OI
           baseLevels.push({
             price: strike,
             strength: 'strong',
-            type: callOIDominance ? 'resistance' : 'support'
+            type: 'resistance'
+          });
+        }
+      }
+      
+      // STRONG SUPPORT: High put OI dominance
+      if (oiData.pe_oi > oiData.ce_oi * 2 && oiData.pe_oi > 100000) {
+        const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
+        
+        if (existingLevel && existingLevel.type === 'support') {
+          existingLevel.strength = 'strong';
+        } else {
+          baseLevels.push({
+            price: strike,
+            strength: 'strong',
+            type: 'support'
           });
         }
       }
     }
   });
   
-  // Add psychological levels for this specific stock
-  const psychLevels = psychologicalLevels[symbol.toUpperCase()] || [];
-  const stockSpecificLevels: SupportResistanceLevel[] = [];
-  
+  // Add psychological levels
+  const psychLevels = getPsychologicalLevels(symbol, currentPrice);
   psychLevels.forEach(level => {
     const distancePercent = Math.abs(level - currentPrice) / currentPrice * 100;
-    if (distancePercent <= 20) { // Within 20% of current price
+    if (distancePercent <= 20) {
       const existingLevel = baseLevels.find(l => Math.abs(l.price - level) <= 10);
       
       if (!existingLevel) {
-        stockSpecificLevels.push({
+        baseLevels.push({
           price: level,
-          strength: 'medium', // Psychological levels are usually medium strength
+          strength: 'medium',
           type: level < currentPrice ? 'support' : 'resistance'
         });
-      } else {
-        // Enhance existing level if it's near a psychological level
-        existingLevel.strength = 'strong';
+      } else if (existingLevel.strength === 'weak') {
+        // Upgrade weak levels to medium if they match psychological levels
+        existingLevel.strength = 'medium';
       }
     }
   });
   
   // Merge and deduplicate levels
-  const allLevels = [...baseLevels, ...stockSpecificLevels];
-  const uniqueLevels = allLevels.filter((level, index, array) =>
+  const uniqueLevels = baseLevels.filter((level, index, array) =>
     index === array.findIndex(l => Math.abs(l.price - level.price) <= 5)
   );
   
@@ -394,7 +420,7 @@ export async function POST(request: Request) {
       displayName.toUpperCase(),
       historicalData,
       ltp,
-      optionsByStrike  // ← Pass the OI data
+      optionsByStrike
     );
     
     const closestSupport = supportResistanceLevels
