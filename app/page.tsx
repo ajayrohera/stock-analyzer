@@ -32,6 +32,9 @@ type AnalysisResult = {
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
   changePercent?: number;
+  // Tooltip data for support/resistance
+  supportTooltip?: string;
+  resistanceTooltip?: string;
 
   // NEW: Change in OI data for key levels (make optional)
   oiAnalysis?: {
@@ -135,15 +138,36 @@ const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sent
 ));
 StatCard.displayName = 'StatCard';
 
-const SupportResistanceCard = React.memo(({ type, value, strength }: { type: 'Support' | 'Resistance', value: number, strength: string }) => { 
+const SupportResistanceCard = React.memo(({ 
+  type, 
+  value, 
+  strength, 
+  tooltip 
+}: { 
+  type: 'Support' | 'Resistance', 
+  value: number, 
+  strength: string,
+  tooltip?: string 
+}) => { 
   const isSupport = type === 'Support'; 
   const color = isSupport ? 'text-green-400' : 'text-red-500'; 
   let strengthColor = 'text-gray-400'; 
   if (strength === 'Very Strong') strengthColor = 'text-cyan-400'; 
   if (strength === 'Strong') strengthColor = 'text-white'; 
+  
   return ( 
     <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
-      <p className="text-sm text-gray-400">{isSupport ? 'Key Support' : 'Key Resistance'}</p>
+      <div className="flex items-center justify-center text-sm text-gray-400">
+        <span>{isSupport ? 'Key Support' : 'Key Resistance'}</span>
+        {tooltip && (
+          <div className="relative group ml-1">
+            <Info size={14} className="cursor-pointer" />
+            <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+              {tooltip}
+            </div>
+          </div>
+        )}
+      </div>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
       <p className={`text-xs font-bold uppercase ${strengthColor}`}>{strength}</p>
     </div> 
@@ -668,7 +692,7 @@ export default function Home() {
           <div className="relative flex items-center">
             <Briefcase className="absolute left-4 h-6 w-6 text-gray-500" />
             <select className="w-full pl-12 pr-32 py-4 bg-gray-900/50 text-white border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan transition-all duration-300 appearance-none" value={selectedSymbol} onChange={handleSymbolChange} disabled={isLoading || symbolList.length === 0}>{symbolOptions}</select>
-            <button 
+                        <button 
               className="absolute right-2 bg-brand-cyan hover:bg-cyan-500 text-brand-dark font-bold py-2.5 px-6 rounded-lg transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" 
               onClick={handleAnalyze} 
               disabled={isLoading || !selectedSymbol || symbolList.length === 0}
@@ -731,8 +755,18 @@ export default function Home() {
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 mb-6">
-                <SupportResistanceCard type="Support" value={results.support} strength={results.supportStrength} />
-                <SupportResistanceCard type="Resistance" value={results.resistance} strength={results.resistanceStrength} />
+                <SupportResistanceCard 
+                  type="Support" 
+                  value={results.support} 
+                  strength={results.supportStrength} 
+                  tooltip={results.supportTooltip} 
+                />
+                <SupportResistanceCard 
+                  type="Resistance" 
+                  value={results.resistance} 
+                  strength={results.resistanceStrength} 
+                  tooltip={results.resistanceTooltip} 
+                />
                 
                 <VolumeCard 
                   avg20DayVolume={results.avg20DayVolume}
@@ -784,7 +818,7 @@ export default function Home() {
             <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
             <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="email" placeholder="Your Email" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
             <textarea placeholder="Your Message" rows={4} className="p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan"></textarea>
-            <button type="submit" className="bg-brand-cyan hover:bg-cyan-500 text-brand-dark font-bold py-3 px-6 rounded-lg transition-all duration-300">Send Message</button>
+            <button type="submit" className="bg-brand-cyan hover:bg-cyan-5 text-brand-dark font-bold py-3 px-6 rounded-lg transition-all duration-300">Send Message</button>
           </form>
         </section>
       </main>
