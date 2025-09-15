@@ -42,6 +42,7 @@ interface SupportResistanceLevel {
   price: number;
   strength: 'weak' | 'medium' | 'strong';
   type: 'support' | 'resistance';
+  tooltip?: string; // Added for tooltip data
 }
 
 // Only keep major indices and exceptionally important stocks
@@ -180,21 +181,24 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       
       if (oiRatio >= 2 && ce_oi > 50000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
+        let tooltip = `CE: ${(ce_oi/100000).toFixed(1)}L, PE: ${(pe_oi/100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
         
         // CORRECTED STRENGTH CALCULATION:
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
-          // Strong resistance: >10 lakh CE OI OR >4:1 ratio OR >20 lakh absolute CE OI
           strength = 'strong';
+          tooltip += ' | Strong: High CE dominance';
         } else if (oiRatio < 1.8 || ce_oi < 100000) {
-          // Weak resistance: <1.8:1 ratio OR <1 lakh CE OI
           strength = 'weak';
+          tooltip += ' | Weak: Low CE dominance';
+        } else {
+          tooltip += ' | Medium: Moderate CE dominance';
         }
-        // Otherwise remains medium
         
         resistanceLevels.push({
           price: strike,
           strength,
-          type: 'resistance'
+          type: 'resistance',
+          tooltip
         });
       }
     }
@@ -226,27 +230,29 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       
       if (oiRatio >= 2 && pe_oi > 50000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
+        let tooltip = `PE: ${(pe_oi/100000).toFixed(1)}L, CE: ${(ce_oi/100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
         
-        // CORRECTED STRENGTH CALCULATION:
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
-          // Strong support: >10 lakh PE OI OR >4:1 ratio OR >20 lakh absolute PE OI
           strength = 'strong';
+          tooltip += ' | Strong: High PE dominance';
         } else if (oiRatio < 1.8 || pe_oi < 100000) {
-          // Weak support: <1.8:1 ratio OR <1 lakh PE OI
           strength = 'weak';
+          tooltip += ' | Weak: Low PE dominance';
+        } else {
+          tooltip += ' | Medium: Moderate PE dominance';
         }
-        // Otherwise remains medium
         
         supportLevels.push({
           price: strike,
           strength,
-          type: 'support'
+          type: 'support',
+          tooltip
         });
       }
     }
   }
   
-  return supportLevels.sort((a, b) => b.price - a.price); // Sort descending for support
+  return supportLevels.sort((a, b) => b.price - a.price);
 }
 
 function calculateSupportResistance(
@@ -279,18 +285,27 @@ function calculateSupportResistance(
     // Only consider levels within 20% of current price
     if (distancePercent <= 20) {
       let strength: 'weak' | 'medium' | 'strong' = 'weak';
+      let tooltip = `Hist. Volume: ${(volume/100000).toFixed(1)}L`;
       
       // Determine strength based on volume percentile
       const maxVolume = Math.max(...sortedLevels.map(l => l[1]));
       const volumeRatio = volume / maxVolume;
       
-      if (volumeRatio > 0.7) strength = 'strong';
-      else if (volumeRatio > 0.4) strength = 'medium';
+      if (volumeRatio > 0.7) {
+        strength = 'strong';
+        tooltip += ' | Strong: High volume concentration';
+      } else if (volumeRatio > 0.4) {
+        strength = 'medium';
+        tooltip += ' | Medium: Moderate volume';
+      } else {
+        tooltip += ' | Weak: Low volume';
+      }
       
       levels.push({
         price,
         strength,
-        type: price < currentPrice ? 'support' : 'resistance'
+        type: price < currentPrice ? 'support' : 'resistance',
+        tooltip
       });
     }
   });
@@ -310,30 +325,22 @@ function calculateEnhancedSupportResistance(
   const oiResistanceLevels = findResistanceLevels(currentPrice, optionsByStrike);
   const oiSupportLevels = findSupportLevels(currentPrice, optionsByStrike);
   
-  // Merge OI-based levels with base levels
+  // Merge OI-based levels with base levels (OI levels take priority)
   oiResistanceLevels.forEach(oiLevel => {
-    const existingLevel = baseLevels.find(l => Math.abs(l.price - oiLevel.price) <= 10);
-    if (existingLevel) {
-      if (existingLevel.type === 'resistance') {
-        // Upgrade strength if OI indicates stronger resistance
-        if (oiLevel.strength === 'strong' || (oiLevel.strength === 'medium' && existingLevel.strength === 'weak')) {
-          existingLevel.strength = oiLevel.strength;
-        }
-      }
+    const existingIndex = baseLevels.findIndex(l => Math.abs(l.price - oiLevel.price) <= 10);
+    if (existingIndex !== -1) {
+      // Replace with OI-based level if it exists
+      baseLevels[existingIndex] = oiLevel;
     } else {
       baseLevels.push(oiLevel);
     }
   });
   
   oiSupportLevels.forEach(oiLevel => {
-    const existingLevel = baseLevels.find(l => Math.abs(l.price - oiLevel.price) <= 10);
-    if (existingLevel) {
-      if (existingLevel.type === 'support') {
-        // Upgrade strength if OI indicates stronger support
-        if (oiLevel.strength === 'strong' || (oiLevel.strength === 'medium' && existingLevel.strength === 'weak')) {
-          existingLevel.strength = oiLevel.strength;
-        }
-      }
+    const existingIndex = baseLevels.findIndex(l => Math.abs(l.price - oiLevel.price) <= 10);
+    if (existingIndex !== -1) {
+      // Replace with OI-based level if it exists
+      baseLevels[existingIndex] = oiLevel;
     } else {
       baseLevels.push(oiLevel);
     }
@@ -350,11 +357,13 @@ function calculateEnhancedSupportResistance(
         baseLevels.push({
           price: level,
           strength: 'medium',
-          type: level < currentPrice ? 'support' : 'resistance'
+          type: level < currentPrice ? 'support' : 'resistance',
+          tooltip: 'Psychological level'
         });
       } else if (existingLevel.strength === 'weak') {
         // Upgrade weak levels to medium if they match psychological levels
         existingLevel.strength = 'medium';
+        existingLevel.tooltip += ' + Psychological level';
       }
     }
   });
@@ -556,6 +565,8 @@ export async function POST(request: Request) {
         expiryDate: formattedExpiry, 
         supportStrength: closestSupport?.strength || 'medium', 
         resistanceStrength: closestResistance?.strength || 'medium',
+        supportTooltip: closestSupport?.tooltip || '',
+        resistanceTooltip: closestResistance?.tooltip || '',
         ltp: ltp,
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { 
           timeZone: 'Asia/Kolkata', 
