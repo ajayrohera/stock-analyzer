@@ -166,7 +166,7 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       const { ce_oi, pe_oi } = optionsByStrike[strike];
       
       // Skip if insufficient OI
-      if (ce_oi < 25000 || pe_oi < 10000) continue;
+      if (ce_oi < 50000) continue;
       
       const oiRatio = pe_oi > 0 ? ce_oi / pe_oi : Infinity;
       
@@ -181,11 +181,15 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       if (oiRatio >= 2 && ce_oi > 50000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
         
-        if (oiRatio >= 3 && ce_oi > 100000) {
+        // CORRECTED STRENGTH CALCULATION:
+        if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
+          // Strong resistance: >10 lakh CE OI OR >4:1 ratio OR >20 lakh absolute CE OI
           strength = 'strong';
-        } else if (oiRatio < 2.5 || ce_oi < 75000) {
+        } else if (oiRatio < 1.8 || ce_oi < 100000) {
+          // Weak resistance: <1.8:1 ratio OR <1 lakh CE OI
           strength = 'weak';
         }
+        // Otherwise remains medium
         
         resistanceLevels.push({
           price: strike,
@@ -208,7 +212,7 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       const { ce_oi, pe_oi } = optionsByStrike[strike];
       
       // Skip if insufficient OI
-      if (pe_oi < 25000 || ce_oi < 10000) continue;
+      if (pe_oi < 50000) continue;
       
       const oiRatio = ce_oi > 0 ? pe_oi / ce_oi : Infinity;
       
@@ -223,11 +227,15 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       if (oiRatio >= 2 && pe_oi > 50000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
         
-        if (oiRatio >= 3 && pe_oi > 100000) {
+        // CORRECTED STRENGTH CALCULATION:
+        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
+          // Strong support: >10 lakh PE OI OR >4:1 ratio OR >20 lakh absolute PE OI
           strength = 'strong';
-        } else if (oiRatio < 2.5 || pe_oi < 75000) {
+        } else if (oiRatio < 1.8 || pe_oi < 100000) {
+          // Weak support: <1.8:1 ratio OR <1 lakh PE OI
           strength = 'weak';
         }
+        // Otherwise remains medium
         
         supportLevels.push({
           price: strike,
