@@ -184,9 +184,46 @@ function calculateSupportResistance(
 function calculateEnhancedSupportResistance(
   symbol: string,
   history: HistoricalData[],
-  currentPrice: number
+  currentPrice: number,
+  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>
 ): SupportResistanceLevel[] {
   const baseLevels = calculateSupportResistance(history, currentPrice);
+  
+  // ENHANCEMENT: Add options OI data for more accurate resistance/support levels
+  Object.entries(optionsByStrike).forEach(([strikeStr, oiData]) => {
+    const strike = Number(strikeStr);
+    const distancePercent = Math.abs(strike - currentPrice) / currentPrice * 100;
+    
+    if (distancePercent <= 20 && (oiData.ce_oi > 0 || oiData.pe_oi > 0)) {
+      const totalOI = oiData.ce_oi + oiData.pe_oi;
+      const callOIRatio = oiData.ce_oi / totalOI;
+      const putOIRatio = oiData.pe_oi / totalOI;
+      
+      const callOIDominance = callOIRatio > 0.6; // 60%+ calls
+      const putOIDominance = putOIRatio > 0.6;   // 60%+ puts
+      const significantOI = totalOI > 100000;    // Significant OI threshold
+      
+      if ((callOIDominance || putOIDominance) && significantOI) {
+        const existingLevel = baseLevels.find(l => Math.abs(l.price - strike) <= 10);
+        
+        if (existingLevel) {
+          // Enhance existing level with OI information
+          if (callOIDominance && existingLevel.type === 'resistance') {
+            existingLevel.strength = 'strong';
+          } else if (putOIDominance && existingLevel.type === 'support') {
+            existingLevel.strength = 'strong';
+          }
+        } else {
+          // Create new level based on OI
+          baseLevels.push({
+            price: strike,
+            strength: 'strong',
+            type: callOIDominance ? 'resistance' : 'support'
+          });
+        }
+      }
+    }
+  });
   
   // Add psychological levels for this specific stock
   const psychLevels = psychologicalLevels[symbol.toUpperCase()] || [];
@@ -288,7 +325,7 @@ export async function POST(request: Request) {
     
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
 
-    // Get quote data for the main symbol to get volume (FIXED: using getQuote instead of getLTP)
+    // Get quote data for the main symbol to get volume
     const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
     const ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
     const currentVolume = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.volume;
@@ -300,7 +337,7 @@ export async function POST(request: Request) {
     // Get historical data for change percent and support/resistance
     const historicalData = await getHistoricalData(displayName.toUpperCase());
     const changePercent = calculateChangePercent(ltp, historicalData);
-    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume); // Pass currentVolume here
+    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
 
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
@@ -352,11 +389,12 @@ export async function POST(request: Request) {
         if (otmPuts.length > 0) support = otmPuts[otmPuts.length - 1];
     }
     
-    // Calculate enhanced support/resistance
+    // Calculate enhanced support/resistance WITH OI DATA
     const supportResistanceLevels = calculateEnhancedSupportResistance(
       displayName.toUpperCase(),
       historicalData,
-      ltp
+      ltp,
+      optionsByStrike  // ← Pass the OI data
     );
     
     const closestSupport = supportResistanceLevels
