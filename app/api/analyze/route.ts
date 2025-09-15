@@ -219,7 +219,9 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       // Skip if insufficient OI
       if (pe_oi < 50000) continue;
       
-      const oiRatio = ce_oi > 0 ? pe_oi / ce_oi : Infinity;
+      // Calculate ratio correctly
+      const actualRatio = ce_oi > 0 ? pe_oi / ce_oi : Infinity;
+      const actualRatioFormatted = ce_oi > 0 ? (pe_oi / ce_oi).toFixed(2) : '∞';
       
       // Check if this is a local maximum for put OI compared to adjacent strikes
       const prevStrike = strikes.find(s => s === strike - 50);
@@ -229,15 +231,15 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       
       const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
       
-      if (oiRatio >= 2 && pe_oi > 50000 && isLocalMax) {
+      if (actualRatio >= 2 && pe_oi > 50000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
-       const actualRatio = ce_oi > 0 ? (pe_oi / ce_oi).toFixed(2) : '∞';
-let tooltip = `PE: ${(pe_oi/100000).toFixed(1)}L, CE: ${(ce_oi/100000).toFixed(1)}L, Ratio: ${actualRatio}:1`;
+        let tooltip = `PE: ${(pe_oi/100000).toFixed(1)}L, CE: ${(ce_oi/100000).toFixed(1)}L, Ratio: ${actualRatioFormatted}:1`;
         
-        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
+        // Use the correct ratio for strength classification
+        if ((actualRatio >= 3 && pe_oi > 1000000) || (actualRatio >= 4) || (pe_oi > 2000000)) {
           strength = 'strong';
           tooltip += ' | Strong: High PE dominance';
-        } else if (oiRatio < 1.8 || pe_oi < 100000) {
+        } else if (actualRatio < 1.8 || pe_oi < 100000) {
           strength = 'weak';
           tooltip += ' | Weak: Low PE dominance';
         } else {
