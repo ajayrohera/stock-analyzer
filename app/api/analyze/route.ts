@@ -181,7 +181,8 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       
       if (oiRatio >= 2 && ce_oi > 50000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
-        let tooltip = `CE: ${(ce_oi/100000).toFixed(1)}L, PE: ${(pe_oi/100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
+        const actualRatio = pe_oi > 0 ? (ce_oi / pe_oi).toFixed(2) : '∞';
+let tooltip = `CE: ${(ce_oi/100000).toFixed(1)}L, PE: ${(pe_oi/100000).toFixed(1)}L, Ratio: ${actualRatio}:1`;
         
         // CORRECTED STRENGTH CALCULATION:
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
@@ -230,7 +231,8 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       
       if (oiRatio >= 2 && pe_oi > 50000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
-        let tooltip = `PE: ${(pe_oi/100000).toFixed(1)}L, CE: ${(ce_oi/100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
+       const actualRatio = ce_oi > 0 ? (pe_oi / ce_oi).toFixed(2) : '∞';
+let tooltip = `PE: ${(pe_oi/100000).toFixed(1)}L, CE: ${(ce_oi/100000).toFixed(1)}L, Ratio: ${actualRatio}:1`;
         
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
           strength = 'strong';
