@@ -335,6 +335,10 @@ function calculateEnhancedSupportResistance(
   oiResistanceLevels.forEach(oiLevel => {
     const existingIndex = baseLevels.findIndex(l => Math.abs(l.price - oiLevel.price) <= 10);
     if (existingIndex !== -1) {
+      // ✅ PRESERVE TOOLTIP if OI level doesn't have one
+      if (!oiLevel.tooltip && baseLevels[existingIndex].tooltip) {
+        oiLevel.tooltip = baseLevels[existingIndex].tooltip;
+      }
       // Replace with OI-based level if it exists
       baseLevels[existingIndex] = oiLevel;
     } else {
