@@ -12,18 +12,12 @@ interface QuoteData {
         last_price: number; 
         oi?: number; 
         volume?: number;
-        ohlc?: {
-            open: number;
-            high: number;
-            low: number;
-            close: number;
-        };
+        ohlc?: { open: number; high: number; low: number; close: number; };
     }
 }
 interface LtpQuote {
     [key: string]: { instrument_token: number; last_price: number; }
 }
-
 interface Instrument {
     tradingsymbol: string;
     strike: number;
@@ -31,14 +25,12 @@ interface Instrument {
     expiry: Date;
     name: string;
 }
-
 interface HistoricalData {
   date: string;
   totalVolume: number;
   lastPrice?: number;
   timestamp: number;
 }
-
 interface SupportResistanceLevel {
   price: number;
   strength: 'weak' | 'medium' | 'strong';
@@ -62,10 +54,7 @@ async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
     if (!historyData) return [];
     const history = JSON.parse(historyData as string);
     return history[symbol] || [];
-  } catch (error) {
-    console.error('Error reading historical data:', error);
-    return [];
-  }
+  } catch (error) { console.error('Error reading historical data:', error); return []; }
 }
 
 function generatePsychologicalLevels(currentPrice: number): number[] {
@@ -75,9 +64,7 @@ function generatePsychologicalLevels(currentPrice: number): number[] {
   const start = Math.round((currentPrice - priceRange) / increment) * increment;
   const end = Math.round((currentPrice + priceRange) / increment) * increment;
   for (let price = start; price <= end; price += increment) {
-    if (price % 100 === 0 || (price % 50 === 0 && currentPrice < 500)) {
-      levels.push(price);
-    }
+    if (price % 100 === 0 || (price % 50 === 0 && currentPrice < 500)) levels.push(price);
   }
   return levels.filter(level => Math.abs(level - currentPrice) > increment);
 }
@@ -90,10 +77,10 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
 
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
   if (!historicalData.length || !currentPrice) return 0;
+  const today = new Date();
   const previousDays = historicalData.filter(entry => {
     const entryDate = new Date(entry.date);
-    const today = new Date();
-    return entryDate.getDate() !== today.getDate() || entryDate.getMonth() !== today.getMonth() || entryDate.getFullYear() !== today.getFullYear();
+    return entryDate.setHours(0,0,0,0) !== today.setHours(0,0,0,0);
   });
   if (previousDays.length === 0) return 0;
   previousDays.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -124,14 +111,12 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
 
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const resistanceLevels: SupportResistanceLevel[] = [];
-  for (const strike of allStrikes) {
-    if (strike > currentPrice) {
-      const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
-      if (ce_oi < 30000) continue;
+  const priceRange = currentPrice * 0.15; // ✅ PROXIMITY GATE: Only consider strikes within 15%
 
-      // ✅ CRITICAL FIX: Ensure there's some Put OI for the ratio to be meaningful.
-      // This prevents far OTM strikes with zero PE OI from creating an infinite ratio.
-      if (pe_oi < 1000) continue; 
+  for (const strike of allStrikes) {
+    if (strike > currentPrice && strike <= currentPrice + priceRange) { // Apply proximity check
+      const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
+      if (ce_oi < 30000 || pe_oi < 1000) continue; // Prevent infinite ratio
 
       const oiRatio = ce_oi / pe_oi;
       const currentIndex = allStrikes.indexOf(strike);
@@ -143,8 +128,7 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
         let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong'; }
-        else if (oiRatio < 2.0 || ce_oi < 100000) { strength = 'weak'; }
-        else { tooltip += ' | Medium'; }
+        else if (oiRatio < 2.0 || ce_oi < 100000) { strength = 'weak'; } else { tooltip += ' | Medium'; }
         resistanceLevels.push({ price: strike, strength, type: 'resistance', tooltip });
       }
     }
@@ -154,13 +138,12 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
 
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const supportLevels: SupportResistanceLevel[] = [];
-  for (const strike of allStrikes) {
-    if (strike < currentPrice) {
-      const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
-      if (pe_oi < 30000) continue;
+  const priceRange = currentPrice * 0.15; // ✅ PROXIMITY GATE: Only consider strikes within 15%
 
-      // ✅ CRITICAL FIX: Ensure there's some Call OI for the ratio to be meaningful.
-      if (ce_oi < 1000) continue;
+  for (const strike of allStrikes) {
+    if (strike < currentPrice && strike >= currentPrice - priceRange) { // Apply proximity check
+      const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
+      if (pe_oi < 30000 || ce_oi < 1000) continue; // Prevent infinite ratio
 
       const oiRatio = pe_oi / ce_oi;
       const currentIndex = allStrikes.indexOf(strike);
@@ -172,8 +155,7 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong'; }
-        else if (oiRatio < 2.0 || pe_oi < 100000) { strength = 'weak'; }
-        else { tooltip += ' | Medium'; }
+        else if (oiRatio < 2.0 || pe_oi < 100000) { strength = 'weak'; } else { tooltip += ' | Medium'; }
         supportLevels.push({ price: strike, strength, type: 'support', tooltip });
       }
     }
@@ -194,8 +176,7 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   });
   const sortedLevels = Array.from(priceLevels.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
   sortedLevels.forEach(([price, volume]) => {
-    const distancePercent = Math.abs((price - currentPrice) / currentPrice) * 100;
-    if (distancePercent <= 20) {
+    if (Math.abs((price - currentPrice) / currentPrice) <= 0.20) {
       let strength: 'weak' | 'medium' | 'strong' = 'weak';
       let tooltip = `Hist. Volume: ${(volume/100000).toFixed(1)}L`;
       const maxVolume = Math.max(...sortedLevels.map(l => l[1]));
@@ -223,8 +204,7 @@ function calculateEnhancedSupportResistance(symbol: string, history: HistoricalD
   });
   const psychLevels = getPsychologicalLevels(symbol, currentPrice);
   psychLevels.forEach(level => {
-    const distancePercent = Math.abs(level - currentPrice) / currentPrice * 100;
-    if (distancePercent <= 20) {
+    if (Math.abs((level - currentPrice) / currentPrice) <= 0.20) {
       const existingLevel = baseLevels.find(l => Math.abs(l.price - level) <= 10);
       if (!existingLevel) baseLevels.push({ price: level, strength: 'medium', type: level < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological level' });
       else if (existingLevel.strength === 'weak') { existingLevel.strength = 'medium'; existingLevel.tooltip += ' + Psychological'; }
@@ -275,14 +255,19 @@ export async function POST(request: Request) {
       instrument.name === tradingSymbol.toUpperCase() && (instrument.instrument_type === 'CE' || instrument.instrument_type === 'PE')
     );
 
-    if (!unfilteredOptionsChain || unfilteredOptionsChain.length === 0) {
+    if (unfilteredOptionsChain.length === 0) {
         return NextResponse.json({ error: `No options found for '${tradingSymbol}'` }, { status: 404 });
     }
 
-    let nearestExpiry = new Date(unfilteredOptionsChain[0].expiry);
+    // ✅ ROBUST EXPIRY FINDER
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let nearestExpiry = new Date('2999-12-31');
     for (const opt of unfilteredOptionsChain) {
         const expiryDate = new Date(opt.expiry);
-        if (expiryDate < nearestExpiry) nearestExpiry = expiryDate;
+        if (expiryDate >= today && expiryDate < nearestExpiry) {
+            nearestExpiry = expiryDate;
+        }
     }
 
     const optionsChain = unfilteredOptionsChain.filter(instrument => new Date(instrument.expiry).getTime() === nearestExpiry.getTime());
@@ -304,14 +289,11 @@ export async function POST(request: Request) {
     const optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }> = {};
     const strikePrices = [...new Set(optionsChain.map(o => o.strike))].sort((a, b) => a - b);
     
-    const ceChain = optionsChain.filter(o => o.instrument_type === 'CE');
-    const peChain = optionsChain.filter(o => o.instrument_type === 'PE');
-
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
 
     for (const strike of strikePrices) {
-        const ceOpt = ceChain.find(o => o.strike === strike);
-        const peOpt = peChain.find(o => o.strike === strike);
+        const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
+        const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
         const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
         const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
         const ce_oi = ceLiveData?.oi || 0;
@@ -325,12 +307,12 @@ export async function POST(request: Request) {
 
     let highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
     for (const strike of strikePrices) {
-        if (strike > ltp) {
+        if (strike > ltp && strike <= ltp * 1.15) { // Proximity check for default
             if (optionsByStrike[strike].ce_oi > highestCallOI) {
                 highestCallOI = optionsByStrike[strike].ce_oi;
                 resistance = strike;
             }
-        } else if (strike < ltp) {
+        } else if (strike < ltp && strike >= ltp * 0.85) { // Proximity check for default
             if (optionsByStrike[strike].pe_oi > highestPutOI) {
                 highestPutOI = optionsByStrike[strike].pe_oi;
                 support = strike;
@@ -349,8 +331,8 @@ export async function POST(request: Request) {
     
     const supportResistanceLevels = calculateEnhancedSupportResistance(displayName.toUpperCase(), historicalData, ltp, optionsByStrike, strikePrices);
     
-    let finalSupport = supportResistanceLevels.filter(level => level.type === 'support').sort((a, b) => Math.abs(a.price - ltp) - Math.abs(b.price - ltp))[0];
-    let finalResistance = supportResistanceLevels.filter(level => level.type === 'resistance').sort((a, b) => Math.abs(a.price - ltp) - Math.abs(b.price - ltp))[0];
+    let finalSupport = supportResistanceLevels.filter(level => level.type === 'support')[0];
+    let finalResistance = supportResistanceLevels.filter(level => level.type === 'resistance')[0];
 
     if (!finalResistance && resistance > 0) {
       const defaultData = optionsByStrike[resistance];
@@ -374,7 +356,6 @@ export async function POST(request: Request) {
       }
     }
     
-    // ✅ CORRECTED PCR CALCULATION
     const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
     let sentiment = "Neutral";
     if (pcr > 1.1) sentiment = "Bullish";
@@ -398,29 +379,22 @@ export async function POST(request: Request) {
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
     const responseData = {
-        symbol: displayName.toUpperCase(), 
-        pcr: parseFloat(pcr.toFixed(2)), 
-        volumePcr: parseFloat(volumePcr.toFixed(2)),
-        maxPain, 
-        resistance: finalResistance?.price || resistance, 
-        support: finalSupport?.price || support, 
-        sentiment, 
-        expiryDate: formattedExpiry, 
-        supportStrength: finalSupport?.strength || 'medium', 
+        symbol: displayName.toUpperCase(), pcr: parseFloat(pcr.toFixed(2)), volumePcr: parseFloat(volumePcr.toFixed(2)),
+        maxPain, resistance: finalResistance?.price || resistance, support: finalSupport?.price || support, 
+        sentiment, expiryDate: formattedExpiry, supportStrength: finalSupport?.strength || 'medium', 
         resistanceStrength: finalResistance?.strength || 'medium',
         supportTooltip: finalSupport?.tooltip || 'No support level found.',
         resistanceTooltip: finalResistance?.tooltip || 'No resistance level found.',
         ltp: ltp,
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
-        changePercent: parseFloat(changePercent.toFixed(2)),
-        ...volumeMetrics
+        changePercent: parseFloat(changePercent.toFixed(2)), ...volumeMetrics
     };
     
     return NextResponse.json(responseData);
 
   } catch (error: unknown) {
     const err = error as Error & { error_type?: string };
-    console.error("API Error:", err.message);
+    console.error("API Error:", err.message, err.stack);
     if (err.error_type === 'TokenException') {
         return NextResponse.json({ error: 'Kite token has expired. Please run the login script again.' }, { status: 401 });
     }
