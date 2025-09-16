@@ -435,7 +435,7 @@ export async function POST(request: Request) {
     const sheets = google.sheets({ version: 'v4', auth });
     const sheetResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'storks!A2:B',
+      range: 'stocks!A2:B',
     });
     
     const rows = sheetResponse.data.values;
