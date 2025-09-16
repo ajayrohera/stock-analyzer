@@ -303,7 +303,8 @@ function calculateSupportResistance(
         strength = 'medium';
         tooltip += ' | Medium: Moderate volume';
       } else {
-        tooltip += ' | Weak: Low volume';
+        strength = 'weak';
+        tooltip += ' | Weak: Low volume concentration';
       }
       
       levels.push({
