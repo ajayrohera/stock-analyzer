@@ -28,7 +28,8 @@ interface Instrument {
     tradingsymbol: string;
     strike: number;
     instrument_type: string;
-    expiry: string;
+    expiry: Date;
+    name: string;
 }
 
 interface HistoricalData {
@@ -435,16 +436,15 @@ export async function POST(request: Request) {
     const kc = new KiteConnect({ api_key: apiKey });
     kc.setAccessToken(JSON.parse(tokenData as string).accessToken);
 
-    // --- Read options cache from Redis ---
-    const optionsCache = await redis.get('options_cache');
-    if (!optionsCache) {
-      return NextResponse.json({ error: 'Options cache is empty. Please run the population script.' }, { status: 500 });
-    }
+    // --- GET OPTIONS CHAIN DIRECTLY FROM KITE API (NO CACHE) ---
+    const allInstruments = await kc.getInstruments('NFO');
+    const optionsChain = allInstruments.filter(instrument => 
+      instrument.name === tradingSymbol.toUpperCase() && 
+      (instrument.instrument_type === 'CE' || instrument.instrument_type === 'PE')
+    );
 
-    const parsedOptionsCache = JSON.parse(optionsCache as string);
-    const optionsChain = parsedOptionsCache[tradingSymbol];
     if (!optionsChain || optionsChain.length === 0) {
-        return NextResponse.json({ error: `Options data for '${tradingSymbol}' not found in cache.` }, { status: 404 });
+        return NextResponse.json({ error: `No options found for symbol '${tradingSymbol}'` }, { status: 404 });
     }
     
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
