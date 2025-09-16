@@ -465,6 +465,10 @@ export async function POST(request: Request) {
 
     const parsedOptionsCache = JSON.parse(optionsCache as string);
     const optionsChain = parsedOptionsCache[tradingSymbol];
+    // === ADD DEBUG LOGGING HERE ===
+console.log('Options cache data for', tradingSymbol, ':', optionsChain.length, 'options');
+console.log('Sample options:', optionsChain.slice(0, 3));
+// === END DEBUG LOGGING ===
     if (!optionsChain || optionsChain.length === 0) {
         return NextResponse.json({ error: `Options data for '${tradingSymbol}' not found in cache.` }, { status: 404 });
     }
