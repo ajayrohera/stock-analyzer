@@ -465,10 +465,6 @@ export async function POST(request: Request) {
 
     const parsedOptionsCache = JSON.parse(optionsCache as string);
     const optionsChain = parsedOptionsCache[tradingSymbol];
-    // === ADD DEBUG LOGGING HERE ===
-console.log('Options cache data for', tradingSymbol, ':', optionsChain.length, 'options');
-console.log('Sample options:', optionsChain.slice(0, 3));
-// === END DEBUG LOGGING ===
     if (!optionsChain || optionsChain.length === 0) {
         return NextResponse.json({ error: `Options data for '${tradingSymbol}' not found in cache.` }, { status: 404 });
     }
@@ -612,22 +608,6 @@ console.log('Sample options:', optionsChain.slice(0, 3));
     const nearestOption = optionsChain[0];
     const formattedExpiry = new Date(nearestOption.expiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
-    //new debug code
-    // Add this right before the return statement
-console.log('=== DEBUG: FINAL SUPPORT/RESISTANCE DATA ===');
-console.log('Closest Support:', closestSupport);
-console.log('Closest Resistance:', closestResistance);
-console.log('All Support/Resistance Levels:', supportResistanceLevels);
-
-// Check what strike prices are actually being analyzed
-supportResistanceLevels.forEach(level => {
-    if (level.price === 860 || level.price === 900) {
-        console.log(`Level ${level.price} (${level.type}):`, optionsByStrike[level.price]);
-    }
-});
-    
-    
-    
     // --- FINAL RESPONSE DATA ---
     const responseData = {
         symbol: displayName.toUpperCase(), 
