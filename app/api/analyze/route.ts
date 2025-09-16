@@ -43,7 +43,7 @@ interface SupportResistanceLevel {
   price: number;
   strength: 'weak' | 'medium' | 'strong';
   type: 'support' | 'resistance';
-  tooltip?: string; // Added for tooltip data
+  tooltip?: string;
 }
 
 // Only keep major indices and exceptionally important stocks
@@ -159,37 +159,42 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
-function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>): SupportResistanceLevel[] {
+// --- REFACTORED AND FIXED FUNCTIONS ---
+
+function findResistanceLevels(
+  currentPrice: number, 
+  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>,
+  allStrikes: number[] // Use the full list of strikes for accurate comparison
+): SupportResistanceLevel[] {
   const resistanceLevels: SupportResistanceLevel[] = [];
-  const strikes = Object.keys(optionsByStrike).map(Number).sort((a, b) => a - b);
   
-  for (const strike of strikes) {
+  for (const strike of allStrikes) {
     if (strike > currentPrice) {
-      const { ce_oi, pe_oi } = optionsByStrike[strike];
+      const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       
-      // Skip if insufficient OI
-      if (ce_oi < 50000) continue;
+      // Lowered threshold to be more inclusive of individual stocks
+      if (ce_oi < 30000) continue;
       
       const oiRatio = pe_oi > 0 ? ce_oi / pe_oi : Infinity;
       
-      // Check if this is a local maximum for call OI compared to adjacent strikes
-      const prevStrike = strikes.find(s => s === strike - 50);
-      const nextStrike = strikes.find(s => s === strike + 50);
-      const prevStrikeOI = prevStrike ? optionsByStrike[prevStrike]?.ce_oi || 0 : 0;
-      const nextStrikeOI = nextStrike ? optionsByStrike[nextStrike]?.ce_oi || 0 : 0;
+      // ✅ FIX: Dynamically find adjacent strikes instead of using a fixed interval
+      const currentIndex = allStrikes.indexOf(strike);
+      const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.ce_oi || 0 : 0;
+      const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.ce_oi || 0 : 0;
       
       const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
       
-      if (oiRatio >= 2 && ce_oi > 50000 && isLocalMax) {
+      if (oiRatio >= 1.8 && ce_oi > 30000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
-        const actualRatio = pe_oi > 0 ? (ce_oi / pe_oi).toFixed(2) : '∞';
-let tooltip = `CE: ${(ce_oi/100000).toFixed(1)}L, PE: ${(pe_oi/100000).toFixed(1)}L, Ratio: ${actualRatio}:1`;
         
-        // CORRECTED STRENGTH CALCULATION:
+        // ✅ FIX: Correctly define and format the ratio for the tooltip
+        const formattedRatio = pe_oi > 0 ? oiRatio.toFixed(2) : '∞';
+        let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${formattedRatio}:1`;
+        
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
           strength = 'strong';
           tooltip += ' | Strong: High CE dominance';
-        } else if (oiRatio < 1.8 || ce_oi < 100000) {
+        } else if (oiRatio < 2.0 || ce_oi < 100000) {
           strength = 'weak';
           tooltip += ' | Weak: Low CE dominance';
         } else {
@@ -209,38 +214,38 @@ let tooltip = `CE: ${(ce_oi/100000).toFixed(1)}L, PE: ${(pe_oi/100000).toFixed(1
   return resistanceLevels.sort((a, b) => a.price - b.price);
 }
 
-function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>): SupportResistanceLevel[] {
+function findSupportLevels(
+  currentPrice: number, 
+  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>,
+  allStrikes: number[] // Use the full list of strikes for accurate comparison
+): SupportResistanceLevel[] {
   const supportLevels: SupportResistanceLevel[] = [];
-  const strikes = Object.keys(optionsByStrike).map(Number).sort((a, b) => a - b);
   
-  for (const strike of strikes) {
+  for (const strike of allStrikes) {
     if (strike < currentPrice) {
-      const { ce_oi, pe_oi } = optionsByStrike[strike];
+      const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       
-      // Skip if insufficient OI
-      if (pe_oi < 50000) continue;
+      // Lowered threshold to be more inclusive of individual stocks
+      if (pe_oi < 30000) continue;
       
-      // Calculate ratio correctly
-      const actualRatio = ce_oi > 0 ? pe_oi / ce_oi : Infinity;
-      const actualRatioFormatted = ce_oi > 0 ? (pe_oi / ce_oi).toFixed(2) : '∞';
+      const oiRatio = ce_oi > 0 ? pe_oi / ce_oi : Infinity;
+      const formattedRatio = ce_oi > 0 ? oiRatio.toFixed(2) : '∞';
       
-      // Check if this is a local maximum for put OI compared to adjacent strikes
-      const prevStrike = strikes.find(s => s === strike - 50);
-      const nextStrike = strikes.find(s => s === strike + 50);
-      const prevStrikeOI = prevStrike ? optionsByStrike[prevStrike]?.pe_oi || 0 : 0;
-      const nextStrikeOI = nextStrike ? optionsByStrike[nextStrike]?.pe_oi || 0 : 0;
-      
+      // ✅ FIX: Dynamically find adjacent strikes instead of using a fixed interval
+      const currentIndex = allStrikes.indexOf(strike);
+      const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.pe_oi || 0 : 0;
+      const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.pe_oi || 0 : 0;
+
       const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
       
-      if (actualRatio >= 2 && pe_oi > 50000 && isLocalMax) {
+      if (oiRatio >= 1.8 && pe_oi > 30000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
-        let tooltip = `PE: ${(pe_oi/100000).toFixed(1)}L, CE: ${(ce_oi/100000).toFixed(1)}L, Ratio: ${actualRatioFormatted}:1`;
+        let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${formattedRatio}:1`;
         
-        // Use the correct ratio for strength classification
-        if ((actualRatio >= 3 && pe_oi > 1000000) || (actualRatio >= 4) || (pe_oi > 2000000)) {
+        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
           strength = 'strong';
           tooltip += ' | Strong: High PE dominance';
-        } else if (actualRatio < 1.8 || pe_oi < 100000) {
+        } else if (oiRatio < 2.0 || pe_oi < 100000) {
           strength = 'weak';
           tooltip += ' | Weak: Low PE dominance';
         } else {
@@ -292,7 +297,6 @@ function calculateSupportResistance(
       let strength: 'weak' | 'medium' | 'strong' = 'weak';
       let tooltip = `Hist. Volume: ${(volume/100000).toFixed(1)}L`;
       
-      // Determine strength based on volume percentile
       const maxVolume = Math.max(...sortedLevels.map(l => l[1]));
       const volumeRatio = volume / maxVolume;
       
@@ -323,23 +327,19 @@ function calculateEnhancedSupportResistance(
   symbol: string,
   history: HistoricalData[],
   currentPrice: number,
-  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>
+  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>,
+  allStrikes: number[] // Pass the full list of strikes
 ): SupportResistanceLevel[] {
   const baseLevels = calculateSupportResistance(history, currentPrice);
   
   // Find resistance and support levels based on OI data
-  const oiResistanceLevels = findResistanceLevels(currentPrice, optionsByStrike);
-  const oiSupportLevels = findSupportLevels(currentPrice, optionsByStrike);
+  const oiResistanceLevels = findResistanceLevels(currentPrice, optionsByStrike, allStrikes);
+  const oiSupportLevels = findSupportLevels(currentPrice, optionsByStrike, allStrikes);
   
-  // Merge OI-based levels with base levels (OI levels take priority)
+  // Merge OI-based levels with base levels
   oiResistanceLevels.forEach(oiLevel => {
     const existingIndex = baseLevels.findIndex(l => Math.abs(l.price - oiLevel.price) <= 10);
     if (existingIndex !== -1) {
-      // ✅ PRESERVE TOOLTIP if OI level doesn't have one
-      if (!oiLevel.tooltip && baseLevels[existingIndex].tooltip) {
-        oiLevel.tooltip = baseLevels[existingIndex].tooltip;
-      }
-      // Replace with OI-based level if it exists
       baseLevels[existingIndex] = oiLevel;
     } else {
       baseLevels.push(oiLevel);
@@ -349,7 +349,6 @@ function calculateEnhancedSupportResistance(
   oiSupportLevels.forEach(oiLevel => {
     const existingIndex = baseLevels.findIndex(l => Math.abs(l.price - oiLevel.price) <= 10);
     if (existingIndex !== -1) {
-      // Replace with OI-based level if it exists
       baseLevels[existingIndex] = oiLevel;
     } else {
       baseLevels.push(oiLevel);
@@ -371,9 +370,8 @@ function calculateEnhancedSupportResistance(
           tooltip: 'Psychological level'
         });
       } else if (existingLevel.strength === 'weak') {
-        // Upgrade weak levels to medium if they match psychological levels
         existingLevel.strength = 'medium';
-        existingLevel.tooltip += ' + Psychological level';
+        existingLevel.tooltip += ' + Psychological';
       }
     }
   });
@@ -383,10 +381,10 @@ function calculateEnhancedSupportResistance(
     index === array.findIndex(l => Math.abs(l.price - level.price) <= 5)
   );
   
-  // Sort by proximity to current price
+  // ✅ IMPROVEMENT: Return more levels to avoid cutting off strong ones
   return uniqueLevels
     .sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice))
-    .slice(0, 5); // Return top 5 closest levels
+    .slice(0, 8); // Return top 8 closest levels instead of 5
 }
 
 // --- MAIN API FUNCTION ---
@@ -518,12 +516,12 @@ export async function POST(request: Request) {
         if (otmPuts.length > 0) support = otmPuts[otmPuts.length - 1];
     }
     
-    // Calculate enhanced support/resistance WITH OI DATA
     const supportResistanceLevels = calculateEnhancedSupportResistance(
       displayName.toUpperCase(),
       historicalData,
       ltp,
-      optionsByStrike
+      optionsByStrike,
+      strikePrices // Pass the sorted strike prices array
     );
     
     const closestSupport = supportResistanceLevels
@@ -574,8 +572,8 @@ export async function POST(request: Request) {
         expiryDate: formattedExpiry, 
         supportStrength: closestSupport?.strength || 'medium', 
         resistanceStrength: closestResistance?.strength || 'medium',
-        supportTooltip: closestSupport?.tooltip || '',
-        resistanceTooltip: closestResistance?.tooltip || '',
+        supportTooltip: closestSupport?.tooltip || 'Default support level based on highest OI.',
+        resistanceTooltip: closestResistance?.tooltip || 'Default resistance level based on highest OI.',
         ltp: ltp,
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { 
           timeZone: 'Asia/Kolkata', 
