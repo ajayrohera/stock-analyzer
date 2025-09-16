@@ -162,17 +162,6 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
   const resistanceLevels: SupportResistanceLevel[] = [];
   const strikes = Object.keys(optionsByStrike).map(Number).sort((a, b) => a - b);
   
-  // Debug: Log all strikes with significant OI
-  console.log('=== DEBUG: RESISTANCE ANALYSIS ===');
-  strikes.forEach(strike => {
-    if (strike > currentPrice) {
-      const { ce_oi, pe_oi } = optionsByStrike[strike];
-      if (ce_oi > 50000) {
-        console.log(`Strike ${strike}: CE=${ce_oi}, PE=${pe_oi}, Ratio=${pe_oi > 0 ? (ce_oi/pe_oi).toFixed(2) : '∞'}`);
-      }
-    }
-  });
-  
   for (const strike of strikes) {
     if (strike > currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike];
@@ -193,7 +182,7 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       if (oiRatio >= 2 && ce_oi > 50000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
         const actualRatio = pe_oi > 0 ? (ce_oi / pe_oi).toFixed(2) : '∞';
-        let tooltip = `CE: ${(ce_oi/100000).toFixed(1)}L, PE: ${(pe_oi/100000).toFixed(1)}L, Ratio: ${actualRatio}:1`;
+let tooltip = `CE: ${(ce_oi/100000).toFixed(1)}L, PE: ${(pe_oi/100000).toFixed(1)}L, Ratio: ${actualRatio}:1`;
         
         // CORRECTED STRENGTH CALCULATION:
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
@@ -222,17 +211,6 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>): SupportResistanceLevel[] {
   const supportLevels: SupportResistanceLevel[] = [];
   const strikes = Object.keys(optionsByStrike).map(Number).sort((a, b) => a - b);
-  
-  // Debug: Log all strikes with significant OI
-  console.log('=== DEBUG: SUPPORT ANALYSIS ===');
-  strikes.forEach(strike => {
-    if (strike < currentPrice) {
-      const { ce_oi, pe_oi } = optionsByStrike[strike];
-      if (pe_oi > 50000) {
-        console.log(`Strike ${strike}: PE=${pe_oi}, CE=${ce_oi}, Ratio=${ce_oi > 0 ? (pe_oi/ce_oi).toFixed(2) : '∞'}`);
-      }
-    }
-  });
   
   for (const strike of strikes) {
     if (strike < currentPrice) {
@@ -522,35 +500,6 @@ export async function POST(request: Request) {
             if (!strikePrices.includes(strike)) strikePrices.push(strike);
         }
     }
-
-    // === ADD DEBUG LOGGING HERE ===
-    console.log('=== DEBUG: RAW OPTIONS DATA ===');
-    console.log('Trading Symbol:', tradingSymbol);
-    console.log('LTP:', ltp);
-    console.log('Total Options:', optionsChain.length);
-
-    // Log specific strike prices around 900
-    for (const opt of optionsChain) {
-        const liveData = quoteData[`NFO:${opt.tradingsymbol}`];
-        if (Math.abs(opt.strike - 900) <= 100) { // Check strikes around 900
-            console.log(`Strike ${opt.strike} ${opt.instrument_type}:`, {
-                tradingsymbol: opt.tradingsymbol,
-                oi: liveData?.oi,
-                volume: liveData?.volume,
-                last_price: liveData?.last_price,
-                expiry: opt.expiry
-            });
-        }
-    }
-
-    // Log the optionsByStrike structure for debugging
-    console.log('=== DEBUG: optionsByStrike STRUCTURE ===');
-    Object.entries(optionsByStrike).forEach(([strike, oiData]) => {
-        if (Math.abs(Number(strike) - 900) <= 100) {
-            console.log(`Strike ${strike}:`, oiData);
-        }
-    });
-    // === END DEBUG LOGGING ===
     
     if (strikePrices.length === 0) { return NextResponse.json({ error: `Found options but no OI data for ${displayName}.` }, { status: 404 }); }
     strikePrices.sort((a, b) => a - b);
