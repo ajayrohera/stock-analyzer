@@ -128,18 +128,23 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
     if (strike > currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       if (ce_oi < 30000) continue;
-      const oiRatio = pe_oi > 0 ? ce_oi / pe_oi : Infinity;
+
+      // ✅ CRITICAL FIX: Ensure there's some Put OI for the ratio to be meaningful.
+      // This prevents far OTM strikes with zero PE OI from creating an infinite ratio.
+      if (pe_oi < 1000) continue; 
+
+      const oiRatio = ce_oi / pe_oi;
       const currentIndex = allStrikes.indexOf(strike);
       const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.ce_oi || 0 : 0;
       const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.ce_oi || 0 : 0;
       const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
-      if (oiRatio >= 1.8 && ce_oi > 30000 && isLocalMax) {
+      
+      if (oiRatio >= 1.8 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
-        const formattedRatio = pe_oi > 0 ? oiRatio.toFixed(2) : '∞';
-        let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${formattedRatio}:1`;
-        if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong: High CE dominance'; }
+        let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
+        if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong'; }
         else if (oiRatio < 2.0 || ce_oi < 100000) { strength = 'weak'; }
-        else { tooltip += ' | Medium: Moderate CE dominance'; }
+        else { tooltip += ' | Medium'; }
         resistanceLevels.push({ price: strike, strength, type: 'resistance', tooltip });
       }
     }
@@ -153,18 +158,22 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
     if (strike < currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       if (pe_oi < 30000) continue;
-      const oiRatio = ce_oi > 0 ? pe_oi / ce_oi : Infinity;
-      const formattedRatio = ce_oi > 0 ? oiRatio.toFixed(2) : '∞';
+
+      // ✅ CRITICAL FIX: Ensure there's some Call OI for the ratio to be meaningful.
+      if (ce_oi < 1000) continue;
+
+      const oiRatio = pe_oi / ce_oi;
       const currentIndex = allStrikes.indexOf(strike);
       const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.pe_oi || 0 : 0;
       const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.pe_oi || 0 : 0;
       const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
-      if (oiRatio >= 1.8 && pe_oi > 30000 && isLocalMax) {
+      
+      if (oiRatio >= 1.8 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
-        let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${formattedRatio}:1`;
-        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong: High PE dominance'; }
+        let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
+        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong'; }
         else if (oiRatio < 2.0 || pe_oi < 100000) { strength = 'weak'; }
-        else { tooltip += ' | Medium: Moderate PE dominance'; }
+        else { tooltip += ' | Medium'; }
         supportLevels.push({ price: strike, strength, type: 'support', tooltip });
       }
     }
@@ -229,7 +238,7 @@ function calculateEnhancedSupportResistance(symbol: string, history: HistoricalD
 export async function POST(request: Request) {
   try {
     const apiKey = process.env.KITE_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: 'Server configuration error: KITE_API_KEY is missing.' }, { status: 500 });
+    if (!apiKey) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
 
     const body = await request.json() as { symbol: string };
     const { symbol: displayName } = body;
@@ -252,11 +261,11 @@ export async function POST(request: Request) {
     const rows = sheetResponse.data.values;
     if (!rows || rows.length === 0) return NextResponse.json({ error: 'Google Sheet is empty.' }, { status: 500 }); 
     const row = rows.find(r => r[0] === displayName);
-    if (!row || !row[1]) return NextResponse.json({ error: `TradingSymbol for '${displayName}' not found in Google Sheet.` }, { status: 404 }); 
+    if (!row || !row[1]) return NextResponse.json({ error: `TradingSymbol for '${displayName}' not found.` }, { status: 404 }); 
     const tradingSymbol = row[1];
 
     const tokenData = await redis.get('kite_token');
-    if (!tokenData) return NextResponse.json({ error: 'Kite token not found. Please run the login script.' }, { status: 401 });
+    if (!tokenData) return NextResponse.json({ error: 'Kite token not found.' }, { status: 401 });
 
     const kc = new KiteConnect({ api_key: apiKey });
     kc.setAccessToken(JSON.parse(tokenData as string).accessToken);
@@ -267,7 +276,7 @@ export async function POST(request: Request) {
     );
 
     if (!unfilteredOptionsChain || unfilteredOptionsChain.length === 0) {
-        return NextResponse.json({ error: `No options found for symbol '${tradingSymbol}'` }, { status: 404 });
+        return NextResponse.json({ error: `No options found for '${tradingSymbol}'` }, { status: 404 });
     }
 
     let nearestExpiry = new Date(unfilteredOptionsChain[0].expiry);
@@ -292,7 +301,6 @@ export async function POST(request: Request) {
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
 
-    // ✅ FIX: Robustly build the optionsByStrike map to prevent the "Missing Contract" bug
     const optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }> = {};
     const strikePrices = [...new Set(optionsChain.map(o => o.strike))].sort((a, b) => a - b);
     
@@ -304,22 +312,17 @@ export async function POST(request: Request) {
     for (const strike of strikePrices) {
         const ceOpt = ceChain.find(o => o.strike === strike);
         const peOpt = peChain.find(o => o.strike === strike);
-
         const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
         const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
-
         const ce_oi = ceLiveData?.oi || 0;
         const pe_oi = peLiveData?.oi || 0;
-        
         optionsByStrike[strike] = { ce_oi, pe_oi };
-        
         totalCallOI += ce_oi;
         totalPutOI += pe_oi;
         totalCallVolume += ceLiveData?.volume || 0;
         totalPutVolume += peLiveData?.volume || 0;
     }
 
-    // --- Calculate default support/resistance based on the new, accurate data ---
     let highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
     for (const strike of strikePrices) {
         if (strike > ltp) {
@@ -371,14 +374,15 @@ export async function POST(request: Request) {
       }
     }
     
-    const pcr = totalPutOI > 0 ? totalCallOI / totalPutOI : 0; // Corrected PCR
+    // ✅ CORRECTED PCR CALCULATION
+    const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
     let sentiment = "Neutral";
     if (pcr > 1.1) sentiment = "Bullish";
     else if (pcr < 0.9) sentiment = "Bearish";
     else if (pcr > 1.0) sentiment = "Slightly Bullish";
     else if (pcr < 1.0) sentiment = "Slightly Bearish";
     
-    const volumePcr = totalPutVolume > 0 ? totalCallVolume / totalPutVolume : 0; // Corrected PCR
+    const volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
     
     let minLoss = Infinity, maxPain = 0;
     for (const expiryStrike of strikePrices) {
