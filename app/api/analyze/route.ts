@@ -46,19 +46,13 @@ interface SupportResistanceLevel {
   tooltip?: string;
 }
 
-// Only keep major indices and exceptionally important stocks
 const specialPsychologicalLevels: Record<string, number[]> = {
   'NIFTY': [24000, 24500, 25000, 25500, 26000],
   'BANKNIFTY': [52000, 53000, 54000, 55000, 56000],
   'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
 };
 
-// Initialize Redis client
-const redis = createClient({
-  url: process.env.REDIS_URL,
-});
-
-// Connect to Redis
+const redis = createClient({ url: process.env.REDIS_URL });
 redis.connect().catch(console.error);
 
 // --- HELPER FUNCTIONS ---
@@ -66,7 +60,6 @@ async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await redis.get('volume_history');
     if (!historyData) return [];
-    
     const history = JSON.parse(historyData as string);
     return history[symbol] || [];
   } catch (error) {
@@ -77,74 +70,51 @@ async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
 
 function generatePsychologicalLevels(currentPrice: number): number[] {
   const levels: number[] = [];
-  const priceRange = currentPrice * 0.2; // ±20% range
-  
+  const priceRange = currentPrice * 0.2;
   const increment = currentPrice > 1000 ? 100 : 50;
   const start = Math.round((currentPrice - priceRange) / increment) * increment;
   const end = Math.round((currentPrice + priceRange) / increment) * increment;
-  
   for (let price = start; price <= end; price += increment) {
     if (price % 100 === 0 || (price % 50 === 0 && currentPrice < 500)) {
       levels.push(price);
     }
   }
-  
   return levels.filter(level => Math.abs(level - currentPrice) > increment);
 }
 
 function getPsychologicalLevels(symbol: string, currentPrice: number): number[] {
   const upperSymbol = symbol.toUpperCase();
-  if (specialPsychologicalLevels[upperSymbol]) {
-    return specialPsychologicalLevels[upperSymbol];
-  }
+  if (specialPsychologicalLevels[upperSymbol]) return specialPsychologicalLevels[upperSymbol];
   return generatePsychologicalLevels(currentPrice);
 }
 
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
   if (!historicalData.length || !currentPrice) return 0;
-  
   const previousDays = historicalData.filter(entry => {
     const entryDate = new Date(entry.date);
     const today = new Date();
-    return entryDate.getDate() !== today.getDate() || 
-           entryDate.getMonth() !== today.getMonth() ||
-           entryDate.getFullYear() !== today.getFullYear();
+    return entryDate.getDate() !== today.getDate() || entryDate.getMonth() !== today.getMonth() || entryDate.getFullYear() !== today.getFullYear();
   });
-  
   if (previousDays.length === 0) return 0;
-  
   previousDays.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const previousClose = previousDays[0]?.lastPrice;
-  
   if (!previousClose) return 0;
-  
   return ((currentPrice - previousClose) / previousClose) * 100;
 }
 
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
   if (!historicalData.length) return {};
-  
-  const recentData = historicalData
-    .filter(entry => entry.totalVolume > 0)
-    .slice(0, 20);
-  
+  const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(0, 20);
   if (recentData.length === 0) return {};
-  
   const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
   const avg20DayVolume = totalVolume / recentData.length;
-  
-  let todayVolumePercentage = 0;
-  let estimatedTodayVolume = 0;
-  
+  let todayVolumePercentage = 0, estimatedTodayVolume = 0;
   if (currentVolume && currentVolume > 0) {
-    const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
-      (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
-    
+    const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
     const expectedDailyVolume = avg20DayVolume * (marketProgress / 6.25);
     todayVolumePercentage = (currentVolume / expectedDailyVolume) * 100;
     estimatedTodayVolume = currentVolume * (6.25 / marketProgress);
   }
-  
   return {
     avg20DayVolume: Math.round(avg20DayVolume),
     todayVolumePercentage: parseFloat(todayVolumePercentage.toFixed(1)),
@@ -152,40 +122,24 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
-function findResistanceLevels(
-  currentPrice: number, 
-  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>,
-  allStrikes: number[]
-): SupportResistanceLevel[] {
+function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const resistanceLevels: SupportResistanceLevel[] = [];
-  
   for (const strike of allStrikes) {
     if (strike > currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       if (ce_oi < 30000) continue;
-      
       const oiRatio = pe_oi > 0 ? ce_oi / pe_oi : Infinity;
-      
       const currentIndex = allStrikes.indexOf(strike);
       const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.ce_oi || 0 : 0;
       const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.ce_oi || 0 : 0;
-      
       const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
-      
       if (oiRatio >= 1.8 && ce_oi > 30000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
         const formattedRatio = pe_oi > 0 ? oiRatio.toFixed(2) : '∞';
         let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${formattedRatio}:1`;
-        
-        if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
-          strength = 'strong';
-          tooltip += ' | Strong: High CE dominance';
-        } else if (oiRatio < 2.0 || ce_oi < 100000) {
-          strength = 'weak';
-        } else {
-          tooltip += ' | Medium: Moderate CE dominance';
-        }
-        
+        if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong: High CE dominance'; }
+        else if (oiRatio < 2.0 || ce_oi < 100000) { strength = 'weak'; }
+        else { tooltip += ' | Medium: Moderate CE dominance'; }
         resistanceLevels.push({ price: strike, strength, type: 'resistance', tooltip });
       }
     }
@@ -193,39 +147,24 @@ function findResistanceLevels(
   return resistanceLevels.sort((a, b) => a.price - b.price);
 }
 
-function findSupportLevels(
-  currentPrice: number, 
-  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>,
-  allStrikes: number[]
-): SupportResistanceLevel[] {
+function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const supportLevels: SupportResistanceLevel[] = [];
-  
   for (const strike of allStrikes) {
     if (strike < currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       if (pe_oi < 30000) continue;
-      
       const oiRatio = ce_oi > 0 ? pe_oi / ce_oi : Infinity;
       const formattedRatio = ce_oi > 0 ? oiRatio.toFixed(2) : '∞';
-      
       const currentIndex = allStrikes.indexOf(strike);
       const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.pe_oi || 0 : 0;
       const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.pe_oi || 0 : 0;
       const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
-      
       if (oiRatio >= 1.8 && pe_oi > 30000 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong' = 'medium';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${formattedRatio}:1`;
-        
-        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
-          strength = 'strong';
-          tooltip += ' | Strong: High PE dominance';
-        } else if (oiRatio < 2.0 || pe_oi < 100000) {
-          strength = 'weak';
-        } else {
-          tooltip += ' | Medium: Moderate PE dominance';
-        }
-        
+        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong: High PE dominance'; }
+        else if (oiRatio < 2.0 || pe_oi < 100000) { strength = 'weak'; }
+        else { tooltip += ' | Medium: Moderate PE dominance'; }
         supportLevels.push({ price: strike, strength, type: 'support', tooltip });
       }
     }
@@ -252,9 +191,9 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
       let tooltip = `Hist. Volume: ${(volume/100000).toFixed(1)}L`;
       const maxVolume = Math.max(...sortedLevels.map(l => l[1]));
       const volumeRatio = volume / maxVolume;
-      if (volumeRatio > 0.7) { strength = 'strong'; tooltip += ' | Strong: High volume concentration'; }
-      else if (volumeRatio > 0.4) { strength = 'medium'; tooltip += ' | Medium: Moderate volume'; }
-      else { strength = 'weak'; tooltip += ' | Weak: Low volume concentration'; }
+      if (volumeRatio > 0.7) { strength = 'strong'; tooltip += ' | Strong'; }
+      else if (volumeRatio > 0.4) { strength = 'medium'; tooltip += ' | Medium'; }
+      else { strength = 'weak'; tooltip += ' | Weak'; }
       levels.push({ price, strength, type: price < currentPrice ? 'support' : 'resistance', tooltip });
     }
   });
@@ -324,27 +263,20 @@ export async function POST(request: Request) {
 
     const allInstruments = await kc.getInstruments('NFO');
     const unfilteredOptionsChain = allInstruments.filter(instrument => 
-      instrument.name === tradingSymbol.toUpperCase() && 
-      (instrument.instrument_type === 'CE' || instrument.instrument_type === 'PE')
+      instrument.name === tradingSymbol.toUpperCase() && (instrument.instrument_type === 'CE' || instrument.instrument_type === 'PE')
     );
 
     if (!unfilteredOptionsChain || unfilteredOptionsChain.length === 0) {
         return NextResponse.json({ error: `No options found for symbol '${tradingSymbol}'` }, { status: 404 });
     }
 
-    // ✅ FIX: Step 1 - Find the nearest expiry date from the unfiltered list
     let nearestExpiry = new Date(unfilteredOptionsChain[0].expiry);
     for (const opt of unfilteredOptionsChain) {
         const expiryDate = new Date(opt.expiry);
-        if (expiryDate < nearestExpiry) {
-            nearestExpiry = expiryDate;
-        }
+        if (expiryDate < nearestExpiry) nearestExpiry = expiryDate;
     }
 
-    // ✅ FIX: Step 2 - Filter the options chain to ONLY include instruments of the nearest expiry
-    const optionsChain = unfilteredOptionsChain.filter(instrument => 
-        new Date(instrument.expiry).getTime() === nearestExpiry.getTime()
-    );
+    const optionsChain = unfilteredOptionsChain.filter(instrument => new Date(instrument.expiry).getTime() === nearestExpiry.getTime());
     
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
     const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
@@ -357,46 +289,51 @@ export async function POST(request: Request) {
     const changePercent = calculateChangePercent(ltp, historicalData);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
 
-    // ✅ FIX: Step 3 - Use the CLEAN, filtered optionsChain for all subsequent logic
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
 
-    let totalCallOI = 0, totalPutOI = 0, highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
-    let totalCallVolume = 0, totalPutVolume = 0;
-    let otmCallOI = 0, otmPutOI = 0;
-    const strikePrices: number[] = [];
+    // ✅ FIX: Robustly build the optionsByStrike map to prevent the "Missing Contract" bug
     const optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }> = {};
+    const strikePrices = [...new Set(optionsChain.map(o => o.strike))].sort((a, b) => a - b);
     
-    for (const opt of optionsChain) { // Using the filtered chain
-        const liveData = quoteData[`NFO:${opt.tradingsymbol}`];
-        const oi = liveData?.oi || 0;
-        const volume = liveData?.volume || 0;
-        if (oi > 0) {
-            const strike = opt.strike;
-            if (!optionsByStrike[strike]) optionsByStrike[strike] = { ce_oi: 0, pe_oi: 0 };
-            if (opt.instrument_type === 'CE') {
-                totalCallOI += oi;
-                totalCallVolume += volume;
-                if (strike > ltp) {
-                    if (oi > highestCallOI) { highestCallOI = oi; resistance = strike; }
-                    otmCallOI += oi;
-                }
-                optionsByStrike[strike].ce_oi = oi;
-            } else if (opt.instrument_type === 'PE') {
-                totalPutOI += oi;
-                totalPutVolume += volume;
-                if (strike < ltp) {
-                    if (oi > highestPutOI) { highestPutOI = oi; support = strike; }
-                    otmPutOI += oi;
-                }
-                optionsByStrike[strike].pe_oi = oi;
+    const ceChain = optionsChain.filter(o => o.instrument_type === 'CE');
+    const peChain = optionsChain.filter(o => o.instrument_type === 'PE');
+
+    let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
+
+    for (const strike of strikePrices) {
+        const ceOpt = ceChain.find(o => o.strike === strike);
+        const peOpt = peChain.find(o => o.strike === strike);
+
+        const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
+        const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
+
+        const ce_oi = ceLiveData?.oi || 0;
+        const pe_oi = peLiveData?.oi || 0;
+        
+        optionsByStrike[strike] = { ce_oi, pe_oi };
+        
+        totalCallOI += ce_oi;
+        totalPutOI += pe_oi;
+        totalCallVolume += ceLiveData?.volume || 0;
+        totalPutVolume += peLiveData?.volume || 0;
+    }
+
+    // --- Calculate default support/resistance based on the new, accurate data ---
+    let highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
+    for (const strike of strikePrices) {
+        if (strike > ltp) {
+            if (optionsByStrike[strike].ce_oi > highestCallOI) {
+                highestCallOI = optionsByStrike[strike].ce_oi;
+                resistance = strike;
             }
-            if (!strikePrices.includes(strike)) strikePrices.push(strike);
+        } else if (strike < ltp) {
+            if (optionsByStrike[strike].pe_oi > highestPutOI) {
+                highestPutOI = optionsByStrike[strike].pe_oi;
+                support = strike;
+            }
         }
     }
-    
-    if (strikePrices.length === 0) return NextResponse.json({ error: `Found options but no OI data for ${displayName}.` }, { status: 404 });
-    strikePrices.sort((a, b) => a - b);
     
     if (resistance === 0) {
         const otmCalls = strikePrices.filter(strike => strike > ltp);
@@ -434,27 +371,24 @@ export async function POST(request: Request) {
       }
     }
     
+    const pcr = totalPutOI > 0 ? totalCallOI / totalPutOI : 0; // Corrected PCR
     let sentiment = "Neutral";
-    const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0;
-    const otmRatio = otmCallOI > 0 ? otmPutOI / otmCallOI : 0;
-    if (pcr > 1.1 && otmRatio > 1.5) sentiment = "Strongly Bullish";
-    else if (pcr < 0.9 && otmRatio < 0.75) sentiment = "Strongly Bearish";
+    if (pcr > 1.1) sentiment = "Bullish";
+    else if (pcr < 0.9) sentiment = "Bearish";
     else if (pcr > 1.0) sentiment = "Slightly Bullish";
     else if (pcr < 1.0) sentiment = "Slightly Bearish";
     
-    const volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+    const volumePcr = totalPutVolume > 0 ? totalCallVolume / totalPutVolume : 0; // Corrected PCR
     
     let minLoss = Infinity, maxPain = 0;
-    if (strikePrices.length > 0) {
-        for (const expiryStrike of strikePrices) {
-            let totalLoss = 0;
-            for (const strike of strikePrices) {
-                const option = optionsByStrike[strike];
-                if (option.ce_oi > 0 && expiryStrike > strike) totalLoss += (expiryStrike - strike) * option.ce_oi;
-                if (option.pe_oi > 0 && expiryStrike < strike) totalLoss += (strike - expiryStrike) * option.pe_oi;
-            }
-            if (totalLoss < minLoss) { minLoss = totalLoss; maxPain = expiryStrike; }
+    for (const expiryStrike of strikePrices) {
+        let totalLoss = 0;
+        for (const strike of strikePrices) {
+            const option = optionsByStrike[strike];
+            if (option.ce_oi > 0 && expiryStrike > strike) totalLoss += (expiryStrike - strike) * option.ce_oi;
+            if (option.pe_oi > 0 && expiryStrike < strike) totalLoss += (strike - expiryStrike) * option.pe_oi;
         }
+        if (totalLoss < minLoss) { minLoss = totalLoss; maxPain = expiryStrike; }
     }
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
