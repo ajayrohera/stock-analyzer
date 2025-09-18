@@ -1,383 +1,155 @@
 // scripts/update-volume-history.ts
 import { KiteConnect } from 'kiteconnect';
-import redis from 'redis';
-import fs from 'fs/promises';
-import path from 'path';
+import { createClient } from 'redis';
 import { google } from 'googleapis';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
+import path from 'path';
 
-// ES module equivalent of __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Load environment variables
+// Load environment variables from the root .env.local
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
-const volumeHistoryPath = path.join(process.cwd(), 'volume_history.json');
-
-// Helper function to safely parse JSON
-async function safeReadJson(filePath: string): Promise<any> {
+// Helper function to get all symbols from Google Sheets
+async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string }[]> {
   try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    return {};
-  }
-}
-
-// Fallback: Get token from environment variable
-function getTokenFromEnv() {
-  try {
-    const envToken = process.env.KITE_TOKEN_DATA;
-    if (!envToken) return null;
-    
-    return JSON.parse(envToken);
-  } catch (error) {
-    console.error('Failed to parse token from env:', error);
-    return null;
-  }
-}
-
-// Validate token consistency between sources
-function validateTokenConsistency(redisToken: any, envToken: any): void {
-  if (redisToken && envToken) {
-    const redisAccess = redisToken.accessToken || '';
-    const envAccess = envToken.accessToken || '';
-    
-    if (redisAccess && envAccess && redisAccess !== envAccess) {
-      console.warn('⚠️ Token mismatch between Redis and environment variable');
-      
-      const redisTime = redisToken.loginTime || 0;
-      const envTime = envToken.loginTime || 0;
-      console.warn('   Redis token age:', Math.floor((Date.now() - redisTime) / (1000 * 60 * 60)) + 'h');
-      console.warn('   Env token age:  ', Math.floor((Date.now() - envTime) / (1000 * 60 * 60)) + 'h');
-      
-      if (redisTime > envTime) {
-        console.log('   Using Redis token (newer)');
-      } else {
-        console.log('   Using env token (newer)');
-      }
-    }
-  }
-}
-
-// Synchronize tokens between sources
-async function synchronizeTokens(redisClient: any, redisToken: any, envToken: any) {
-  if (!redisToken || !envToken) return;
-  
-  const redisTime = redisToken.loginTime || 0;
-  const envTime = envToken.loginTime || 0;
-  
-  // If environment is newer, update Redis
-  if (envTime > redisTime + 60000 && redisClient) { // 1 minute threshold
-    try {
-      await redisClient.setEx('kite_token', 24 * 60 * 60, JSON.stringify(envToken));
-      console.log('🔄 Updated Redis with newer environment token');
-    } catch (error) {
-      console.log('⚠️ Could not update Redis with newer token:', error);
-    }
-  }
-}
-
-// Helper function to refresh token
-async function refreshAccessToken(kc: any, tokenData: any): Promise<any> {
-  try {
-    console.log('🔄 Token expired, attempting refresh...');
-    
-    if (!process.env.KITE_API_SECRET) {
-      throw new Error('KITE_API_SECRET not set for token refresh');
-    }
-
-    const refreshResponse = await kc.renewAccessToken(tokenData.refreshToken, process.env.KITE_API_SECRET!);
-    
-    const newTokenData = {
-      accessToken: refreshResponse.access_token,
-      refreshToken: refreshResponse.refresh_token,
-      loginTime: Date.now()
-    };
-    
-    // Try to update Redis if available
-    try {
-      const redisClient = redis.createClient({
-        url: process.env.REDIS_URL as string,
-        password: process.env.REDIS_PASSWORD as string
-      });
-
-      redisClient.on('error', (err) => console.log('Redis Client Error', err));
-      await redisClient.connect();
-      await redisClient.setEx('kite_token', 24 * 60 * 60, JSON.stringify(newTokenData));
-      await redisClient.quit();
-      console.log('✅ Token refreshed and saved to Redis');
-    } catch (redisError) {
-      console.log('⚠️ Could not save to Redis, token refreshed in memory only');
-    }
-    
-    return newTokenData;
-  } catch (error) {
-    console.error('❌ Token refresh failed:', error);
-    throw new Error('Token refresh failed. Please re-authenticate by running authenticate.ts');
-  }
-}
-
-// Get all symbols
-async function getAllSymbols(): Promise<string[]> {
-  try {
-    if (process.env.NODE_ENV === 'production') {
-      return ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TATASTEEL', 'INFY'];
-    }
-    
-    const auth = new google.auth.GoogleAuth({ 
-      keyFile: path.join(process.cwd(), 'credentials.json'), 
-      scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly' 
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        type: 'service_account',
+        project_id: process.env.GOOGLE_PROJECT_ID,
+        private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
+        private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+        client_email: process.env.GOOGLE_CLIENT_EMAIL,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+      },
+      scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly'
     });
     
     const sheets = google.sheets({ version: 'v4', auth });
     const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: '1NeUJ-N3yNAhtLN0VPV71vY88MTTAYGEW8gGxtNbVcRU',
-      range: 'stocks!A2:A',
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: 'stocks!A2:B', // Fetching both columns now
     });
+
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) return [];
     
-    return response.data.values?.flat().filter(Boolean) || [];
+    return rows
+      .map(row => ({ displayName: row[0], tradingSymbol: row[1] }))
+      .filter(s => s.displayName && s.tradingSymbol);
+
   } catch (error) {
-    console.error('Error fetching symbols, using default set:', error);
-    return ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TATASTEEL', 'INFY'];
+    console.error('❌ Error fetching symbols from Google Sheets:', error);
+    // Fallback to a default list in case of error
+    return [{ displayName: 'NIFTY', tradingSymbol: 'NIFTY 50' }];
   }
 }
 
-// Extract OI data from quote response
-function extractOIData(data: any) {
-  const oiData: any = {};
-  
-  // Check various possible OI field names
-  if (data.oi !== undefined) {
-    oiData.openInterest = data.oi;
-  }
-  if (data.open_interest !== undefined) {
-    oiData.openInterest = data.open_interest;
-  }
-  if (data.openinterest !== undefined) {
-    oiData.openInterest = data.openinterest;
-  }
-  
-  // Additional useful fields
-  if (data.last_price !== undefined) {
-    oiData.lastPrice = data.last_price;
-  }
-  if (data.volume !== undefined) {
-    oiData.volume = data.volume;
-  }
-  if (data.change !== undefined) {
-    oiData.change = data.change;
-  }
-  if (data.avg_price !== undefined) {
-    oiData.averagePrice = data.avg_price;
-  }
-  
-  return oiData;
-}
 
+// --- MAIN FUNCTION ---
 async function updateVolumeHistory() {
-  let redisClient = null;
-
+  console.log('--- Starting Volume History Update ---');
+  
+  const redisClient = createClient({ url: process.env.REDIS_URL });
+  
   try {
+    // 1. Connect to Redis
+    await redisClient.connect();
+    console.log('✅ Connected to Redis');
+
+    // 2. Get API Key and Access Token
     const apiKey = process.env.KITE_API_KEY;
-    if (!apiKey) throw new Error('KITE_API_KEY not set');
-    
-    let redisToken = null;
-    let envToken = null;
-    let tokenData = null;
+    if (!apiKey) throw new Error('KITE_API_KEY is not set in environment variables.');
 
-    // Try to connect to Redis first
-    try {
-      redisClient = redis.createClient({
-        url: process.env.REDIS_URL as string,
-        password: process.env.REDIS_PASSWORD as string
-      });
-
-      redisClient.on('error', (err) => console.log('Redis Client Error', err));
-      await redisClient.connect();
-      console.log('✅ Connected to Redis');
-
-      // Try to get token from Redis
-      const tokenDataStr = await redisClient.get('kite_token');
-      if (tokenDataStr) {
-        redisToken = JSON.parse(tokenDataStr);
-      }
-    } catch (redisError) {
-      console.log('⚠️ Redis connection failed, trying environment variable...');
+    const tokenDataString = await redisClient.get('kite_token');
+    if (!tokenDataString) {
+      throw new Error('No Kite token found in Redis. Please run the daily manual login script first.');
     }
-
-    // Get environment token
-    envToken = getTokenFromEnv();
-
-    // Validate consistency and synchronize if needed
-    if (redisToken && envToken) {
-      validateTokenConsistency(redisToken, envToken);
-      
-      if (redisClient) {
-        await synchronizeTokens(redisClient, redisToken, envToken);
-      }
-    }
-
-    // Choose the appropriate token source
-    if (redisToken && envToken) {
-      const redisTime = redisToken.loginTime || 0;
-      const envTime = envToken.loginTime || 0;
-      tokenData = redisTime > envTime ? redisToken : envToken;
-      console.log(`🔑 Using ${redisTime > envTime ? 'Redis' : 'environment'} token`);
-    } else if (redisToken) {
-      tokenData = redisToken;
-      console.log('🔑 Using Redis token');
-    } else if (envToken) {
-      tokenData = envToken;
-      console.log('🔑 Using environment token');
-    }
-
-    if (!tokenData) {
-      throw new Error('No access token found in Redis or environment variables. Please run authenticate.ts first');
-    }
-
+    const tokenData = JSON.parse(tokenDataString);
     if (!tokenData.accessToken) {
-      throw new Error('Invalid token data: access token missing');
+      throw new Error('Invalid token data found in Redis: accessToken is missing.');
     }
 
-    // Get all symbols to track
-    const symbols = await getAllSymbols();
-    if (symbols.length === 0) throw new Error('No symbols found');
-    
-    console.log(`📊 Found ${symbols.length} symbols to update`);
-
-    // Initialize KiteConnect
-    const kc = new KiteConnect({
-      api_key: apiKey
-    }) as any;
-    
+    // 3. Initialize KiteConnect
+    const kc = new KiteConnect({ api_key: apiKey });
     kc.setAccessToken(tokenData.accessToken);
+    console.log('🔑 KiteConnect initialized with access token.');
 
-    // Load existing history
-    let history: Record<string, Array<{
-      date: string;
-      totalVolume: number;
-      openInterest?: number;
-      lastPrice?: number;
-      change?: number;
-      averagePrice?: number;
-      timestamp: number;
-    }>> = await safeReadJson(volumeHistoryPath);
-    
-    // Fetch latest data for all symbols
+    // 4. Get all symbols to track
+    const symbols = await getAllSymbols();
+    if (symbols.length === 0) throw new Error('No symbols found in Google Sheet.');
+    console.log(`📊 Found ${symbols.length} symbols to update.`);
+
+    // 5. Fetch existing history from Redis
+    const existingHistoryStr = await redisClient.get('volume_history');
+    const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
+
+    // 6. Fetch latest data for all symbols
     const today = new Date().toISOString().split('T')[0];
     const timestamp = Date.now();
     let updatedCount = 0;
     let failedCount = 0;
-    let oiDataCount = 0;
+
+    const instrumentIdentifiers = symbols.map(s => {
+      const exchange = (s.displayName === 'NIFTY' || s.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
+      return `${exchange}:${s.tradingSymbol}`;
+    });
+
+    const quoteData = await kc.getQuote(instrumentIdentifiers);
 
     for (const symbol of symbols) {
       try {
-        // Determine exchange based on symbol type
-        const exchange = (symbol === 'NIFTY' || symbol === 'BANKNIFTY') ? 'NFO' : 'NSE';
-        const tradingsymbol = symbol;
-        
-        let quote;
-        try {
-          quote = await kc.getQuote([`${exchange}:${tradingsymbol}`]);
-        } catch (error: any) {
-          // If token expired, refresh and retry
-          if (error.message.includes('token') || error.message.includes('expired') || error.message.includes('invalid') || error.message.includes('401')) {
-            const newTokenData = await refreshAccessToken(kc, tokenData);
-            kc.setAccessToken(newTokenData.accessToken);
-            quote = await kc.getQuote([`${exchange}:${tradingsymbol}`]);
-          } else {
-            throw error;
-          }
-        }
-        
-        const data = quote[`${exchange}:${tradingsymbol}`];
-        
-        if (data && data.volume !== undefined) {
-          if (!history[symbol]) history[symbol] = [];
-          
-          // Remove old entry for today if it exists
-          history[symbol] = history[symbol].filter(entry => entry.date !== today);
-          
-          // Extract OI and other data
-          const oiData = extractOIData(data);
-          
-          // Create new entry
-          const newEntry: any = {
+        const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
+        const data = quoteData[`${exchange}:${symbol.tradingSymbol}`];
+
+        if (data && data.volume !== undefined && data.last_price !== undefined) {
+          const newEntry = {
             date: today,
             totalVolume: data.volume,
-            timestamp: timestamp
+            lastPrice: data.last_price,
+            timestamp: timestamp,
           };
-          
-          // Add OI data if available
-          if (oiData.openInterest !== undefined) {
-            newEntry.openInterest = oiData.openInterest;
-            oiDataCount++;
+
+          if (!history[symbol.displayName]) {
+            history[symbol.displayName] = [];
           }
-          
-          // Add other useful fields
-          if (oiData.lastPrice !== undefined) {
-            newEntry.lastPrice = oiData.lastPrice;
-          }
-          if (oiData.change !== undefined) {
-            newEntry.change = oiData.change;
-          }
-          if (oiData.averagePrice !== undefined) {
-            newEntry.averagePrice = oiData.averagePrice;
-          }
-          
-          history[symbol].push(newEntry);
-          
-          // Keep only last 20 days
-          const twentyDaysAgo = timestamp - (20 * 24 * 60 * 60 * 1000);
-          history[symbol] = history[symbol].filter(entry => entry.timestamp > twentyDaysAgo);
+
+          // Remove old entry for today to ensure data is fresh
+          history[symbol.displayName] = history[symbol.displayName].filter(entry => entry.date !== today);
+          history[symbol.displayName].push(newEntry);
+
+          // Keep only last 30 entries (approx. 1.5 months of trading days)
+          history[symbol.displayName] = history[symbol.displayName].slice(-30);
           
           updatedCount++;
-          process.stdout.write(`✅ ${symbol} `);
+          console.log(`  ✅ Updated ${symbol.displayName}`);
+        } else {
+          console.warn(`  ⚠️ No volume or price data for ${symbol.displayName}`);
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        console.error(`\n❌ Failed to update ${symbol}:`, errorMessage);
+        console.error(`  ❌ Failed to process ${symbol.displayName}:`, error instanceof Error ? error.message : 'Unknown error');
         failedCount++;
       }
     }
     
-    // Save updated history
-    await fs.writeFile(volumeHistoryPath, JSON.stringify(history, null, 2));
+    // 7. Save updated history back to Redis
+    // Set expiry for 90 days, well beyond the 30 entries we store
+    await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
     
-    console.log(`\n\n📈 Successfully updated volume history for ${updatedCount}/${symbols.length} symbols`);
-    if (oiDataCount > 0) {
-      console.log(`📊 OI data captured for ${oiDataCount} symbols`);
-    } else {
-      console.log('⚠️ No OI data found in API response');
-    }
+    console.log(`\n📈 Successfully updated volume history for ${updatedCount}/${symbols.length} symbols.`);
     if (failedCount > 0) {
-      console.log(`❌ Failed to update ${failedCount} symbols`);
+      console.log(`❌ Failed to update ${failedCount} symbols.`);
     }
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    console.error('❌ Volume update failed:', errorMessage);
-    
-    // If it's a token error, we need manual reauthentication
-    if (errorMessage.includes('token') || errorMessage.includes('expired') || errorMessage.includes('invalid')) {
-      console.log('\n⚠️  Token needs manual refresh. Please run: npx ts-node scripts/authenticate.ts');
-    }
-    
-    process.exit(1);
+    console.error('❌ CRITICAL ERROR in volume update process:', error instanceof Error ? error.message : 'Unknown error');
+    // Re-throw the error so the calling API route knows it failed
+    throw error;
   } finally {
-    // Cleanup Redis connection
-    if (redisClient) {
+    // 8. Cleanup Redis connection
+    if (redisClient.isOpen) {
       await redisClient.quit();
+      console.log('🔌 Disconnected from Redis.');
     }
   }
-}
-
-// ES module way to check if this is the main module
-if (import.meta.url === `file://${process.argv[1]}`) {
-  updateVolumeHistory();
 }
 
 export { updateVolumeHistory };
