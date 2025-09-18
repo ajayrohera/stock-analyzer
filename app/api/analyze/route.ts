@@ -5,7 +5,6 @@ import { google } from 'googleapis';
 import { KiteConnect } from 'kiteconnect';
 import { createClient } from 'redis';
 
-// ... (All other helper types and functions remain exactly the same) ...
 // --- HELPER TYPES ---
 interface QuoteData {
     [key:string]: { 
@@ -226,43 +225,59 @@ function getFinalLevels(
   };
 }
 
+// === UPGRADED SENTIMENT FUNCTION WITH DETAILED LOGGING ===
 function calculateSmartSentiment(
   pcr: number,
   volumePcr: number,
   highestPutOI: number,
   highestCallOI: number
 ): string {
+  // 1. Upgraded "PCR Score" (from OI PCR)
   let pcrScore = 0;
-  if (pcr > 1.2) pcrScore = 2;
-  else if (pcr > 1.0) pcrScore = 1;
-  else if (pcr < 0.8) pcrScore = -2;
-  else if (pcr < 1.0) pcrScore = -1;
+  if (pcr > 1.3) pcrScore = 2;
+  else if (pcr > 1.1) pcrScore = 1;
+  else if (pcr >= 0.9) pcrScore = 0;
+  else if (pcr < 0.7) pcrScore = -2;
+  else if (pcr < 0.9) pcrScore = -1;
 
+  // 2. "Conviction Score" (from OI Walls)
   let convictionScore = 0;
   if (highestPutOI > highestCallOI * 2) convictionScore = 2;
   else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
   else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
   else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
   
+  // 3. Upgraded "Volume Modifier" (from Volume PCR)
   let volumeModifier = 0;
-  if (volumePcr < 0.8) volumeModifier = 1;
-  else if (volumePcr > 1.2) volumeModifier = -1;
+  if (volumePcr < 0.7) volumeModifier = 2;
+  else if (volumePcr < 0.9) volumeModifier = 1;
+  else if (volumePcr <= 1.1) volumeModifier = 0;
+  else if (volumePcr > 1.3) volumeModifier = -2;
+  else if (volumePcr > 1.1) volumeModifier = -1;
 
   const finalScore = pcrScore + convictionScore + volumeModifier;
 
-  // === DIAGNOSTIC LOGGING FOR SENTIMENT ===
-  console.log(`[SENTIMENT DIAGNOSTIC] PCR Score: ${pcrScore} (OI PCR: ${pcr.toFixed(2)}) | Conviction Score: ${convictionScore} | Volume Modifier: ${volumeModifier} (Vol PCR: ${volumePcr.toFixed(2)}) ==> Final Score: ${finalScore}`);
-  // =========================================
+  // --- DETAILED DIAGNOSTIC LOG ---
+  console.log(`[SENTIMENT DIAGNOSTIC]
+    - OI PCR: ${pcr.toFixed(2)} -> pcrScore: ${pcrScore}
+    - Highest PUT OI: ${highestPutOI}, Highest CALL OI: ${highestCallOI} -> convictionScore: ${convictionScore}
+    - Volume PCR: ${volumePcr.toFixed(2)} -> volumeModifier: ${volumeModifier}
+    - ==> FINAL SCORE: ${finalScore}`);
+  // -----------------------------
 
-  if (finalScore >= 4) return "Strongly Bullish";
-  if (finalScore >= 2) return "Bullish";
-  if (finalScore === 1) return "Slightly Bullish";
+  if (finalScore >= 5) return "Strongly Bullish";
+  if (finalScore >= 3) return "Bullish";
+  if (finalScore >= 1) return "Slightly Bullish";
   if (finalScore === 0) return "Neutral";
-  if (finalScore === -1) return "Slightly Bearish";
-  if (finalScore <= -2 && finalScore > -4) return "Bearish";
-  if (finalScore <= -4) return "Strongly Bearish";
+  if (finalScore <= -1 && finalScore > -2) return "Slightly Bearish";
+  if (finalScore <= -3 && finalScore > -4) return "Bearish";
+  if (finalScore <= -5) return "Strongly Bearish";
+  
+  // Fallback for scores -2 and -4 to map to a sentiment
+  if (finalScore === -2) return "Slightly Bearish";
+  if (finalScore === -4) return "Bearish";
 
-  return "Neutral";
+  return "Neutral"; // Default
 }
 
 // --- MAIN API FUNCTION ---

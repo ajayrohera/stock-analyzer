@@ -79,17 +79,25 @@ const getNextWorkingDay = (currentDate: Date): string => {
   } while (true);
 };
 
-const getPcrSentiment = (pcrValue: number): { sentiment: 'Bullish' | 'Bearish' | 'Neutral', color: string } => {
-  if (pcrValue > 1.1) return { sentiment: 'Bullish', color: 'text-green-400' };
-  if (pcrValue < 0.9) return { sentiment: 'Bearish', color: 'text-red-500' };
-  return { sentiment: 'Neutral', color: 'text-gray-400' };
+// === NEW UNIFIED FUNCTION === This one function now handles both PCR types with the correct logic.
+const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sentiment: string, color: string } => {
+  if (type === 'OI') {
+    // For OI PCR: High is Bullish
+    if (pcrValue > 1.3) return { sentiment: 'Highly Bullish', color: 'text-green-400' };
+    if (pcrValue > 1.1) return { sentiment: 'Slightly Bullish', color: 'text-green-300' };
+    if (pcrValue < 0.7) return { sentiment: 'Highly Bearish', color: 'text-red-500' };
+    if (pcrValue < 0.9) return { sentiment: 'Slightly Bearish', color: 'text-red-400' };
+    return { sentiment: 'Neutral', color: 'text-gray-400' };
+  } else {
+    // For Volume PCR: Low is Bullish
+    if (pcrValue < 0.7) return { sentiment: 'Highly Bullish', color: 'text-green-400' };
+    if (pcrValue < 0.9) return { sentiment: 'Slightly Bullish', color: 'text-green-300' };
+    if (pcrValue > 1.3) return { sentiment: 'Highly Bearish', color: 'text-red-500' };
+    if (pcrValue > 1.1) return { sentiment: 'Slightly Bearish', color: 'text-red-400' };
+    return { sentiment: 'Neutral', color: 'text-gray-400' };
+  }
 };
 
-const getRsiSentiment = (rsiValue: number): { sentiment: 'Bullish' | 'Bearish' | 'Neutral', color: string } => {
-  if (rsiValue < 30) return { sentiment: 'Bullish', color: 'text-green-400' };
-  if (rsiValue > 70) return { sentiment: 'Bearish', color: 'text-red-500' };
-  return { sentiment: 'Neutral', color: 'text-gray-400' };
-};
 
 // --- HELPER COMPONENTS ---
 const ErrorToast = React.memo(({ error }: { error: AppError }) => ( 
@@ -103,13 +111,12 @@ const ErrorToast = React.memo(({ error }: { error: AppError }) => (
 ));
 ErrorToast.displayName = 'ErrorToast';
 
-const StatCard = React.memo(({ icon: Icon, title, value, color = 'text-white', tooltip, sentiment, sentimentColor, subValue }: { 
+const StatCard = React.memo(({ icon: Icon, title, value, color = 'text-white', tooltip, sentimentColor, subValue }: { 
   icon?: React.ElementType;
   title: string; 
   value: number | string; 
   color?: string; 
   tooltip?: string; 
-  sentiment?: string; 
   sentimentColor?: string; 
   subValue?: string;
 }) => ( 
@@ -306,8 +313,8 @@ const PCRStatCard = React.memo(({
         <Info size={14} className="cursor-pointer" />
         <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
           {title === 'OI PCR Ratio' 
-            ? 'Put-Call Ratio based on Open Interest. Values above 1.1 are bullish, below 0.9 are bearish.'
-            : "Put-Call Ratio based on today's trading volume. Indicates intraday sentiment shifts."}
+            ? 'Put-Call Ratio based on Open Interest. High (>1.1) is bullish, low (<0.9) is bearish.'
+            : "Put-Call Ratio based on today's trading volume. Low (<0.9) is bullish, high (>1.1) is bearish."}
         </div>
       </div>
     </div>
@@ -323,7 +330,6 @@ const PCRStatCard = React.memo(({
 PCRStatCard.displayName = 'PCRStatCard';
 
 
-// === RESTORED COMPONENT === This was accidentally deleted.
 const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
   const isCall = type === 'CALL';
   const isPositive = changeOi > 0;
@@ -346,7 +352,6 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
 OIChangeRow.displayName = 'OIChangeRow';
 
 
-// === RESTORED COMPONENT === This was accidentally deleted.
 const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
   oiAnalysis?: AnalysisResult['oiAnalysis'];
   marketStatus: MarketStatus; 
@@ -361,7 +366,7 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
   }
 
   if (!oiAnalysis) {
-    return null; // Don't render the card if there's no data
+    return null;
   }
 
   return (
@@ -600,11 +605,12 @@ export default function Home() {
     setCooldownMessage('');
   }, []);
 
+  // === UPDATED LOGIC === Now calls the new unified function for both PCR types.
   const { oiPcrSentiment, volumePcrSentiment } = useMemo(() => { 
     if (!results) return { oiPcrSentiment: null, volumePcrSentiment: null }; 
     return { 
-      oiPcrSentiment: getPcrSentiment(results.pcr), 
-      volumePcrSentiment: getPcrSentiment(results.volumePcr), 
+      oiPcrSentiment: getAdvancedPcrSentiment(results.pcr, 'OI'), 
+      volumePcrSentiment: getAdvancedPcrSentiment(results.volumePcr, 'VOLUME'), 
     }; 
   }, [results]);
 
@@ -685,7 +691,6 @@ export default function Home() {
                   icon={Target}
                   title="Current Price"
                   value={results.ltp}
-                  // === FIX for undefined changePercent ===
                   subValue={typeof results.changePercent === 'number' ? `${results.changePercent > 0 ? '+' : ''}${results.changePercent.toFixed(2)}%` : '-'}
                   sentimentColor={typeof results.changePercent === 'number' ? (results.changePercent >= 0 ? 'text-green-400' : 'text-red-500') : 'text-gray-400'}
                 />
