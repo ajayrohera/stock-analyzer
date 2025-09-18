@@ -48,13 +48,38 @@ const redis = createClient({ url: process.env.REDIS_URL });
 redis.connect().catch(console.error);
 
 // --- HELPER FUNCTIONS ---
+
+// === DIAGNOSTIC LOGGING ADDED HERE ===
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await redis.get('volume_history');
-    if (!historyData) return [];
+    if (!historyData) {
+      console.error('[DIAGNOSTIC] Failed to get "volume_history" key from Redis.');
+      return [];
+    }
+
     const history = JSON.parse(historyData as string);
-    return history[symbol] || [];
-  } catch (error) { console.error('Error reading historical data:', error); return []; }
+    
+    // 1. Log the key we are looking for
+    console.log(`[DIAGNOSTIC] Key we are looking for: "${symbol}"`);
+
+    // 2. Log all available keys in the Redis data
+    console.log(`[DIAGNOSTIC] Available keys in Redis: [${Object.keys(history).join(', ')}]`);
+
+    const result = history[symbol];
+
+    // 3. Log whether we found a match
+    if (result) {
+      console.log(`[DIAGNOSTIC] SUCCESS: Found a match for "${symbol}".`);
+    } else {
+      console.error(`[DIAGNOSTIC] FAILURE: No match found for "${symbol}". Returning empty array.`);
+    }
+
+    return result || [];
+  } catch (error) { 
+    console.error('[DIAGNOSTIC] Error in getHistoricalData:', error); 
+    return []; 
+  }
 }
 
 function generatePsychologicalLevels(currentPrice: number): number[] {
@@ -76,7 +101,7 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
 }
 
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
-  if (!historicalData.length || !currentPrice) return 0;
+  if (!historicalData || historicalData.length === 0 || !currentPrice) return 0;
   const today = new Date();
   const previousDays = historicalData.filter(entry => {
     const entryDate = new Date(entry.date);
@@ -109,20 +134,16 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
-// === FINAL FIX === Implements the "Significant Peaks" Algorithm
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
-  // 1. Find all plausible candidates that pass the ratio test
   const candidates: SupportResistanceLevel[] = [];
   for (const strike of allStrikes) {
     if (strike > currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       if (ce_oi < 30000 || pe_oi < 1000) continue;
-
       const oiRatio = ce_oi / pe_oi;
       if (oiRatio >= 1.3) {
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
-
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
             strength = 'strong';
             tooltip += ' | Strong';
@@ -137,31 +158,22 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       }
     }
   }
-
-  // 2. Filter for significance (Top 5 highest OI among candidates)
   if (candidates.length === 0) return [];
-
   candidates.sort((a, b) => (optionsByStrike[b.price]?.ce_oi || 0) - (optionsByStrike[a.price]?.ce_oi || 0));
   const significantLevels = candidates.slice(0, 5);
-
-  // 3. Sort by proximity and return
   return significantLevels.sort((a, b) => a.price - b.price);
 }
 
-// === FINAL FIX === Implements the "Significant Peaks" Algorithm
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
-  // 1. Find all plausible candidates that pass the ratio test
   const candidates: SupportResistanceLevel[] = [];
   for (const strike of allStrikes) {
     if (strike < currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       if (pe_oi < 30000 || ce_oi < 1000) continue;
-
       const oiRatio = pe_oi / ce_oi;
       if (oiRatio >= 1.3) {
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
-
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
             strength = 'strong';
             tooltip += ' | Strong';
@@ -176,14 +188,9 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       }
     }
   }
-
-  // 2. Filter for significance (Top 5 highest OI among candidates)
   if (candidates.length === 0) return [];
-  
   candidates.sort((a, b) => (optionsByStrike[b.price]?.pe_oi || 0) - (optionsByStrike[a.price]?.pe_oi || 0));
   const significantLevels = candidates.slice(0, 5);
-
-  // 3. Sort by proximity and return
   return significantLevels.sort((a, b) => b.price - a.price);
 }
 
@@ -192,7 +199,6 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   const levels: SupportResistanceLevel[] = [];
   const priceLevels = new Map<number, number>();
   const priceRange = currentPrice * 0.20;
-
   history.forEach(entry => {
     if (entry.lastPrice && Math.abs(entry.lastPrice - currentPrice) <= priceRange) {
       const roundedPrice = Math.round(entry.lastPrice / 5) * 5;
@@ -200,7 +206,6 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
       priceLevels.set(roundedPrice, volume + (entry.totalVolume || 0));
     }
   });
-
   const sortedLevels = Array.from(priceLevels.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
   sortedLevels.forEach(([price]) => {
       levels.push({ price, strength: 'weak', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Historical Volume Level' });
@@ -215,38 +220,24 @@ function getFinalLevels(
   optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, 
   allStrikes: number[]
 ): { supports: SupportResistanceLevel[], resistances: SupportResistanceLevel[] } {
-  
   const allSupports: SupportResistanceLevel[] = [];
   const allResistances: SupportResistanceLevel[] = [];
-
   const addLevel = (level: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
-    if (!list.some(l => l.price === level.price)) {
-      list.push(level);
-    }
+    if (!list.some(l => l.price === level.price)) list.push(level);
   };
-
   findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allSupports));
   findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allResistances));
-  
   calculateSupportResistance(history, currentPrice).forEach(l => {
     if (l.type === 'support') addLevel(l, allSupports);
     else addLevel(l, allResistances);
   });
-  
   getPsychologicalLevels(symbol, currentPrice).forEach(price => {
-    const level: SupportResistanceLevel = {
-      price,
-      strength: 'medium',
-      type: price < currentPrice ? 'support' : 'resistance',
-      tooltip: 'Psychological Level'
-    };
+    const level: SupportResistanceLevel = { price, strength: 'medium', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological Level' };
     if (level.type === 'support') addLevel(level, allSupports);
     else addLevel(level, allResistances);
   });
-
   allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
   allResistances.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
-
   return {
     supports: allSupports.slice(0, 2),
     resistances: allResistances.slice(0, 2)
@@ -269,7 +260,7 @@ export async function POST(request: Request) {
         type: 'service_account',
         project_id: process.env.GOOGLE_PROJECT_ID,
         private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
-        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
         client_email: process.env.GOOGLE_CLIENT_EMAIL,
         client_id: process.env.GOOGLE_CLIENT_ID,
       },
@@ -288,13 +279,12 @@ export async function POST(request: Request) {
     if (!tokenData) return NextResponse.json({ error: 'Kite token not found.' }, { status: 401 });
 
     const kc = new KiteConnect({ api_key: apiKey });
-    kc.setAccessToken(JSON.parse(tokenData as string).accessToken);
+    kc.setAccessToken(JSON.parse(tokenData).accessToken);
 
     const allInstruments = await kc.getInstruments('NFO');
     const unfilteredOptionsChain = allInstruments.filter(instrument => 
       instrument.name === tradingSymbol.toUpperCase() && (instrument.instrument_type === 'CE' || instrument.instrument_type === 'PE')
     );
-
     if (unfilteredOptionsChain.length === 0) {
         return NextResponse.json({ error: `No options found for '${tradingSymbol}'` }, { status: 404 });
     }
@@ -396,7 +386,7 @@ export async function POST(request: Request) {
     
     return NextResponse.json(responseData);
 
-  } catch (error: unknown) {
+  } catch (error) {
     const err = error as Error & { error_type?: string };
     console.error("API Error:", err.message, err.stack);
     if (err.error_type === 'TokenException') {
