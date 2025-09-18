@@ -1,4 +1,4 @@
-// This is the updated version with pre-market support and 10-second cooldown
+// This is the final, complete, and unabbreviated code for the front-end component.
 
 'use client';
 
@@ -6,8 +6,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 
 // --- HELPER TYPES ---
-
-// === CHANGED === Updated Support/Resistance level type to match new API structure
 type SupportResistanceLevel = {
   price: number;
   strength: 'weak' | 'medium' | 'strong';
@@ -22,14 +20,13 @@ type OiChange = {
   type: 'CALL' | 'PUT';
 };
 
-// === CHANGED === Updated AnalysisResult to match new API structure
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
   volumePcr: number;
   maxPain: number; 
-  resistance: number; // Closest resistance price
-  support: number;   // Closest support price
+  resistance: number;
+  support: number;
   sentiment: string;
   expiryDate: string; 
   ltp: number;
@@ -39,11 +36,8 @@ type AnalysisResult = {
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
   changePercent?: number;
-
-  // New array structures
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
-
   oiAnalysis?: {
     calls: OiChange[];
     puts: OiChange[];
@@ -63,7 +57,6 @@ type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
 const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
 
-// === CHANGED === Updated validation function for the new data structure
 const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   try {
     const typedData = data as AnalysisResult;
@@ -74,7 +67,6 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
       typeof typedData.resistance === 'number' &&
       typeof typedData.support === 'number' &&
       typeof typedData.ltp === 'number' &&
-      // Check that 'supports' and 'resistances' are arrays
       Array.isArray(typedData.supports) &&
       Array.isArray(typedData.resistances)
     );
@@ -101,9 +93,9 @@ const getPcrSentiment = (pcrValue: number): { sentiment: 'Bullish' | 'Bearish' |
 };
 
 const getRsiSentiment = (rsiValue: number): { sentiment: 'Bullish' | 'Bearish' | 'Neutral', color: string } => {
-  if (rsiValue < 30) return { sentiment: 'Bullish', color: 'text-green-400' }; // Oversold
-  if (rsiValue > 70) return { sentiment: 'Bearish', color: 'text-red-500' }; // Overbought
-  return { sentiment: 'Neutral', color: 'text-gray-400' }; // Neutral zone
+  if (rsiValue < 30) return { sentiment: 'Bullish', color: 'text-green-400' };
+  if (rsiValue > 70) return { sentiment: 'Bearish', color: 'text-red-500' };
+  return { sentiment: 'Neutral', color: 'text-gray-400' };
 };
 
 // --- HELPER COMPONENTS ---
@@ -146,7 +138,6 @@ const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sent
 ));
 StatCard.displayName = 'StatCard';
 
-// === NEW COMPONENT === Displays a list of support or resistance levels
 const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportResistanceLevel[], type: 'Support' | 'Resistance' }) => {
   const isSupport = type === 'Support';
   const headerColor = isSupport ? 'text-green-400' : 'text-red-500';
@@ -188,7 +179,7 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
                 )}
               </div>
             </div>
-            {index === 0 && <p className="text-xs text-gray-400 mt-1">Primary Level (Closest)</p>}
+            {/* === REMOVED === The confusing "Primary Level" text has been removed from here. */}
           </div>
         ))}
       </div>
@@ -750,13 +741,9 @@ export default function Home() {
                 </button>
               </div>
               
-              {/* === CHANGED === Main grid now spans 3 columns on desktop for a better layout */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                {/* Support/Resistance lists now take up the first two columns */}
                 <SupportResistanceList type="Support" levels={results.supports} />
                 <SupportResistanceList type="Resistance" levels={results.resistances} />
-                
-                {/* Other cards follow */}
                 <VolumeCard 
                   avg20DayVolume={results.avg20DayVolume}
                   todayVolumePercentage={results.todayVolumePercentage}

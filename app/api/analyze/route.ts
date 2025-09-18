@@ -109,7 +109,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
-// === CHANGED === Updated function with tiered logic for resistance levels
+// === BUG FIX HERE ===
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const resistanceLevels: SupportResistanceLevel[] = [];
   const priceRange = currentPrice * 0.15;
@@ -120,12 +120,9 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       if (ce_oi < 30000 || pe_oi < 1000) continue;
 
       const oiRatio = ce_oi / pe_oi;
-      const currentIndex = allStrikes.indexOf(strike);
-      const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.ce_oi || 0 : 0;
-      const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.ce_oi || 0 : 0;
-      const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
       
-      if (oiRatio >= 1.3 && isLocalMax) {
+      // The `isLocalMax` check was too strict and has been removed. The ratio is the most important factor.
+      if (oiRatio >= 1.3) {
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
 
@@ -147,7 +144,7 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
   return resistanceLevels.sort((a, b) => a.price - b.price);
 }
 
-// === CHANGED === Updated function with tiered logic for support levels
+// === BUG FIX HERE ===
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const supportLevels: SupportResistanceLevel[] = [];
   const priceRange = currentPrice * 0.15;
@@ -158,12 +155,9 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       if (pe_oi < 30000 || ce_oi < 1000) continue;
 
       const oiRatio = pe_oi / ce_oi;
-      const currentIndex = allStrikes.indexOf(strike);
-      const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.pe_oi || 0 : 0;
-      const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.pe_oi || 0 : 0;
-      const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
       
-      if (oiRatio >= 1.3 && isLocalMax) {
+      // The `isLocalMax` check was too strict and has been removed. The ratio is the most important factor.
+      if (oiRatio >= 1.3) {
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
 
@@ -343,13 +337,11 @@ export async function POST(request: Request) {
         }
     }
     
-    // === CHANGED === Updated logic to handle full arrays of S/R levels
     const allLevels = calculateEnhancedSupportResistance(displayName.toUpperCase(), historicalData, ltp, optionsByStrike, strikePrices);
     
     const supportLevels = allLevels.filter(level => level.type === 'support');
     const resistanceLevels = allLevels.filter(level => level.type === 'resistance');
 
-    // For the top-level property, use the closest identified level, or the fallback if none exist.
     const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : support;
     const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : resistance;
     
@@ -375,26 +367,19 @@ export async function POST(request: Request) {
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
-    // === CHANGED === Restructured responseData to include the full S/R arrays
     const responseData = {
         symbol: displayName.toUpperCase(),
         ltp: ltp,
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
         changePercent: parseFloat(changePercent.toFixed(2)),
         ...volumeMetrics,
-        
-        // Key Data
         expiryDate: formattedExpiry,
         sentiment,
         pcr: parseFloat(pcr.toFixed(2)),
         volumePcr: parseFloat(volumePcr.toFixed(2)),
         maxPain,
-
-        // Top Level S/R (Closest Validated Level)
         support: finalSupport, 
         resistance: finalResistance,
-        
-        // FULL LIST OF ALL S/R LEVELS
         supports: supportLevels,
         resistances: resistanceLevels,
     };
