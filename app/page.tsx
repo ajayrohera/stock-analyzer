@@ -164,8 +164,8 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
     <div className="bg-gray-900/50 p-4 rounded-lg h-full">
       <h3 className={`text-lg font-bold text-center mb-4 ${headerColor}`}>{type} Levels</h3>
       <div className="space-y-2">
-        {levels.map((level, index) => (
-          <div key={level.price} className={`p-2 rounded-md ${index === 0 ? 'bg-gray-800/70 border border-white/10' : ''}`}>
+        {levels.map((level) => (
+          <div key={level.price} className='p-2 rounded-md'>
             <div className="flex justify-between items-center">
               <span className={`text-xl font-bold ${headerColor}`}>{level.price}</span>
               <div className="relative group flex items-center">
@@ -179,7 +179,6 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
                 )}
               </div>
             </div>
-            {/* === REMOVED === The confusing "Primary Level" text has been removed from here. */}
           </div>
         ))}
       </div>
@@ -741,15 +740,8 @@ export default function Home() {
                 </button>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <SupportResistanceList type="Support" levels={results.supports} />
-                <SupportResistanceList type="Resistance" levels={results.resistances} />
-                <VolumeCard 
-                  avg20DayVolume={results.avg20DayVolume}
-                  todayVolumePercentage={results.todayVolumePercentage}
-                  estimatedTodayVolume={results.estimatedTodayVolume}
-                  marketStatus={marketStatus}
-                />
+              {/* === UI FIX === The main grid for stat cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-6">
                 <PCRStatCard 
                   title="OI PCR Ratio" 
                   value={results.pcr} 
@@ -765,13 +757,13 @@ export default function Home() {
                   sentimentColor={volumePcrSentiment?.color} 
                 />
                 <SentimentCard sentiment={results.sentiment} />
-                {results.rsi !== undefined && (
-                  <StatCard title="RSI" value={results.rsi} sentiment={rsiSentiment?.sentiment} sentimentColor={rsiSentiment?.color} tooltip="Relative Strength Index. Values below 30 indicate oversold conditions (bullish), above 70 indicate overbought conditions (bearish)." />
-                )}
+                <StatCard title="Max Pain" value={results.maxPain} tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."/>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <OIAnalysisCard oiAnalysis={results.oiAnalysis} marketStatus={marketStatus} />
+              {/* === UI FIX === A new grid section below for the taller list components */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <SupportResistanceList type="Support" levels={results.supports} />
+                <SupportResistanceList type="Resistance" levels={results.resistances} />
               </div>
             </div>
           )}

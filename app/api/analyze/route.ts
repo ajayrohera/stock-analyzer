@@ -109,7 +109,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
-// === BUG FIX HERE ===
+// === REVERTED TO STABLE LOGIC === The isLocalMax check is restored to find significant OI peaks.
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const resistanceLevels: SupportResistanceLevel[] = [];
   const priceRange = currentPrice * 0.15;
@@ -120,9 +120,12 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       if (ce_oi < 30000 || pe_oi < 1000) continue;
 
       const oiRatio = ce_oi / pe_oi;
+      const currentIndex = allStrikes.indexOf(strike);
+      const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.ce_oi || 0 : 0;
+      const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.ce_oi || 0 : 0;
+      const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
       
-      // The `isLocalMax` check was too strict and has been removed. The ratio is the most important factor.
-      if (oiRatio >= 1.3) {
+      if (oiRatio >= 1.3 && isLocalMax) { // isLocalMax is back
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
 
@@ -144,7 +147,7 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
   return resistanceLevels.sort((a, b) => a.price - b.price);
 }
 
-// === BUG FIX HERE ===
+// === REVERTED TO STABLE LOGIC === The isLocalMax check is restored to find significant OI peaks.
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const supportLevels: SupportResistanceLevel[] = [];
   const priceRange = currentPrice * 0.15;
@@ -155,9 +158,12 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       if (pe_oi < 30000 || ce_oi < 1000) continue;
 
       const oiRatio = pe_oi / ce_oi;
+      const currentIndex = allStrikes.indexOf(strike);
+      const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.pe_oi || 0 : 0;
+      const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.pe_oi || 0 : 0;
+      const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
       
-      // The `isLocalMax` check was too strict and has been removed. The ratio is the most important factor.
-      if (oiRatio >= 1.3) {
+      if (oiRatio >= 1.3 && isLocalMax) { // isLocalMax is back
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
 
@@ -275,7 +281,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `No options found for '${tradingSymbol}'` }, { status: 404 });
     }
 
-    // ✅ ROBUST EXPIRY FINDER
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     let nearestExpiry = new Date('2999-12-31');
@@ -321,7 +326,6 @@ export async function POST(request: Request) {
         totalPutVolume += peLiveData?.volume || 0;
     }
 
-    // Default support/resistance based purely on highest OI near LTP (as a fallback)
     let highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
     for (const strike of strikePrices) {
         if (strike > ltp && strike <= ltp * 1.15) {
