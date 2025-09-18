@@ -6,41 +6,48 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 
 // --- HELPER TYPES ---
-type OiChange = {
-  strike: number;
-  changeOi: number;     // The net change in Open Interest
-  totalOi: number;      // The total Open Interest at this strike
-  type: 'CALL' | 'PUT'; // Whether this change is for a Call or a Put
+
+// === CHANGED === Updated Support/Resistance level type to match new API structure
+type SupportResistanceLevel = {
+  price: number;
+  strength: 'weak' | 'medium' | 'strong';
+  type: 'support' | 'resistance';
+  tooltip?: string;
 };
 
+type OiChange = {
+  strike: number;
+  changeOi: number;
+  totalOi: number;
+  type: 'CALL' | 'PUT';
+};
+
+// === CHANGED === Updated AnalysisResult to match new API structure
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
   volumePcr: number;
   maxPain: number; 
-  resistance: number; 
-  support: number; 
+  resistance: number; // Closest resistance price
+  support: number;   // Closest support price
   sentiment: string;
   expiryDate: string; 
-  supportStrength: string; 
-  resistanceStrength: string;
   ltp: number;
   lastRefreshed: string;
   rsi?: number;
-  // Volume metrics and percentage change
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
   changePercent?: number;
-  // Tooltip data for support/resistance
-  supportTooltip?: string;
-  resistanceTooltip?: string;
 
-  // NEW: Change in OI data for key levels (make optional)
+  // New array structures
+  supports: SupportResistanceLevel[];
+  resistances: SupportResistanceLevel[];
+
   oiAnalysis?: {
-    calls: OiChange[];    // Top N strikes with highest CALL OI change
-    puts: OiChange[];     // Top N strikes with highest PUT OI change
-    summary: string;      // Auto-generated summary of the activity
+    calls: OiChange[];
+    puts: OiChange[];
+    summary: string;
   };
 };
 
@@ -56,19 +63,20 @@ type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
 const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
 
+// === CHANGED === Updated validation function for the new data structure
 const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   try {
     const typedData = data as AnalysisResult;
     return (
       typedData &&
-      typeof typedData.symbol === 'string' && typeof typedData.pcr === 'number' &&
-      typeof typedData.volumePcr === 'number' && typeof typedData.maxPain === 'number' &&
-      typeof typedData.resistance === 'number' && typeof typedData.support === 'number' &&
-      typeof typedData.sentiment === 'string' && typeof typedData.expiryDate === 'string' &&
-      typeof typedData.supportStrength === 'string' && typeof typedData.resistanceStrength === 'string' &&
-      typeof typedData.ltp === 'number' && typeof typedData.lastRefreshed === 'string' &&
-      // REMOVE oiAnalysis validation since it's not in the API response
-      true
+      typeof typedData.symbol === 'string' &&
+      typeof typedData.pcr === 'number' &&
+      typeof typedData.resistance === 'number' &&
+      typeof typedData.support === 'number' &&
+      typeof typedData.ltp === 'number' &&
+      // Check that 'supports' and 'resistances' are arrays
+      Array.isArray(typedData.supports) &&
+      Array.isArray(typedData.resistances)
     );
   } catch (error) { 
     console.error('Validation error:', error); 
@@ -138,42 +146,57 @@ const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sent
 ));
 StatCard.displayName = 'StatCard';
 
-const SupportResistanceCard = React.memo(({ 
-  type, 
-  value, 
-  strength, 
-  tooltip 
-}: { 
-  type: 'Support' | 'Resistance', 
-  value: number, 
-  strength: string,
-  tooltip?: string 
-}) => { 
-  const isSupport = type === 'Support'; 
-  const color = isSupport ? 'text-green-400' : 'text-red-500'; 
-  let strengthColor = 'text-gray-400'; 
-  if (strength === 'Very Strong') strengthColor = 'text-cyan-400'; 
-  if (strength === 'Strong') strengthColor = 'text-white'; 
-  
-  return ( 
-    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
-      <div className="flex items-center justify-center text-sm text-gray-400">
-        <span>{isSupport ? 'Key Support' : 'Key Resistance'}</span>
-        {tooltip && (
-          <div className="relative group ml-1">
-            <Info size={14} className="cursor-pointer" />
-            <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-              {tooltip}
-            </div>
-          </div>
-        )}
+// === NEW COMPONENT === Displays a list of support or resistance levels
+const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportResistanceLevel[], type: 'Support' | 'Resistance' }) => {
+  const isSupport = type === 'Support';
+  const headerColor = isSupport ? 'text-green-400' : 'text-red-500';
+
+  const getStrengthColor = (strength: string) => {
+    switch (strength) {
+      case 'strong': return 'bg-gray-700 text-white';
+      case 'medium': return 'bg-gray-800 text-gray-300';
+      case 'weak': return 'bg-gray-900 text-gray-500';
+      default: return 'bg-gray-800 text-gray-300';
+    }
+  };
+
+  if (!levels || levels.length === 0) {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg h-full">
+        <h3 className={`text-lg font-bold text-center mb-2 ${headerColor}`}>{type} Levels</h3>
+        <p className="text-gray-500 text-center text-sm">No significant levels found.</p>
       </div>
-      <p className={`text-3xl font-bold ${color}`}>{value}</p>
-      <p className={`text-xs font-bold uppercase ${strengthColor}`}>{strength}</p>
-    </div> 
-  ); 
+    );
+  }
+
+  return (
+    <div className="bg-gray-900/50 p-4 rounded-lg h-full">
+      <h3 className={`text-lg font-bold text-center mb-4 ${headerColor}`}>{type} Levels</h3>
+      <div className="space-y-2">
+        {levels.map((level, index) => (
+          <div key={level.price} className={`p-2 rounded-md ${index === 0 ? 'bg-gray-800/70 border border-white/10' : ''}`}>
+            <div className="flex justify-between items-center">
+              <span className={`text-xl font-bold ${headerColor}`}>{level.price}</span>
+              <div className="relative group flex items-center">
+                <span className={`text-xs font-semibold uppercase px-2 py-1 rounded ${getStrengthColor(level.strength)}`}>
+                  {level.strength}
+                </span>
+                {level.tooltip && (
+                  <div className="absolute right-full mr-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+                    {level.tooltip}
+                  </div>
+                )}
+              </div>
+            </div>
+            {index === 0 && <p className="text-xs text-gray-400 mt-1">Primary Level (Closest)</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 });
-SupportResistanceCard.displayName = 'SupportResistanceCard';
+SupportResistanceList.displayName = 'SupportResistanceList';
+
 
 const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => { 
   const isBullish = sentiment.includes('Bullish'); 
@@ -213,8 +236,6 @@ const FeatureCard = React.memo(({ icon, title, description }: { icon: React.Reac
 ));
 FeatureCard.displayName = 'FeatureCard';
 
-// VolumeCard component - always show data but with appropriate messages
-// VolumeCard component - show data even during off-market hours
 const VolumeCard = React.memo(({ 
   avg20DayVolume, 
   todayVolumePercentage, 
@@ -303,7 +324,6 @@ const VolumeCard = React.memo(({
 });
 VolumeCard.displayName = 'VolumeCard';
 
-// PCRStatCard component for OI PCR and Volume PCR
 const PCRStatCard = React.memo(({ 
   title, 
   value, 
@@ -340,7 +360,6 @@ const PCRStatCard = React.memo(({
 ));
 PCRStatCard.displayName = 'PCRStatCard';
 
-// NEW: OIChangeRow component for displaying individual strike changes
 const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
   const isCall = type === 'CALL';
   const isPositive = changeOi > 0;
@@ -362,14 +381,13 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
 });
 OIChangeRow.displayName = 'OIChangeRow';
 
-// NEW: OIAnalysisCard component
 const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
   oiAnalysis?: AnalysisResult['oiAnalysis'];
   marketStatus: MarketStatus; 
 }) => {
   if (marketStatus === 'PRE_MARKET') {
     return (
-      <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
+      <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-2">
         <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
           <span>Open Interest Analysis</span>
           <div className="relative group ml-1">
@@ -384,18 +402,11 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
     );
   }
 
-  // Handle missing oiAnalysis
   if (!oiAnalysis) {
     return (
-      <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
+      <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-2">
         <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
           <span>Open Interest Analysis</span>
-          <div className="relative group ml-1">
-            <Info size={14} className="cursor-pointer" />
-            <div className="absolute bottom-full mb-2 w-80 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-              Shows the largest changes in Open Interest at key strike prices. Call OI increase suggests bullish bets, Put OI increase suggests hedging or bearish positioning.
-            </div>
-          </div>
         </div>
         <p className="text-gray-400 text-sm text-center">Open Interest data not available</p>
       </div>
@@ -403,15 +414,9 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
   }
 
   return (
-    <div className="bg-gray-900/50 p-4 rounded-lg col-span-2">
+    <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-2">
       <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
         <span>Open Interest Analysis</span>
-        <div className="relative group ml-1">
-          <Info size={14} className="cursor-pointer" />
-          <div className="absolute bottom-full mb-2 w-80 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-            Shows the largest changes in Open Interest at key strike prices. Call OI increase suggests bullish bets, Put OI increase suggests hedging or bearish positioning.
-            </div>
-        </div>
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -452,6 +457,8 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
 });
 OIAnalysisCard.displayName = 'OIAnalysisCard';
 
+
+// === MAIN COMPONENT ===
 export default function Home() {
   const [symbolList, setSymbolList] = useState<string[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState('');
@@ -525,7 +532,6 @@ export default function Home() {
       const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); 
       const todayKey = `${istTime.getUTCFullYear()}-${String(istTime.getUTCMonth() + 1).padStart(2, '0')}-${String(istTime.getUTCDate()).padStart(2, '0')}`; 
       
-      // Check for holidays first
       if (marketHolidays2025.has(todayKey)) { 
         setMarketStatus('CLOSED'); 
         setMarketMessage(`Market closed for ${marketHolidaysWithNames[todayKey]}. Opens ${getNextWorkingDay(istTime)} at 9:15 AM`); 
@@ -533,7 +539,6 @@ export default function Home() {
       } 
       
       const day = istTime.getUTCDay(); 
-      // Check for weekends
       if (day === 0 || day === 6) { 
         setMarketStatus('CLOSED'); 
         setMarketMessage(`Market closed for weekend. Opens Monday at 9:15 AM`); 
@@ -542,17 +547,14 @@ export default function Home() {
       
       const timeInMinutes = istTime.getUTCHours() * 60 + istTime.getUTCMinutes(); 
       
-      // Pre-market (9:00 AM to 9:15 AM)
       if (timeInMinutes >= 540 && timeInMinutes < 555) {
         setMarketStatus('PRE_MARKET');
         setMarketMessage('Pre-market hours: Data from previous close. Live data available at 9:15 AM');
       }
-      // Market hours (9:15 AM to 3:30 PM)
       else if (timeInMinutes >= 555 && timeInMinutes <= 930) {
         setMarketStatus('OPEN');
         setMarketMessage('Market is open');
       }
-      // Closed
       else {
         setMarketStatus('CLOSED');
         setMarketMessage(`Market closed. Showing data from last trading session. Opens ${getNextMarketOpenTime(now)}`);
@@ -585,10 +587,9 @@ export default function Home() {
 
   const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
     const currentTime = Date.now();
-    // Check if we're in cooldown period (within 10 seconds of last request)
     if (lastRequestTime > 0 && currentTime - lastRequestTime < 10000) {
       setCooldownMessage('Please wait 10 seconds before making another request.');
-      setTimeout(() => setCooldownMessage(''), 3000); // Clear message after 3 seconds
+      setTimeout(() => setCooldownMessage(''), 3000);
       return; 
     } 
     
@@ -603,11 +604,8 @@ export default function Home() {
       }); 
       const data = await response.json(); 
       
-      // DEBUG LOGGING
-      console.log('🔍 API Response from /api/analyze:', data);
-      console.log('✅ Is valid result:', isAnalysisResult(data));
       if (!isAnalysisResult(data)) {
-        console.log('❌ Validation failed. Data structure:', JSON.stringify(data, null, 2));
+        console.error('❌ Validation failed. Data structure:', JSON.stringify(data, null, 2));
         throw new Error('Invalid response format from server.');
       }
       
@@ -628,7 +626,6 @@ export default function Home() {
     if (isLoading) return; 
     setIsLoading(true); 
     setLoadingState('ANALYZING'); 
-    // Don't clear results on cooldown - keep showing current data
     performAnalysis(selectedSymbol).finally(() => { 
       setIsLoading(false); 
       setLoadingState('IDLE'); 
@@ -670,7 +667,7 @@ export default function Home() {
       {errorToasts}
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <section className="text-center py-16">
-                    <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine2</h1>
+          <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine</h1>
           <p className="text-lg md:text-xl text-gray-400 max-w-3xl mx-auto">Leverage options data to uncover market sentiment, identify key support and resistance levels, and make smarter trading decisions.</p>
         </section>
 
@@ -692,7 +689,7 @@ export default function Home() {
           <div className="relative flex items-center">
             <Briefcase className="absolute left-4 h-6 w-6 text-gray-500" />
             <select className="w-full pl-12 pr-32 py-4 bg-gray-900/50 text-white border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan transition-all duration-300 appearance-none" value={selectedSymbol} onChange={handleSymbolChange} disabled={isLoading || symbolList.length === 0}>{symbolOptions}</select>
-                        <button 
+            <button 
               className="absolute right-2 bg-brand-cyan hover:bg-cyan-500 text-brand-dark font-bold py-2.5 px-6 rounded-lg transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" 
               onClick={handleAnalyze} 
               disabled={isLoading || !selectedSymbol || symbolList.length === 0}
@@ -702,7 +699,6 @@ export default function Home() {
             </button>
           </div>
           
-          {/* Cooldown message - shown below stock list box in yellow */}
           {cooldownMessage && (
             <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-700/50 rounded-lg text-center">
               <div className="flex items-center justify-center text-yellow-300">
@@ -754,27 +750,19 @@ export default function Home() {
                 </button>
               </div>
               
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 mb-6">
-                <SupportResistanceCard 
-                  type="Support" 
-                  value={results.support} 
-                  strength={results.supportStrength} 
-                  tooltip={results.supportTooltip} 
-                />
-                <SupportResistanceCard 
-                  type="Resistance" 
-                  value={results.resistance} 
-                  strength={results.resistanceStrength} 
-                  tooltip={results.resistanceTooltip} 
-                />
+              {/* === CHANGED === Main grid now spans 3 columns on desktop for a better layout */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                {/* Support/Resistance lists now take up the first two columns */}
+                <SupportResistanceList type="Support" levels={results.supports} />
+                <SupportResistanceList type="Resistance" levels={results.resistances} />
                 
+                {/* Other cards follow */}
                 <VolumeCard 
                   avg20DayVolume={results.avg20DayVolume}
                   todayVolumePercentage={results.todayVolumePercentage}
                   estimatedTodayVolume={results.estimatedTodayVolume}
                   marketStatus={marketStatus}
                 />
-                
                 <PCRStatCard 
                   title="OI PCR Ratio" 
                   value={results.pcr} 
@@ -782,7 +770,6 @@ export default function Home() {
                   sentiment={oiPcrSentiment?.sentiment} 
                   sentimentColor={oiPcrSentiment?.color} 
                 />
-                
                 <PCRStatCard 
                   title="Volume PCR" 
                   value={results.volumePcr} 
@@ -790,15 +777,15 @@ export default function Home() {
                   sentiment={volumePcrSentiment?.sentiment} 
                   sentimentColor={volumePcrSentiment?.color} 
                 />
-                
                 <SentimentCard sentiment={results.sentiment} />
                 {results.rsi !== undefined && (
                   <StatCard title="RSI" value={results.rsi} sentiment={rsiSentiment?.sentiment} sentimentColor={rsiSentiment?.color} tooltip="Relative Strength Index. Values below 30 indicate oversold conditions (bullish), above 70 indicate overbought conditions (bearish)." />
                 )}
               </div>
 
-              {/* NEW: Open Interest Analysis Section */}
-              <OIAnalysisCard oiAnalysis={results.oiAnalysis} marketStatus={marketStatus} />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <OIAnalysisCard oiAnalysis={results.oiAnalysis} marketStatus={marketStatus} />
+              </div>
             </div>
           )}
         </section>
