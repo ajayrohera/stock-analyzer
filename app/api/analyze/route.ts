@@ -187,69 +187,72 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   if (!history || history.length === 0 || !currentPrice) return [];
   const levels: SupportResistanceLevel[] = [];
   const priceLevels = new Map<number, number>();
+  // Proximity gate for historical levels
+  const priceRange = currentPrice * 0.20;
+
   history.forEach(entry => {
-    if (entry.lastPrice) {
+    if (entry.lastPrice && Math.abs(entry.lastPrice - currentPrice) <= priceRange) {
       const roundedPrice = Math.round(entry.lastPrice / 5) * 5;
       const volume = priceLevels.get(roundedPrice) || 0;
       priceLevels.set(roundedPrice, volume + (entry.totalVolume || 0));
     }
   });
+
   const sortedLevels = Array.from(priceLevels.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  sortedLevels.forEach(([price, volume]) => {
-    if (Math.abs((price - currentPrice) / currentPrice) <= 0.20) {
-      let strength: 'weak' | 'medium' | 'strong' = 'weak';
-      let tooltip = `Hist. Volume: ${(volume/100000).toFixed(1)}L`;
-      const maxVolume = Math.max(...sortedLevels.map(l => l[1]));
-      const volumeRatio = volume / maxVolume;
-      if (volumeRatio > 0.7) { strength = 'strong'; tooltip += ' | Strong'; }
-      else if (volumeRatio > 0.4) { strength = 'medium'; tooltip += ' | Medium'; }
-      else { strength = 'weak'; tooltip += ' | Weak'; }
-      levels.push({ price, strength, type: price < currentPrice ? 'support' : 'resistance', tooltip });
-    }
+  sortedLevels.forEach(([price]) => {
+      levels.push({ price, strength: 'weak', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Historical Volume Level' });
   });
   return levels;
 }
 
-// === FINAL FIX === Rewritten merging logic to prevent levels from overwriting each other.
-function calculateEnhancedSupportResistance(symbol: string, history: HistoricalData[], currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
-  const combinedLevels: SupportResistanceLevel[] = [];
-  const levelPrices = new Set<number>();
+// === FINAL FIX === This function implements the new, robust "separate and slice" architecture.
+function getFinalLevels(
+  symbol: string, 
+  history: HistoricalData[], 
+  currentPrice: number, 
+  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, 
+  allStrikes: number[]
+): { supports: SupportResistanceLevel[], resistances: SupportResistanceLevel[] } {
+  
+  const allSupports: SupportResistanceLevel[] = [];
+  const allResistances: SupportResistanceLevel[] = [];
 
-  const addLevel = (level: SupportResistanceLevel) => {
-    if (!levelPrices.has(level.price)) {
-      combinedLevels.push(level);
-      levelPrices.add(level.price);
+  const addLevel = (level: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
+    // Prevent adding duplicates
+    if (!list.some(l => l.price === level.price)) {
+      list.push(level);
     }
   };
 
-  const oiSupportLevels = findSupportLevels(currentPrice, optionsByStrike, allStrikes);
-  const oiResistanceLevels = findResistanceLevels(currentPrice, optionsByStrike, allStrikes);
+  // 1. Get all potential levels from all sources
+  findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allSupports));
+  findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allResistances));
   
-  oiSupportLevels.forEach(addLevel);
-  oiResistanceLevels.forEach(addLevel);
-
-  const historicalLevels = calculateSupportResistance(history, currentPrice);
-  historicalLevels.forEach(histLevel => {
-    const hasClash = Array.from(levelPrices).some(price => Math.abs(price - histLevel.price) <= 10);
-    if (!hasClash) {
-      addLevel(histLevel);
-    }
+  calculateSupportResistance(history, currentPrice).forEach(l => {
+    if (l.type === 'support') addLevel(l, allSupports);
+    else addLevel(l, allResistances);
+  });
+  
+  getPsychologicalLevels(symbol, currentPrice).forEach(price => {
+    const level: SupportResistanceLevel = {
+      price,
+      strength: 'medium',
+      type: price < currentPrice ? 'support' : 'resistance',
+      tooltip: 'Psychological Level'
+    };
+    if (level.type === 'support') addLevel(level, allSupports);
+    else addLevel(level, allResistances);
   });
 
-  const psychLevels = getPsychologicalLevels(symbol, currentPrice);
-  psychLevels.forEach(psychPrice => {
-    const existingLevel = combinedLevels.find(l => Math.abs(l.price - psychPrice) <= 10);
-    if (!existingLevel) {
-      addLevel({ price: psychPrice, strength: 'medium', type: psychPrice < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological level' });
-    } else if (existingLevel.strength === 'weak') {
-      existingLevel.strength = 'medium';
-      existingLevel.tooltip += ' + Psychological';
-    }
-  });
+  // 2. Sort each list independently by proximity
+  allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
+  allResistances.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
 
-  return combinedLevels
-    .sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice))
-    .slice(0, 8);
+  // 3. Return the top 2 from each list
+  return {
+    supports: allSupports.slice(0, 2),
+    resistances: allResistances.slice(0, 2)
+  };
 }
 
 
@@ -343,28 +346,17 @@ export async function POST(request: Request) {
         totalPutVolume += peLiveData?.volume || 0;
     }
 
-    let highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
-    for (const strike of strikePrices) {
-        if (strike > ltp && strike <= ltp * 1.15) {
-            if (optionsByStrike[strike].ce_oi > highestCallOI) {
-                highestCallOI = optionsByStrike[strike].ce_oi;
-                resistance = strike;
-            }
-        } else if (strike < ltp && strike >= ltp * 0.85) {
-            if (optionsByStrike[strike].pe_oi > highestPutOI) {
-                highestPutOI = optionsByStrike[strike].pe_oi;
-                support = strike;
-            }
-        }
-    }
-    
-    const allLevels = calculateEnhancedSupportResistance(displayName.toUpperCase(), historicalData, ltp, optionsByStrike, strikePrices);
-    
-    const supportLevels = allLevels.filter(level => level.type === 'support');
-    const resistanceLevels = allLevels.filter(level => level.type === 'resistance');
+    // Get the final, curated lists of levels
+    const { supports: supportLevels, resistances: resistanceLevels } = getFinalLevels(
+      displayName.toUpperCase(), 
+      historicalData, 
+      ltp, 
+      optionsByStrike, 
+      strikePrices
+    );
 
-    const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : support;
-    const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : resistance;
+    const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : 0;
+    const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : 0;
     
     const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
     let sentiment = "Neutral";
