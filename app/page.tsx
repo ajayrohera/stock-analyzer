@@ -60,16 +60,9 @@ const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Repu
 const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   try {
     const typedData = data as AnalysisResult;
-    return (
-      typedData &&
-      typeof typedData.symbol === 'string' &&
-      typeof typedData.pcr === 'number' &&
-      typeof typedData.resistance === 'number' &&
-      typeof typedData.support === 'number' &&
-      typeof typedData.ltp === 'number' &&
-      Array.isArray(typedData.supports) &&
-      Array.isArray(typedData.resistances)
-    );
+    const supportsIsValid = Array.isArray(typedData.supports) && (typedData.supports.length === 0 || (typeof typedData.supports[0] === 'object' && typedData.supports[0] !== null && 'price' in typedData.supports[0]));
+    const resistancesIsValid = Array.isArray(typedData.resistances) && (typedData.resistances.length === 0 || (typeof typedData.resistances[0] === 'object' && typedData.resistances[0] !== null && 'price' in typedData.resistances[0]));
+    return (!!typedData && typeof typedData.symbol === 'string' && typeof typedData.pcr === 'number' && typeof typedData.ltp === 'number' && supportsIsValid && resistancesIsValid);
   } catch (error) { 
     console.error('Validation error:', error); 
     return false; 
@@ -138,6 +131,7 @@ const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sent
 ));
 StatCard.displayName = 'StatCard';
 
+// === FINAL FIX HERE === The Info icon and tooltip are restored in this component.
 const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportResistanceLevel[], type: 'Support' | 'Resistance' }) => {
   const isSupport = type === 'Support';
   const headerColor = isSupport ? 'text-green-400' : 'text-red-500';
@@ -172,10 +166,14 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
                 <span className={`text-xs font-semibold uppercase px-2 py-1 rounded ${getStrengthColor(level.strength)}`}>
                   {level.strength}
                 </span>
+                {/* The Info icon and tooltip logic is restored here */}
                 {level.tooltip && (
-                  <div className="absolute right-full mr-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-                    {level.tooltip}
-                  </div>
+                  <>
+                    <Info size={14} className="ml-2 text-gray-400 cursor-pointer" />
+                    <div className="absolute bottom-full mb-2 right-0 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+                      {level.tooltip}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
@@ -740,7 +738,6 @@ export default function Home() {
                 </button>
               </div>
               
-              {/* === UI FIX === The main grid for stat cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-6">
                 <PCRStatCard 
                   title="OI PCR Ratio" 
@@ -760,11 +757,16 @@ export default function Home() {
                 <StatCard title="Max Pain" value={results.maxPain} tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."/>
               </div>
 
-              {/* === UI FIX === A new grid section below for the taller list components */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <SupportResistanceList type="Support" levels={results.supports} />
                 <SupportResistanceList type="Resistance" levels={results.resistances} />
               </div>
+
+              {results.oiAnalysis && (
+                <div className="grid grid-cols-1 mt-6">
+                  <OIAnalysisCard oiAnalysis={results.oiAnalysis} marketStatus={marketStatus} />
+                </div>
+              )}
             </div>
           )}
         </section>
