@@ -109,22 +109,17 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
+// === FINAL FIX === Implements the "Significant Peaks" Algorithm
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
-  const resistanceLevels: SupportResistanceLevel[] = [];
-  const priceRange = currentPrice * 0.15;
-
+  // 1. Find all plausible candidates that pass the ratio test
+  const candidates: SupportResistanceLevel[] = [];
   for (const strike of allStrikes) {
-    if (strike > currentPrice && strike <= currentPrice + priceRange) {
+    if (strike > currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       if (ce_oi < 30000 || pe_oi < 1000) continue;
 
       const oiRatio = ce_oi / pe_oi;
-      const currentIndex = allStrikes.indexOf(strike);
-      const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.ce_oi || 0 : 0;
-      const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.ce_oi || 0 : 0;
-      const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
-      
-      if (oiRatio >= 1.3 && isLocalMax) {
+      if (oiRatio >= 1.3) {
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
 
@@ -138,30 +133,32 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
             strength = 'weak';
             tooltip += ' | Weak';
         }
-        
-        resistanceLevels.push({ price: strike, strength, type: 'resistance', tooltip });
+        candidates.push({ price: strike, strength, type: 'resistance', tooltip });
       }
     }
   }
-  return resistanceLevels.sort((a, b) => a.price - b.price);
+
+  // 2. Filter for significance (Top 5 highest OI among candidates)
+  if (candidates.length === 0) return [];
+
+  candidates.sort((a, b) => (optionsByStrike[b.price]?.ce_oi || 0) - (optionsByStrike[a.price]?.ce_oi || 0));
+  const significantLevels = candidates.slice(0, 5);
+
+  // 3. Sort by proximity and return
+  return significantLevels.sort((a, b) => a.price - b.price);
 }
 
+// === FINAL FIX === Implements the "Significant Peaks" Algorithm
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
-  const supportLevels: SupportResistanceLevel[] = [];
-  const priceRange = currentPrice * 0.15;
-
+  // 1. Find all plausible candidates that pass the ratio test
+  const candidates: SupportResistanceLevel[] = [];
   for (const strike of allStrikes) {
-    if (strike < currentPrice && strike >= currentPrice - priceRange) {
+    if (strike < currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       if (pe_oi < 30000 || ce_oi < 1000) continue;
 
       const oiRatio = pe_oi / ce_oi;
-      const currentIndex = allStrikes.indexOf(strike);
-      const prevStrikeOI = currentIndex > 0 ? optionsByStrike[allStrikes[currentIndex - 1]]?.pe_oi || 0 : 0;
-      const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.pe_oi || 0 : 0;
-      const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
-      
-      if (oiRatio >= 1.3 && isLocalMax) {
+      if (oiRatio >= 1.3) {
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
 
@@ -175,19 +172,25 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
             strength = 'weak';
             tooltip += ' | Weak';
         }
-        
-        supportLevels.push({ price: strike, strength, type: 'support', tooltip });
+        candidates.push({ price: strike, strength, type: 'support', tooltip });
       }
     }
   }
-  return supportLevels.sort((a, b) => b.price - a.price);
+
+  // 2. Filter for significance (Top 5 highest OI among candidates)
+  if (candidates.length === 0) return [];
+  
+  candidates.sort((a, b) => (optionsByStrike[b.price]?.pe_oi || 0) - (optionsByStrike[a.price]?.pe_oi || 0));
+  const significantLevels = candidates.slice(0, 5);
+
+  // 3. Sort by proximity and return
+  return significantLevels.sort((a, b) => b.price - a.price);
 }
 
 function calculateSupportResistance(history: HistoricalData[], currentPrice: number): SupportResistanceLevel[] {
   if (!history || history.length === 0 || !currentPrice) return [];
   const levels: SupportResistanceLevel[] = [];
   const priceLevels = new Map<number, number>();
-  // Proximity gate for historical levels
   const priceRange = currentPrice * 0.20;
 
   history.forEach(entry => {
@@ -205,7 +208,6 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   return levels;
 }
 
-// === FINAL FIX === This function implements the new, robust "separate and slice" architecture.
 function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -218,13 +220,11 @@ function getFinalLevels(
   const allResistances: SupportResistanceLevel[] = [];
 
   const addLevel = (level: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
-    // Prevent adding duplicates
     if (!list.some(l => l.price === level.price)) {
       list.push(level);
     }
   };
 
-  // 1. Get all potential levels from all sources
   findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allSupports));
   findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allResistances));
   
@@ -244,11 +244,9 @@ function getFinalLevels(
     else addLevel(level, allResistances);
   });
 
-  // 2. Sort each list independently by proximity
   allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
   allResistances.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
 
-  // 3. Return the top 2 from each list
   return {
     supports: allSupports.slice(0, 2),
     resistances: allResistances.slice(0, 2)
@@ -346,7 +344,6 @@ export async function POST(request: Request) {
         totalPutVolume += peLiveData?.volume || 0;
     }
 
-    // Get the final, curated lists of levels
     const { supports: supportLevels, resistances: resistanceLevels } = getFinalLevels(
       displayName.toUpperCase(), 
       historicalData, 
