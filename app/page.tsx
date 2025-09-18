@@ -131,7 +131,6 @@ const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sent
 ));
 StatCard.displayName = 'StatCard';
 
-// === FINAL FIX HERE === The Info icon and tooltip are restored in this component.
 const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportResistanceLevel[], type: 'Support' | 'Resistance' }) => {
   const isSupport = type === 'Support';
   const headerColor = isSupport ? 'text-green-400' : 'text-red-500';
@@ -162,18 +161,18 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
           <div key={level.price} className='p-2 rounded-md'>
             <div className="flex justify-between items-center">
               <span className={`text-xl font-bold ${headerColor}`}>{level.price}</span>
-              <div className="relative group flex items-center">
+              <div className="flex items-center">
                 <span className={`text-xs font-semibold uppercase px-2 py-1 rounded ${getStrengthColor(level.strength)}`}>
                   {level.strength}
                 </span>
-                {/* The Info icon and tooltip logic is restored here */}
+                {/* === UI/UX FIX === Tooltip hover is now isolated to only the Info icon */}
                 {level.tooltip && (
-                  <>
+                  <div className="relative group">
                     <Info size={14} className="ml-2 text-gray-400 cursor-pointer" />
                     <div className="absolute bottom-full mb-2 right-0 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
                       {level.tooltip}
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             </div>
