@@ -109,8 +109,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
-// === CHANGE START ===
-// Updated function with tiered logic for resistance levels
+// === CHANGED === Updated function with tiered logic for resistance levels
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const resistanceLevels: SupportResistanceLevel[] = [];
   const priceRange = currentPrice * 0.15;
@@ -126,12 +125,10 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.ce_oi || 0 : 0;
       const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
       
-      // Lowered entry gate to consider more levels
       if (oiRatio >= 1.3 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
 
-        // Tiered strength logic
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
             strength = 'strong';
             tooltip += ' | Strong';
@@ -150,7 +147,7 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
   return resistanceLevels.sort((a, b) => a.price - b.price);
 }
 
-// Updated function with tiered logic for support levels
+// === CHANGED === Updated function with tiered logic for support levels
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const supportLevels: SupportResistanceLevel[] = [];
   const priceRange = currentPrice * 0.15;
@@ -166,12 +163,10 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.pe_oi || 0 : 0;
       const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
       
-      // Lowered entry gate to consider more levels
       if (oiRatio >= 1.3 && isLocalMax) {
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
 
-        // Tiered strength logic
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
             strength = 'strong';
             tooltip += ' | Strong';
@@ -189,7 +184,6 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
   }
   return supportLevels.sort((a, b) => b.price - a.price);
 }
-// === CHANGE END ===
 
 function calculateSupportResistance(history: HistoricalData[], currentPrice: number): SupportResistanceLevel[] {
   if (!history || history.length === 0 || !currentPrice) return [];
@@ -333,14 +327,15 @@ export async function POST(request: Request) {
         totalPutVolume += peLiveData?.volume || 0;
     }
 
+    // Default support/resistance based purely on highest OI near LTP (as a fallback)
     let highestCallOI = 0, resistance = 0, highestPutOI = 0, support = 0;
     for (const strike of strikePrices) {
-        if (strike > ltp && strike <= ltp * 1.15) { // Proximity check for default
+        if (strike > ltp && strike <= ltp * 1.15) {
             if (optionsByStrike[strike].ce_oi > highestCallOI) {
                 highestCallOI = optionsByStrike[strike].ce_oi;
                 resistance = strike;
             }
-        } else if (strike < ltp && strike >= ltp * 0.85) { // Proximity check for default
+        } else if (strike < ltp && strike >= ltp * 0.85) {
             if (optionsByStrike[strike].pe_oi > highestPutOI) {
                 highestPutOI = optionsByStrike[strike].pe_oi;
                 support = strike;
@@ -348,41 +343,15 @@ export async function POST(request: Request) {
         }
     }
     
-    if (resistance === 0) {
-        const otmCalls = strikePrices.filter(strike => strike > ltp);
-        if (otmCalls.length > 0) resistance = otmCalls[0];
-    }
-    if (support === 0) {
-        const otmPuts = strikePrices.filter(strike => strike < ltp);
-        if (otmPuts.length > 0) support = otmPuts[otmPuts.length - 1];
-    }
+    // === CHANGED === Updated logic to handle full arrays of S/R levels
+    const allLevels = calculateEnhancedSupportResistance(displayName.toUpperCase(), historicalData, ltp, optionsByStrike, strikePrices);
     
-    const supportResistanceLevels = calculateEnhancedSupportResistance(displayName.toUpperCase(), historicalData, ltp, optionsByStrike, strikePrices);
-    
-    let finalSupport = supportResistanceLevels.filter(level => level.type === 'support')[0];
-    let finalResistance = supportResistanceLevels.filter(level => level.type === 'resistance')[0];
+    const supportLevels = allLevels.filter(level => level.type === 'support');
+    const resistanceLevels = allLevels.filter(level => level.type === 'resistance');
 
-    if (!finalResistance && resistance > 0) {
-      const defaultData = optionsByStrike[resistance];
-      if (defaultData) {
-        const { ce_oi, pe_oi } = defaultData;
-        const ratio = pe_oi > 0 ? (ce_oi / pe_oi).toFixed(2) : '∞';
-        let strength: 'weak' | 'medium' | 'strong' = 'medium';
-        if (ce_oi > 2000000) strength = 'strong'; else if (ce_oi < 100000) strength = 'weak';
-        finalResistance = { price: resistance, strength, type: 'resistance', tooltip: `Default | CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${ratio}:1` };
-      }
-    }
-
-    if (!finalSupport && support > 0) {
-      const defaultData = optionsByStrike[support];
-      if (defaultData) {
-        const { ce_oi, pe_oi } = defaultData;
-        const ratio = ce_oi > 0 ? (pe_oi / ce_oi).toFixed(2) : '∞';
-        let strength: 'weak' | 'medium' | 'strong' = 'medium';
-        if (pe_oi > 2000000) strength = 'strong'; else if (pe_oi < 100000) strength = 'weak';
-        finalSupport = { price: support, strength, type: 'support', tooltip: `Default | PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${ratio}:1` };
-      }
-    }
+    // For the top-level property, use the closest identified level, or the fallback if none exist.
+    const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : support;
+    const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : resistance;
     
     const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
     let sentiment = "Neutral";
@@ -406,16 +375,28 @@ export async function POST(request: Request) {
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
+    // === CHANGED === Restructured responseData to include the full S/R arrays
     const responseData = {
-        symbol: displayName.toUpperCase(), pcr: parseFloat(pcr.toFixed(2)), volumePcr: parseFloat(volumePcr.toFixed(2)),
-        maxPain, resistance: finalResistance?.price || resistance, support: finalSupport?.price || support, 
-        sentiment, expiryDate: formattedExpiry, supportStrength: finalSupport?.strength || 'medium', 
-        resistanceStrength: finalResistance?.strength || 'medium',
-        supportTooltip: finalSupport?.tooltip || 'No support level found.',
-        resistanceTooltip: finalResistance?.tooltip || 'No resistance level found.',
+        symbol: displayName.toUpperCase(),
         ltp: ltp,
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
-        changePercent: parseFloat(changePercent.toFixed(2)), ...volumeMetrics
+        changePercent: parseFloat(changePercent.toFixed(2)),
+        ...volumeMetrics,
+        
+        // Key Data
+        expiryDate: formattedExpiry,
+        sentiment,
+        pcr: parseFloat(pcr.toFixed(2)),
+        volumePcr: parseFloat(volumePcr.toFixed(2)),
+        maxPain,
+
+        // Top Level S/R (Closest Validated Level)
+        support: finalSupport, 
+        resistance: finalResistance,
+        
+        // FULL LIST OF ALL S/R LEVELS
+        supports: supportLevels,
+        resistances: resistanceLevels,
     };
     
     return NextResponse.json(responseData);
