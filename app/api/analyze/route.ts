@@ -5,6 +5,7 @@ import { google } from 'googleapis';
 import { KiteConnect } from 'kiteconnect';
 import { createClient } from 'redis';
 
+// ... (All other helper types and functions remain exactly the same) ...
 // --- HELPER TYPES ---
 interface QuoteData {
     [key:string]: { 
@@ -225,45 +226,43 @@ function getFinalLevels(
   };
 }
 
-// === NEW FUNCTION === This is the new, isolated SMART Sentiment algorithm.
 function calculateSmartSentiment(
   pcr: number,
   volumePcr: number,
   highestPutOI: number,
   highestCallOI: number
 ): string {
-  // 1. Calculate PCR Score
   let pcrScore = 0;
   if (pcr > 1.2) pcrScore = 2;
   else if (pcr > 1.0) pcrScore = 1;
   else if (pcr < 0.8) pcrScore = -2;
   else if (pcr < 1.0) pcrScore = -1;
 
-  // 2. Calculate Conviction Score
   let convictionScore = 0;
   if (highestPutOI > highestCallOI * 2) convictionScore = 2;
   else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
   else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
   else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
   
-  // 3. Calculate Volume Modifier
   let volumeModifier = 0;
-  if (volumePcr < 0.8) volumeModifier = 1; // Bullish action today
-  else if (volumePcr > 1.2) volumeModifier = -1; // Bearish action today
+  if (volumePcr < 0.8) volumeModifier = 1;
+  else if (volumePcr > 1.2) volumeModifier = -1;
 
-  // 4. Calculate Final Score
   const finalScore = pcrScore + convictionScore + volumeModifier;
 
-  // 5. Determine Sentiment
+  // === DIAGNOSTIC LOGGING FOR SENTIMENT ===
+  console.log(`[SENTIMENT DIAGNOSTIC] PCR Score: ${pcrScore} (OI PCR: ${pcr.toFixed(2)}) | Conviction Score: ${convictionScore} | Volume Modifier: ${volumeModifier} (Vol PCR: ${volumePcr.toFixed(2)}) ==> Final Score: ${finalScore}`);
+  // =========================================
+
   if (finalScore >= 4) return "Strongly Bullish";
   if (finalScore >= 2) return "Bullish";
   if (finalScore === 1) return "Slightly Bullish";
   if (finalScore === 0) return "Neutral";
   if (finalScore === -1) return "Slightly Bearish";
-  if (finalScore <= -2) return "Bearish";
+  if (finalScore <= -2 && finalScore > -4) return "Bearish";
   if (finalScore <= -4) return "Strongly Bearish";
 
-  return "Neutral"; // Default fallback
+  return "Neutral";
 }
 
 // --- MAIN API FUNCTION ---
@@ -355,7 +354,6 @@ export async function POST(request: Request) {
         totalCallVolume += ceLiveData?.volume || 0;
         totalPutVolume += peLiveData?.volume || 0;
         
-        // Find the highest OTM OI walls
         if (strike > ltp && ce_oi > highestCallOI) {
             highestCallOI = ce_oi;
         }
@@ -378,7 +376,6 @@ export async function POST(request: Request) {
     const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
     const volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
     
-    // === SENTIMENT LOGIC IS NOW REPLACED WITH A SINGLE CALL TO THE NEW FUNCTION ===
     const sentiment = calculateSmartSentiment(pcr, volumePcr, highestPutOI, highestCallOI);
     
     let minLoss = Infinity, maxPain = 0;
