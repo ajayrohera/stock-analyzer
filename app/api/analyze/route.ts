@@ -7,7 +7,7 @@ import { createClient } from 'redis';
 
 // --- HELPER TYPES ---
 interface QuoteData {
-    [key: string]: { 
+    [key:string]: { 
         instrument_token: number; 
         last_price: number; 
         oi?: number; 
@@ -16,7 +16,7 @@ interface QuoteData {
     }
 }
 interface LtpQuote {
-    [key: string]: { instrument_token: number; last_price: number; }
+    [key:string]: { instrument_token: number; last_price: number; }
 }
 interface Instrument {
     tradingsymbol: string;
@@ -79,31 +79,21 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
   return generatePsychologicalLevels(currentPrice);
 }
 
-// === FINAL FIX IS HERE === The date comparison logic is now robust.
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
   if (!historicalData || historicalData.length < 2 || !currentPrice) {
-    // We need at least two days of data (today and yesterday) to calculate a change.
     return 0;
   }
-  
-  // The cron job saves entries with a 'YYYY-MM-DD' date string.
-  // We can create today's date string in the same format for a reliable comparison.
   const todayDateString = new Date().toISOString().split('T')[0];
-
-  // Find the latest entry that is NOT from today. This will be the previous day's close.
   const previousDayEntry = historicalData
-    .filter(entry => entry.date !== todayDateString) // Exclude today's data
-    .sort((a, b) => b.timestamp - a.timestamp) // Sort by timestamp descending
-    [0]; // Get the most recent one
-
+    .filter(entry => entry.date !== todayDateString)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    [0];
   if (!previousDayEntry || !previousDayEntry.lastPrice) {
-    return 0; // No previous day data found
+    return 0;
   }
-
   const previousClose = previousDayEntry.lastPrice;
   return ((currentPrice - previousClose) / previousClose) * 100;
 }
-
 
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
   if (!historicalData.length) return {};
@@ -235,6 +225,46 @@ function getFinalLevels(
   };
 }
 
+// === NEW FUNCTION === This is the new, isolated SMART Sentiment algorithm.
+function calculateSmartSentiment(
+  pcr: number,
+  volumePcr: number,
+  highestPutOI: number,
+  highestCallOI: number
+): string {
+  // 1. Calculate PCR Score
+  let pcrScore = 0;
+  if (pcr > 1.2) pcrScore = 2;
+  else if (pcr > 1.0) pcrScore = 1;
+  else if (pcr < 0.8) pcrScore = -2;
+  else if (pcr < 1.0) pcrScore = -1;
+
+  // 2. Calculate Conviction Score
+  let convictionScore = 0;
+  if (highestPutOI > highestCallOI * 2) convictionScore = 2;
+  else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
+  else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
+  else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
+  
+  // 3. Calculate Volume Modifier
+  let volumeModifier = 0;
+  if (volumePcr < 0.8) volumeModifier = 1; // Bullish action today
+  else if (volumePcr > 1.2) volumeModifier = -1; // Bearish action today
+
+  // 4. Calculate Final Score
+  const finalScore = pcrScore + convictionScore + volumeModifier;
+
+  // 5. Determine Sentiment
+  if (finalScore >= 4) return "Strongly Bullish";
+  if (finalScore >= 2) return "Bullish";
+  if (finalScore === 1) return "Slightly Bullish";
+  if (finalScore === 0) return "Neutral";
+  if (finalScore === -1) return "Slightly Bearish";
+  if (finalScore <= -2) return "Bearish";
+  if (finalScore <= -4) return "Strongly Bearish";
+
+  return "Neutral"; // Default fallback
+}
 
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
@@ -299,7 +329,7 @@ export async function POST(request: Request) {
 
     if (ltp === 0) return NextResponse.json({ error: `Could not fetch live price for '${tradingSymbol}'.` }, { status: 404 });
     
-    const historicalData = await getHistoricalData(displayName); // Using original display name now
+    const historicalData = await getHistoricalData(displayName);
     const changePercent = calculateChangePercent(ltp, historicalData);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
 
@@ -310,6 +340,7 @@ export async function POST(request: Request) {
     const strikePrices = [...new Set(optionsChain.map(o => o.strike))].sort((a, b) => a - b);
     
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
+    let highestCallOI = 0, highestPutOI = 0;
 
     for (const strike of strikePrices) {
         const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
@@ -323,6 +354,14 @@ export async function POST(request: Request) {
         totalPutOI += pe_oi;
         totalCallVolume += ceLiveData?.volume || 0;
         totalPutVolume += peLiveData?.volume || 0;
+        
+        // Find the highest OTM OI walls
+        if (strike > ltp && ce_oi > highestCallOI) {
+            highestCallOI = ce_oi;
+        }
+        if (strike < ltp && pe_oi > highestPutOI) {
+            highestPutOI = pe_oi;
+        }
     }
 
     const { supports: supportLevels, resistances: resistanceLevels } = getFinalLevels(
@@ -337,13 +376,10 @@ export async function POST(request: Request) {
     const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : 0;
     
     const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
-    let sentiment = "Neutral";
-    if (pcr > 1.1) sentiment = "Bullish";
-    else if (pcr < 0.9) sentiment = "Bearish";
-    else if (pcr > 1.0) sentiment = "Slightly Bullish";
-    else if (pcr < 1.0) sentiment = "Slightly Bearish";
-    
     const volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+    
+    // === SENTIMENT LOGIC IS NOW REPLACED WITH A SINGLE CALL TO THE NEW FUNCTION ===
+    const sentiment = calculateSmartSentiment(pcr, volumePcr, highestPutOI, highestCallOI);
     
     let minLoss = Infinity, maxPain = 0;
     for (const expiryStrike of strikePrices) {

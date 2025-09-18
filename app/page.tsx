@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
+import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown, Calendar, Target } from 'lucide-react';
 
 // --- HELPER TYPES ---
 type SupportResistanceLevel = {
@@ -103,16 +103,19 @@ const ErrorToast = React.memo(({ error }: { error: AppError }) => (
 ));
 ErrorToast.displayName = 'ErrorToast';
 
-const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sentiment, sentimentColor }: { 
+const StatCard = React.memo(({ icon: Icon, title, value, color = 'text-white', tooltip, sentiment, sentimentColor, subValue }: { 
+  icon?: React.ElementType;
   title: string; 
   value: number | string; 
   color?: string; 
   tooltip?: string; 
   sentiment?: string; 
   sentimentColor?: string; 
+  subValue?: string;
 }) => ( 
-  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
     <div className="flex items-center justify-center text-sm text-gray-400">
+      {Icon && <Icon size={14} className="mr-1.5" />}
       <span>{title}</span>
       {tooltip && (
         <div className="relative group ml-1">
@@ -124,8 +127,8 @@ const StatCard = React.memo(({ title, value, color = 'text-white', tooltip, sent
       )}
     </div>
     <p className={`text-3xl font-bold ${color}`}>{typeof value === 'number' ? value.toFixed(2) : value}</p>
-    {sentiment && sentimentColor && (
-      <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
+    {subValue && (
+      <p className={`text-sm mt-1 ${sentimentColor}`}>{subValue}</p>
     )}
   </div>
 ));
@@ -146,7 +149,7 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
 
   if (!levels || levels.length === 0) {
     return (
-      <div className="bg-gray-900/50 p-4 rounded-lg h-full">
+      <div className="bg-gray-900/50 p-4 rounded-lg h-full min-h-[140px] flex flex-col justify-center">
         <h3 className={`text-lg font-bold text-center mb-2 ${headerColor}`}>{type} Levels</h3>
         <p className="text-gray-500 text-center text-sm">No significant levels found.</p>
       </div>
@@ -154,7 +157,7 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
   }
 
   return (
-    <div className="bg-gray-900/50 p-4 rounded-lg h-full">
+    <div className="bg-gray-900/50 p-4 rounded-lg h-full min-h-[140px]">
       <h3 className={`text-lg font-bold text-center mb-4 ${headerColor}`}>{type} Levels</h3>
       <div className="space-y-2">
         {levels.map((level) => (
@@ -165,7 +168,6 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
                 <span className={`text-xs font-semibold uppercase px-2 py-1 rounded ${getStrengthColor(level.strength)}`}>
                   {level.strength}
                 </span>
-                {/* === UI/UX FIX === Tooltip hover is now isolated to only the Info icon */}
                 {level.tooltip && (
                   <div className="relative group">
                     <Info size={14} className="ml-2 text-gray-400 cursor-pointer" />
@@ -192,13 +194,17 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
   if (isBullish) color = 'text-green-400'; 
   if (isBearish) color = 'text-red-500'; 
   return ( 
-  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
     <div className="flex items-center justify-center text-sm text-gray-400">
+      <TrendingUp size={14} className="mr-1.5" />
       <span>SMART Sentiment</span>
       <div className="relative group ml-1">
         <Info size={14} className="cursor-pointer" />
-        <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-          This is a sophisticated sentiment analysis based on the Put-Call Ratio and the concentration of Open Interest at key Out-of-the-Money (OTM) strike prices.
+        <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+          A sophisticated sentiment score derived from three factors:
+          <br />1. Overall Open Interest PCR (prevailing mood).
+          <br />2. OI Conviction (highest support vs. resistance walls).
+          <br />3. Volume PCR (today&apos;s intraday action).
         </div>
       </div>
     </div>
@@ -246,39 +252,12 @@ const VolumeCard = React.memo(({
     if (percentage > 50) return 'text-orange-400';
     return 'text-red-400';
   };
-
-  if (marketStatus === 'PRE_MARKET') {
-    return (
-      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
-        <div className="flex items-center justify-center text-sm text-gray-400">
-          <span>Volume Analysis</span>
-          <div className="relative group ml-1">
-            <Info size={14} className="cursor-pointer" />
-            <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-              Compares today&apos;s volume against 20-day average. Percentage shows progress vs daily average. Estimated projects full day volume.
-            </div>
-          </div>
-        </div>
-        <p className="text-yellow-400 text-sm mt-2">Pre-market: Data from previous close</p>
-        {avg20DayVolume !== undefined && (
-          <p className="text-lg font-semibold text-white mt-2">
-            20D Avg: {formatVolume(avg20DayVolume)}
-          </p>
-        )}
-      </div>
-    );
-  }
-
+  
   return (
-    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
       <div className="flex items-center justify-center text-sm text-gray-400">
+        <BarChart size={14} className="mr-1.5" />
         <span>Volume Analysis</span>
-        <div className="relative group ml-1">
-          <Info size={14} className="cursor-pointer" />
-          <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-            Compares today&apos;s volume against 20-day average. Percentage shows progress vs daily average. Estimated projects full day volume.
-          </div>
-        </div>
       </div>
       
       {avg20DayVolume !== undefined && (
@@ -287,24 +266,20 @@ const VolumeCard = React.memo(({
         </p>
       )}
       
-      {todayVolumePercentage !== undefined && (
-        <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
+      {todayVolumePercentage !== undefined && marketStatus === 'OPEN' && (
+        <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-1`}>
           {todayVolumePercentage.toFixed(1)}% of Avg
         </p>
       )}
       
-      {estimatedTodayVolume !== undefined && (
-        <p className="text-md text-gray-300 mt-2">
+      {estimatedTodayVolume !== undefined && marketStatus === 'OPEN' && (
+        <p className="text-md text-gray-300 mt-1">
           Est. Today: {formatVolume(estimatedTodayVolume)}
         </p>
       )}
       
       {marketStatus !== 'OPEN' && (
-        <p className="text-gray-400 text-xs mt-2">Data from previous trading session</p>
-      )}
-      
-      {(!avg20DayVolume && !todayVolumePercentage && !estimatedTodayVolume) && (
-        <p className="text-gray-400 text-sm mt-2">Volume data not available</p>
+        <p className="text-yellow-400 text-sm mt-2">Data from previous session</p>
       )}
     </div>
   );
@@ -324,7 +299,7 @@ const PCRStatCard = React.memo(({
   sentiment?: string; 
   sentimentColor?: string; 
 }) => (
-  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
+  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
     <div className="flex items-center justify-center text-sm text-gray-400">
       <span>{title}</span>
       <div className="relative group ml-1">
@@ -332,7 +307,7 @@ const PCRStatCard = React.memo(({
         <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
           {title === 'OI PCR Ratio' 
             ? 'Put-Call Ratio based on Open Interest. Values above 1.1 are bullish, below 0.9 are bearish.'
-            : 'Put-Call Ratio based on trading volumes. Values above 1.1 are bullish, below 0.9 are bearish.'}
+            : "Put-Call Ratio based on today's trading volume. Indicates intraday sentiment shifts."}
         </div>
       </div>
     </div>
@@ -340,13 +315,15 @@ const PCRStatCard = React.memo(({
     {sentiment && sentimentColor && marketStatus !== 'PRE_MARKET' && (
       <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
     )}
-    {marketStatus === 'PRE_MARKET' && (
-      <p className="text-yellow-400 text-xs mt-1">Pre-market: Data from previous close</p>
+    {marketStatus !== 'OPEN' && (
+      <p className="text-yellow-400 text-xs mt-1">Data from previous close</p>
     )}
   </div>
 ));
 PCRStatCard.displayName = 'PCRStatCard';
 
+
+// === RESTORED COMPONENT === This was accidentally deleted.
 const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
   const isCall = type === 'CALL';
   const isPositive = changeOi > 0;
@@ -368,47 +345,31 @@ const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) =
 });
 OIChangeRow.displayName = 'OIChangeRow';
 
+
+// === RESTORED COMPONENT === This was accidentally deleted.
 const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
   oiAnalysis?: AnalysisResult['oiAnalysis'];
   marketStatus: MarketStatus; 
 }) => {
   if (marketStatus === 'PRE_MARKET') {
     return (
-      <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-2">
-        <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
-          <span>Open Interest Analysis</span>
-          <div className="relative group ml-1">
-            <Info size={14} className="cursor-pointer" />
-            <div className="absolute bottom-full mb-2 w-80 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-              Shows the largest changes in Open Interest at key strike prices. Call OI increase suggests bullish bets, Put OI increase suggests hedging or bearish positioning.
-            </div>
-          </div>
-        </div>
-        <p className="text-yellow-400 text-sm text-center">Pre-market: OI data from previous close</p>
+      <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-3">
+        <h3 className="text-lg font-bold text-center mb-2 text-white">Intraday OI Changes</h3>
+        <p className="text-yellow-400 text-sm text-center">Data from previous close. Live changes will appear after market open.</p>
       </div>
     );
   }
 
   if (!oiAnalysis) {
-    return (
-      <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-2">
-        <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
-          <span>Open Interest Analysis</span>
-        </div>
-        <p className="text-gray-400 text-sm text-center">Open Interest data not available</p>
-      </div>
-    );
+    return null; // Don't render the card if there's no data
   }
 
   return (
-    <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-2">
-      <div className="flex items-center justify-center text-sm text-gray-400 mb-4">
-        <span>Open Interest Analysis</span>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-3">
+      <h3 className="text-lg font-bold text-center mb-4 text-white">Intraday OI Changes</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <h4 className="text-green-400 font-semibold mb-2 text-center">Call OI Changes</h4>
+          <h4 className="text-green-400 font-semibold mb-2 text-center">Top Call OI Additions</h4>
           <div className="max-h-40 overflow-y-auto">
             {oiAnalysis.calls.length > 0 ? (
               oiAnalysis.calls.map((item, index) => (
@@ -421,7 +382,7 @@ const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: {
         </div>
         
         <div>
-          <h4 className="text-red-400 font-semibold mb-2 text-center">Put OI Changes</h4>
+          <h4 className="text-red-400 font-semibold mb-2 text-center">Top Put OI Additions</h4>
           <div className="max-h-40 overflow-y-auto">
             {oiAnalysis.puts.length > 0 ? (
               oiAnalysis.puts.map((item, index) => (
@@ -639,12 +600,11 @@ export default function Home() {
     setCooldownMessage('');
   }, []);
 
-  const { oiPcrSentiment, volumePcrSentiment, rsiSentiment } = useMemo(() => { 
-    if (!results) return { oiPcrSentiment: null, volumePcrSentiment: null, rsiSentiment: null }; 
+  const { oiPcrSentiment, volumePcrSentiment } = useMemo(() => { 
+    if (!results) return { oiPcrSentiment: null, volumePcrSentiment: null }; 
     return { 
       oiPcrSentiment: getPcrSentiment(results.pcr), 
       volumePcrSentiment: getPcrSentiment(results.volumePcr), 
-      rsiSentiment: results.rsi ? getRsiSentiment(results.rsi) : null, 
     }; 
   }, [results]);
 
@@ -715,29 +675,25 @@ export default function Home() {
           
           {results && (
             <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl shadow-2xl text-left animate-fade-in">
-              <h2 className="text-3xl font-bold text-center text-white mb-2">Analysis for <span className="text-brand-cyan">{results.symbol}</span></h2>
-              <p className="text-center text-gray-400 mb-1">Expiry Date: {results.expiryDate}</p>
-              <div className="flex items-center justify-center mb-6">
-                <span className="text-white font-bold">
-                  {marketStatus === 'PRE_MARKET' ? 'Previous Close: ' : 'CMP: '}{results.ltp}
-                  {results.changePercent !== undefined && (
-                    <span className={results.changePercent >= 0 ? 'text-green-400' : 'text-red-500'}>
-                      {` (${results.changePercent > 0 ? '+' : ''}${results.changePercent.toFixed(2)}%)`}
-                    </span>
-                  )}
-                </span>
-                <span className="text-gray-500 ml-2">(last refreshed {results.lastRefreshed})</span>
-                <button 
-                  onClick={handleRefreshCard} 
-                  disabled={refreshingCard} 
-                  className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50" 
-                  title="Refresh data"
-                >
-                  <RefreshCw size={14} className={refreshingCard ? 'animate-spin' : ''} />
-                </button>
+              <div className="text-center mb-6">
+                <h2 className="text-3xl font-bold text-white">Analysis for <span className="text-brand-cyan">{results.symbol}</span></h2>
               </div>
               
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+                {/* Row 1 */}
+                <StatCard 
+                  icon={Target}
+                  title="Current Price"
+                  value={results.ltp}
+                  // === FIX for undefined changePercent ===
+                  subValue={typeof results.changePercent === 'number' ? `${results.changePercent > 0 ? '+' : ''}${results.changePercent.toFixed(2)}%` : '-'}
+                  sentimentColor={typeof results.changePercent === 'number' ? (results.changePercent >= 0 ? 'text-green-400' : 'text-red-500') : 'text-gray-400'}
+                />
+                <SupportResistanceList type="Support" levels={results.supports} />
+                <SupportResistanceList type="Resistance" levels={results.resistances} />
+
+                {/* Row 2 */}
+                <SentimentCard sentiment={results.sentiment} />
                 <PCRStatCard 
                   title="OI PCR Ratio" 
                   value={results.pcr} 
@@ -752,13 +708,24 @@ export default function Home() {
                   sentiment={volumePcrSentiment?.sentiment} 
                   sentimentColor={volumePcrSentiment?.color} 
                 />
-                <SentimentCard sentiment={results.sentiment} />
-                <StatCard title="Max Pain" value={results.maxPain} tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."/>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <SupportResistanceList type="Support" levels={results.supports} />
-                <SupportResistanceList type="Resistance" levels={results.resistances} />
+                {/* Row 3 */}
+                <StatCard 
+                  title="Max Pain" 
+                  value={results.maxPain} 
+                  tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."
+                />
+                <VolumeCard 
+                  avg20DayVolume={results.avg20DayVolume}
+                  todayVolumePercentage={results.todayVolumePercentage}
+                  estimatedTodayVolume={results.estimatedTodayVolume}
+                  marketStatus={marketStatus}
+                />
+                <StatCard 
+                  icon={Calendar}
+                  title="Expiry Date"
+                  value={results.expiryDate}
+                />
               </div>
 
               {results.oiAnalysis && (
