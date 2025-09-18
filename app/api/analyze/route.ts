@@ -49,35 +49,14 @@ redis.connect().catch(console.error);
 
 // --- HELPER FUNCTIONS ---
 
-// === DIAGNOSTIC LOGGING ADDED HERE ===
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await redis.get('volume_history');
-    if (!historyData) {
-      console.error('[DIAGNOSTIC] Failed to get "volume_history" key from Redis.');
-      return [];
-    }
-
+    if (!historyData) return [];
     const history = JSON.parse(historyData as string);
-    
-    // 1. Log the key we are looking for
-    console.log(`[DIAGNOSTIC] Key we are looking for: "${symbol}"`);
-
-    // 2. Log all available keys in the Redis data
-    console.log(`[DIAGNOSTIC] Available keys in Redis: [${Object.keys(history).join(', ')}]`);
-
-    const result = history[symbol];
-
-    // 3. Log whether we found a match
-    if (result) {
-      console.log(`[DIAGNOSTIC] SUCCESS: Found a match for "${symbol}".`);
-    } else {
-      console.error(`[DIAGNOSTIC] FAILURE: No match found for "${symbol}". Returning empty array.`);
-    }
-
-    return result || [];
+    return history[symbol.toUpperCase()] || [];
   } catch (error) { 
-    console.error('[DIAGNOSTIC] Error in getHistoricalData:', error); 
+    console.error('Error in getHistoricalData:', error); 
     return []; 
   }
 }
@@ -100,19 +79,31 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
   return generatePsychologicalLevels(currentPrice);
 }
 
+// === FINAL FIX IS HERE === The date comparison logic is now robust.
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
-  if (!historicalData || historicalData.length === 0 || !currentPrice) return 0;
-  const today = new Date();
-  const previousDays = historicalData.filter(entry => {
-    const entryDate = new Date(entry.date);
-    return entryDate.setHours(0,0,0,0) !== today.setHours(0,0,0,0);
-  });
-  if (previousDays.length === 0) return 0;
-  previousDays.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const previousClose = previousDays[0]?.lastPrice;
-  if (!previousClose) return 0;
+  if (!historicalData || historicalData.length < 2 || !currentPrice) {
+    // We need at least two days of data (today and yesterday) to calculate a change.
+    return 0;
+  }
+  
+  // The cron job saves entries with a 'YYYY-MM-DD' date string.
+  // We can create today's date string in the same format for a reliable comparison.
+  const todayDateString = new Date().toISOString().split('T')[0];
+
+  // Find the latest entry that is NOT from today. This will be the previous day's close.
+  const previousDayEntry = historicalData
+    .filter(entry => entry.date !== todayDateString) // Exclude today's data
+    .sort((a, b) => b.timestamp - a.timestamp) // Sort by timestamp descending
+    [0]; // Get the most recent one
+
+  if (!previousDayEntry || !previousDayEntry.lastPrice) {
+    return 0; // No previous day data found
+  }
+
+  const previousClose = previousDayEntry.lastPrice;
   return ((currentPrice - previousClose) / previousClose) * 100;
 }
+
 
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
   if (!historicalData.length) return {};
@@ -308,7 +299,7 @@ export async function POST(request: Request) {
 
     if (ltp === 0) return NextResponse.json({ error: `Could not fetch live price for '${tradingSymbol}'.` }, { status: 404 });
     
-    const historicalData = await getHistoricalData(displayName.toUpperCase());
+    const historicalData = await getHistoricalData(displayName); // Using original display name now
     const changePercent = calculateChangePercent(ltp, historicalData);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
 
