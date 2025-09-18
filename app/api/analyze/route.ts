@@ -109,14 +109,16 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
 }
 
+// === CHANGE START ===
+// Updated function with tiered logic for resistance levels
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const resistanceLevels: SupportResistanceLevel[] = [];
-  const priceRange = currentPrice * 0.15; // ✅ PROXIMITY GATE: Only consider strikes within 15%
+  const priceRange = currentPrice * 0.15;
 
   for (const strike of allStrikes) {
-    if (strike > currentPrice && strike <= currentPrice + priceRange) { // Apply proximity check
+    if (strike > currentPrice && strike <= currentPrice + priceRange) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
-      if (ce_oi < 30000 || pe_oi < 1000) continue; // Prevent infinite ratio
+      if (ce_oi < 30000 || pe_oi < 1000) continue;
 
       const oiRatio = ce_oi / pe_oi;
       const currentIndex = allStrikes.indexOf(strike);
@@ -124,11 +126,23 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.ce_oi || 0 : 0;
       const isLocalMax = ce_oi > prevStrikeOI && ce_oi > nextStrikeOI;
       
-      if (oiRatio >= 1.8 && isLocalMax) {
-        let strength: 'weak' | 'medium' | 'strong' = 'medium';
+      // Lowered entry gate to consider more levels
+      if (oiRatio >= 1.3 && isLocalMax) {
+        let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
-        if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong'; }
-        else if (oiRatio < 2.0 || ce_oi < 100000) { strength = 'weak'; } else { tooltip += ' | Medium'; }
+
+        // Tiered strength logic
+        if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
+            strength = 'strong';
+            tooltip += ' | Strong';
+        } else if (oiRatio >= 1.8) {
+            strength = 'medium';
+            tooltip += ' | Medium';
+        } else {
+            strength = 'weak';
+            tooltip += ' | Weak';
+        }
+        
         resistanceLevels.push({ price: strike, strength, type: 'resistance', tooltip });
       }
     }
@@ -136,14 +150,15 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
   return resistanceLevels.sort((a, b) => a.price - b.price);
 }
 
+// Updated function with tiered logic for support levels
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const supportLevels: SupportResistanceLevel[] = [];
-  const priceRange = currentPrice * 0.15; // ✅ PROXIMITY GATE: Only consider strikes within 15%
+  const priceRange = currentPrice * 0.15;
 
   for (const strike of allStrikes) {
-    if (strike < currentPrice && strike >= currentPrice - priceRange) { // Apply proximity check
+    if (strike < currentPrice && strike >= currentPrice - priceRange) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
-      if (pe_oi < 30000 || ce_oi < 1000) continue; // Prevent infinite ratio
+      if (pe_oi < 30000 || ce_oi < 1000) continue;
 
       const oiRatio = pe_oi / ce_oi;
       const currentIndex = allStrikes.indexOf(strike);
@@ -151,17 +166,30 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       const nextStrikeOI = currentIndex < allStrikes.length - 1 ? optionsByStrike[allStrikes[currentIndex + 1]]?.pe_oi || 0 : 0;
       const isLocalMax = pe_oi > prevStrikeOI && pe_oi > nextStrikeOI;
       
-      if (oiRatio >= 1.8 && isLocalMax) {
-        let strength: 'weak' | 'medium' | 'strong' = 'medium';
+      // Lowered entry gate to consider more levels
+      if (oiRatio >= 1.3 && isLocalMax) {
+        let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
-        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) { strength = 'strong'; tooltip += ' | Strong'; }
-        else if (oiRatio < 2.0 || pe_oi < 100000) { strength = 'weak'; } else { tooltip += ' | Medium'; }
+
+        // Tiered strength logic
+        if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
+            strength = 'strong';
+            tooltip += ' | Strong';
+        } else if (oiRatio >= 1.8) {
+            strength = 'medium';
+            tooltip += ' | Medium';
+        } else {
+            strength = 'weak';
+            tooltip += ' | Weak';
+        }
+        
         supportLevels.push({ price: strike, strength, type: 'support', tooltip });
       }
     }
   }
   return supportLevels.sort((a, b) => b.price - a.price);
 }
+// === CHANGE END ===
 
 function calculateSupportResistance(history: HistoricalData[], currentPrice: number): SupportResistanceLevel[] {
   if (!history || history.length === 0 || !currentPrice) return [];
