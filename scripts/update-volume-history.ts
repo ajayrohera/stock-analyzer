@@ -53,10 +53,10 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
 
 // --- MAIN FUNCTION ---
 async function updateVolumeHistory() {
-  console.log('--- Starting Daily Data Update Cron Job (Corrected History Logic) ---');
+  console.log('--- Starting Daily Data Update Cron Job (Corrected History Logic v2) ---');
 
   if (!isMarketClosedForDay()) {
-    console.log('Market is not yet closed. Aborting cron job to prevent saving incomplete data.');
+    console.log('Market is not yet closed. Aborting cron job.');
     return;
   }
   
@@ -83,11 +83,12 @@ async function updateVolumeHistory() {
     if (symbols.length === 0) throw new Error('No symbols found.');
     console.log(`📊 Found ${symbols.length} symbols to update.`);
 
-    // === THE FIX IS HERE ===
-    // 1. Start with the complete history from Redis.
+    // === THE DEFINITIVE FIX IS HERE ===
+    // 1. Read the existing history from Redis and use THIS object as our base.
     const existingHistoryStr = await redisClient.get('volume_history');
     const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
-    // ========================
+    console.log(`📚 Loaded existing history for ${Object.keys(history).length} symbols.`);
+    // ===================================
 
     const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
     
@@ -101,17 +102,17 @@ async function updateVolumeHistory() {
 
     const today = new Date().toISOString().split('T')[0];
     
-    // 2. Loop and MODIFY the history object instead of rebuilding it.
+    // 2. Loop and MODIFY the history object directly.
     for (const symbol of symbols) {
       const key = symbol.displayName.toUpperCase();
       const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
       const data = allStockQuotes[`${exchange}:${symbol.tradingSymbol}`];
       
       if (!history[key]) {
-        history[key] = []; // Initialize if it's a new stock
+        history[key] = [];
       }
 
-      // Filter out today's old data
+      // Filter out today's old data from the existing history
       history[key] = history[key].filter((entry: any) => entry.date !== today);
 
       if (data && data.volume !== undefined && data.last_price !== undefined) {
@@ -127,7 +128,6 @@ async function updateVolumeHistory() {
 
     const allInstruments = await kc.getInstruments('NFO');
     for (const symbol of symbols) {
-      // ... (The options processing logic remains the same and is correct) ...
       try {
         const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
         
@@ -143,6 +143,8 @@ async function updateVolumeHistory() {
           
           if (optionsChain.length > 0) {
             const instrumentTokens = optionsChain.map((o: any) => `NFO:${o.tradingsymbol}`);
+            // This is a potentially slow call inside a loop, but necessary for options.
+            // A future optimization could be to batch these if possible.
             const optionQuoteData = await kc.getQuote(instrumentTokens);
 
             let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
