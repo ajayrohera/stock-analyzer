@@ -46,8 +46,11 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
     }
 }
 
+// Helper to delay execution
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function updateVolumeHistory() {
-    console.log('--- Starting Daily Data Rebuild Cron Job (Parallel Performance Version) ---');
+    console.log('--- Starting Daily Data Rebuild Cron Job (Chunked Parallel Version) ---');
 
     if (!isMarketClosedForDay()) {
         console.log('Market is not yet closed. Aborting cron job.');
@@ -74,7 +77,7 @@ async function updateVolumeHistory() {
         if (symbols.length === 0) throw new Error('No symbols found.');
         console.log(`📊 Found ${symbols.length} symbols to rebuild.`);
 
-        console.log('🔥 Deleting old Redis keys to ensure clean slate...');
+        console.log('🔥 Deleting old Redis keys...');
         await redisClient.del(['volume_history', 'daily_sentiment_data']);
         console.log('✅ Old keys deleted.');
         
@@ -85,32 +88,36 @@ async function updateVolumeHistory() {
         const fromDate = new Date();
         fromDate.setDate(toDate.getDate() - 45);
 
-        // === PARALLEL PERFORMANCE FIX 1: Fetch all historical data concurrently ===
-        console.log(`📡 Preparing to fetch historical data for ${symbols.length} symbols in parallel...`);
-        const historicalPromises = symbols.map(symbol => 
-            kc.getHistoricalData(symbol.instrumentToken, 'day', fromDate, toDate)
-              .catch((e: any) => {
-                  console.error(`  ⚠️ Could not fetch history for ${symbol.displayName}: ${e.message}`);
-                  return []; // Return empty array on failure for this symbol
-              })
-        );
-        const historicalResults = await Promise.all(historicalPromises);
-        console.log('✅ Received all historical data responses.');
-
-        // Process the results in memory
-        symbols.forEach((symbol, index) => {
-            const records = historicalResults[index];
-            if (records && records.length > 0) {
-                newHistory[symbol.displayName.toUpperCase()] = records.map((r: any) => ({
-                    date: new Date(r.date).toISOString().split('T')[0],
-                    totalVolume: r.volume,
-                    lastPrice: r.close,
-                    timestamp: new Date(r.date).getTime(),
-                }));
-            }
-        });
-
-        // === PARALLEL PERFORMANCE FIX 2: Efficiently process options data ===
+        // === RATE-LIMIT SAFE PARALLEL FETCHING ===
+        console.log(`📡 Fetching historical data in chunks to respect rate limits...`);
+        const chunkSize = 50;
+        for (let i = 0; i < symbols.length; i += chunkSize) {
+            const chunk = symbols.slice(i, i + chunkSize);
+            console.log(`  -> Fetching chunk ${i / chunkSize + 1}...`);
+            const promises = chunk.map(symbol => 
+                kc.getHistoricalData(symbol.instrumentToken, 'day', fromDate, toDate)
+                  .catch((e: any) => {
+                      console.error(`  ⚠️ History fetch failed for ${symbol.displayName}: ${e.message}`);
+                      return [];
+                  })
+            );
+            const chunkResults = await Promise.all(promises);
+            chunk.forEach((symbol, index) => {
+                const records = chunkResults[index];
+                if (records && records.length > 0) {
+                    newHistory[symbol.displayName.toUpperCase()] = records.map((r: any) => ({
+                        date: new Date(r.date).toISOString().split('T')[0],
+                        totalVolume: r.volume,
+                        lastPrice: r.close,
+                        timestamp: new Date(r.date).getTime(),
+                    }));
+                }
+            });
+            await delay(1000); // Wait 1 second between chunks to be safe
+        }
+        console.log('✅ All historical data fetched.');
+        
+        // === EFFICIENT OPTIONS PROCESSING ===
         const allInstruments = await kc.getInstruments('NFO');
         const masterTokenList: string[] = [];
         const symbolToOptionsMap: Record<string, any[]> = {};
@@ -132,9 +139,9 @@ async function updateVolumeHistory() {
         }
         
         if (masterTokenList.length > 0) {
-            console.log(`📡 Fetching all ${masterTokenList.length} option quotes in a single batch...`);
+            console.log(`📡 Fetching all ${masterTokenList.length} option quotes in one batch...`);
             const allOptionQuotes = await kc.getQuote(masterTokenList);
-            console.log('✅ Received all option quotes.');
+            console.log('✅ All option quotes received.');
 
             for (const symbol of symbols) {
                 const key = symbol.displayName.toUpperCase();
