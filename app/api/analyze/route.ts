@@ -6,7 +6,6 @@ import { KiteConnect } from 'kiteconnect';
 import { createClient } from 'redis';
 
 // --- HELPER TYPES ---
-// ... (All helper types remain the same) ...
 interface QuoteData {
     [key:string]: { 
         instrument_token: number; 
@@ -50,7 +49,6 @@ const redis = createClient({ url: process.env.REDIS_URL });
 redis.connect().catch(console.error);
 
 // --- HELPER FUNCTIONS ---
-// ... (All other helper functions remain the same, including the new calculateSmartSentiment) ...
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await redis.get('volume_history');
@@ -196,6 +194,7 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   return levels;
 }
 
+// === FINAL FIX IS HERE === The typo 'l' has been corrected.
 function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -205,27 +204,37 @@ function getFinalLevels(
 ): { supports: SupportResistanceLevel[], resistances: SupportResistanceLevel[] } {
   const allSupports: SupportResistanceLevel[] = [];
   const allResistances: SupportResistanceLevel[] = [];
-  const addLevel = (level: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
-    if (!list.some(l => l.price === level.price)) list.push(level);
+  
+  const addLevel = (levelToAdd: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
+    // Corrected variable name from 'l' to 'existingLevel'
+    if (!list.some(existingLevel => existingLevel.price === levelToAdd.price)) {
+      list.push(levelToAdd);
+    }
   };
+
   findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allSupports));
   findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allResistances));
+  
   calculateSupportResistance(history, currentPrice).forEach(l => {
     if (l.type === 'support') addLevel(l, allSupports);
     else addLevel(l, allResistances);
   });
+  
   getPsychologicalLevels(symbol, currentPrice).forEach(price => {
     const level: SupportResistanceLevel = { price, strength: 'medium', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological Level' };
     if (level.type === 'support') addLevel(level, allSupports);
     else addLevel(level, allResistances);
   });
+
   allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
   allResistances.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
+
   return {
     supports: allSupports.slice(0, 2),
     resistances: allResistances.slice(0, 2)
   };
 }
+
 
 function calculateSmartSentiment(
   pcr: number,
@@ -268,15 +277,13 @@ function calculateSmartSentiment(
   return "Neutral";
 }
 
-// === NEW HELPER FUNCTION === To check market status
 const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
     const now = new Date();
     const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
     const day = istTime.getDay();
     const hours = istTime.getHours();
     const minutes = istTime.getMinutes();
-
-    if (day > 0 && day < 6) { // Monday to Friday
+    if (day > 0 && day < 6) {
         if (hours > 9 || (hours === 9 && minutes >= 15)) {
             if (hours < 15 || (hours === 15 && minutes <= 30)) {
                 return 'OPEN';
@@ -316,6 +323,7 @@ export async function POST(request: Request) {
     const row = rows.find(r => r[0] === displayName);
     if (!row || !row[1]) return NextResponse.json({ error: `TradingSymbol for '${displayName}' not found.` }, { status: 404 }); 
     const tradingSymbol = row[1];
+
 
     const tokenData = await redis.get('kite_token');
     if (!tokenData) return NextResponse.json({ error: 'Kite token not found.' }, { status: 401 });
@@ -362,31 +370,29 @@ export async function POST(request: Request) {
     
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
     let highestCallOI = 0, highestPutOI = 0;
-    let pcr = 0, volumePcr = 0;
-    const marketStatus = getMarketStatus();
 
-    if (marketStatus === 'OPEN') {
-        console.log("Market is OPEN. Calculating live PCR data.");
-        for (const strike of strikePrices) {
-            const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
-            const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
-            const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
-            const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
-            const ce_oi = ceLiveData?.oi || 0;
-            const pe_oi = peLiveData?.oi || 0;
-            optionsByStrike[strike] = { ce_oi, pe_oi };
-            totalCallOI += ce_oi;
-            totalPutOI += pe_oi;
-            totalCallVolume += ceLiveData?.volume || 0;
-            totalPutVolume += peLiveData?.volume || 0;
-            
-            if (strike > ltp && ce_oi > highestCallOI) highestCallOI = ce_oi;
-            if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
-        }
-        pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
-        volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
-    } else {
-        console.log("Market is CLOSED. Fetching stored daily sentiment data from Redis.");
+    for (const strike of strikePrices) {
+        const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
+        const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
+        const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
+        const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
+        const ce_oi = ceLiveData?.oi || 0;
+        const pe_oi = peLiveData?.oi || 0;
+        optionsByStrike[strike] = { ce_oi, pe_oi };
+        totalCallOI += ce_oi;
+        totalPutOI += pe_oi;
+        totalCallVolume += ceLiveData?.volume || 0;
+        totalPutVolume += peLiveData?.volume || 0;
+        
+        if (strike > ltp && ce_oi > highestCallOI) highestCallOI = ce_oi;
+        if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
+    }
+
+    let pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
+    let volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+
+    const marketStatus = getMarketStatus();
+    if (marketStatus === 'CLOSED') {
         const dailyDataStr = await redis.get('daily_sentiment_data');
         if (dailyDataStr) {
             const dailyData = JSON.parse(dailyDataStr);
@@ -394,23 +400,9 @@ export async function POST(request: Request) {
             if (symbolData) {
                 pcr = symbolData.oiPcr;
                 volumePcr = symbolData.volumePcr;
-                console.log(`Using stored PCR for ${displayName.toUpperCase()}: OI PCR=${pcr}, Vol PCR=${volumePcr}`);
             }
         }
-         // During closed hours, OI conviction is more stable, so we calculate it anyway.
-        for (const strike of strikePrices) {
-            const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
-            const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
-            const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
-            const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
-            const ce_oi = ceLiveData?.oi || 0;
-            const pe_oi = peLiveData?.oi || 0;
-            optionsByStrike[strike] = { ce_oi, pe_oi };
-            if (strike > ltp && ce_oi > highestCallOI) highestCallOI = ce_oi;
-            if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
-        }
     }
-
 
     const { supports: supportLevels, resistances: resistanceLevels } = getFinalLevels(
       displayName.toUpperCase(), 
