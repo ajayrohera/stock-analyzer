@@ -1,4 +1,4 @@
-// This is the final, complete, and unabbreviated code for the front-end component with the diagnostic tool.
+// This is the final, complete, and unabbreviated code for the front-end component.
 
 'use client';
 
@@ -13,6 +13,13 @@ type SupportResistanceLevel = {
   tooltip?: string;
 };
 
+type OiChange = {
+  strike: number;
+  changeOi: number;
+  totalOi: number;
+  type: 'CALL' | 'PUT';
+};
+
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -24,15 +31,26 @@ type AnalysisResult = {
   expiryDate: string; 
   ltp: number;
   lastRefreshed: string;
+  rsi?: number;
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
   changePercent?: number;
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
+  oiAnalysis?: {
+    calls: OiChange[];
+    puts: OiChange[];
+    summary: string;
+  };
 };
+
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
-type AppError = { message: string; type: string; timestamp: Date; };
+type AppError = {
+  message: string;
+  type: 'NETWORK' | 'SERVER' | 'VALIDATION' | 'UNKNOWN' | 'TOKEN_EXPIRED' | 'SYMBOL_NOT_FOUND';
+  timestamp: Date;
+};
 type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 
 // --- CONSTANTS AND HELPERS ---
@@ -203,6 +221,19 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
 });
 SentimentCard.displayName = 'SentimentCard';
 
+// === RESTORED COMPONENT === This was the cause of the build error.
+const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
+  <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
+    <div className="inline-block p-4 bg-gray-900/50 rounded-full mb-4 text-brand-cyan">
+      {icon}
+    </div>
+    <h3 className="text-xl font-bold mb-2 text-white">{title}</h3>
+    <p className="text-gray-400">{description}</p>
+  </div> 
+));
+FeatureCard.displayName = 'FeatureCard';
+
+
 const VolumeCard = React.memo(({ avg20DayVolume, todayVolumePercentage, estimatedTodayVolume, marketStatus }: { 
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
@@ -273,6 +304,7 @@ const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: {
   </div>
 ));
 PCRStatCard.displayName = 'PCRStatCard';
+
 
 // === MAIN COMPONENT ===
 export default function Home() {
@@ -617,8 +649,8 @@ export default function Home() {
         <section className="w-full max-w-2xl mx-auto mt-24 p-8 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10">
           <h2 className="text-3xl font-bold text-center mb-6">Get In Touch</h2>
           <form className="flex flex-col gap-4">
-            <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1.2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
-            <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1.2 text-gray-500"/><input type="email" placeholder="Your Email" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
+            <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
+            <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="email" placeholder="Your Email" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
             <textarea placeholder="Your Message" rows={4} className="p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan"></textarea>
             <button type="submit" className="bg-brand-cyan hover:bg-cyan-5 text-brand-dark font-bold py-3 px-6 rounded-lg transition-all duration-300">Send Message</button>
           </form>
