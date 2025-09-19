@@ -12,8 +12,8 @@ const isMarketClosedForDay = (): boolean => {
     const day = nowInIST.getDay();
     const hours = nowInIST.getHours();
     const minutes = nowInIST.getMinutes();
-    if (day === 0 || day === 6) return true; // It's a weekend
-    if (hours > 15 || (hours === 15 && minutes >= 45)) return true; // It's after 3:45 PM on a weekday
+    if (day === 0 || day === 6) return true;
+    if (hours > 15 || (hours === 15 && minutes >= 45)) return true;
     return false;
 };
 
@@ -31,7 +31,6 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
             scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly'
         });
         const sheets = google.sheets({ version: 'v4', auth });
-        // IMPORTANT: Assumes your sheet has Display Name (A), Trading Symbol (B), Instrument Token (C)
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.GOOGLE_SHEET_ID,
             range: 'stocks!A2:C',
@@ -48,10 +47,10 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
 }
 
 async function updateVolumeHistory() {
-    console.log('--- Starting Daily Data Rebuild Cron Job ---');
+    console.log('--- Starting Daily Data Rebuild Cron Job (ULTRA Performance Version) ---');
 
     if (!isMarketClosedForDay()) {
-        console.log('Market is not yet closed. Aborting to ensure final EOD data is used.');
+        console.log('Market is not yet closed. Aborting cron job.');
         return;
     }
 
@@ -84,14 +83,43 @@ async function updateVolumeHistory() {
         
         const toDate = new Date();
         const fromDate = new Date();
-        fromDate.setDate(toDate.getDate() - 45); // Fetch ~45 calendar days to get ~30 trading days
+        fromDate.setDate(toDate.getDate() - 45);
 
+        // === PERFORMANCE UPGRADE 1: Fetch all instruments ONCE ===
+        console.log('📡 Fetching all NFO instruments...');
         const allInstruments = await kc.getInstruments('NFO');
+        console.log(`✅ Received ${allInstruments.length} total instruments.`);
+
+        // === PERFORMANCE UPGRADE 2: Build a master list of all option tokens needed ===
+        console.log('🛠️ Building master list of required option tokens...');
+        const masterTokenList: string[] = [];
+        const symbolToOptionsMap: Record<string, any[]> = {};
 
         for (const symbol of symbols) {
+            const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
+            if (unfilteredOptionsChain.length > 0) {
+                const todayDt = new Date();
+                todayDt.setHours(0, 0, 0, 0);
+                let nearestExpiry = new Date('2999-12-31');
+                unfilteredOptionsChain.forEach((opt: any) => {
+                    const expiryDate = new Date(opt.expiry);
+                    if (expiryDate >= todayDt && expiryDate < nearestExpiry) nearestExpiry = expiryDate;
+                });
+                const optionsChain = unfilteredOptionsChain.filter((i: any) => new Date(i.expiry).getTime() === nearestExpiry.getTime());
+                symbolToOptionsMap[symbol.displayName.toUpperCase()] = optionsChain;
+                optionsChain.forEach((o: any) => masterTokenList.push(`NFO:${o.tradingsymbol}`));
+            }
+        }
+        console.log(`✅ Master list built with ${masterTokenList.length} unique option tokens.`);
+
+        // === PERFORMANCE UPGRADE 3: Make ONE massive API call for all options data ===
+        console.log('📡 Fetching all option quotes in a single batch...');
+        const allOptionQuotes = await kc.getQuote(masterTokenList);
+        console.log('✅ Received all option quotes.');
+
+        // Now, loop through and process everything from memory
+        for (const symbol of symbols) {
             try {
-                console.log(`  -> Processing ${symbol.displayName}...`);
-                
                 // 1. Rebuild Historical Data
                 const records = await kc.getHistoricalData(symbol.instrumentToken, 'day', fromDate, toDate);
                 newHistory[symbol.displayName.toUpperCase()] = records.map((r: any) => ({
@@ -101,42 +129,27 @@ async function updateVolumeHistory() {
                     timestamp: new Date(r.date).getTime(),
                 }));
 
-                // 2. Calculate EOD Sentiment Data
-                const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
-                if (unfilteredOptionsChain.length > 0) {
-                    const todayDt = new Date();
-                    todayDt.setHours(0, 0, 0, 0);
-                    let nearestExpiry = new Date('2999-12-31');
-                    unfilteredOptionsChain.forEach((opt: any) => {
-                        const expiryDate = new Date(opt.expiry);
-                        if (expiryDate >= todayDt && expiryDate < nearestExpiry) nearestExpiry = expiryDate;
-                    });
-                    const optionsChain = unfilteredOptionsChain.filter((i: any) => new Date(i.expiry).getTime() === nearestExpiry.getTime());
-                    
-                    if (optionsChain.length > 0) {
-                        const instrumentTokens = optionsChain.map((o: any) => `NFO:${o.tradingsymbol}`);
-                        const optionQuoteData = await kc.getQuote(instrumentTokens);
-                        let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
-                        for (const token of instrumentTokens) {
-                            const quote = optionQuoteData[token];
-                            const instrument = optionsChain.find((o: any) => `NFO:${o.tradingsymbol}` === token);
-                            if (quote && instrument) {
-                                if (instrument.instrument_type === 'CE') {
-                                    totalCallOI += quote.oi || 0;
-                                    totalCallVolume += quote.volume || 0;
-                                } else {
-                                    totalPutOI += quote.oi || 0;
-                                    totalPutVolume += quote.volume || 0;
-                                }
+                // 2. Calculate EOD Sentiment Data from pre-fetched quotes
+                const optionsChain = symbolToOptionsMap[symbol.displayName.toUpperCase()];
+                if (optionsChain && optionsChain.length > 0) {
+                    let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
+                    for (const instrument of optionsChain) {
+                        const quote = allOptionQuotes[`NFO:${instrument.tradingsymbol}`];
+                        if (quote) {
+                            if (instrument.instrument_type === 'CE') {
+                                totalCallOI += quote.oi || 0;
+                                totalCallVolume += quote.volume || 0;
+                            } else {
+                                totalPutOI += quote.oi || 0;
+                                totalPutVolume += quote.volume || 0;
                             }
                         }
-                        dailySentimentData[symbol.displayName.toUpperCase()] = {
-                            oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
-                            volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
-                        };
                     }
+                    dailySentimentData[symbol.displayName.toUpperCase()] = {
+                        oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
+                        volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
+                    };
                 }
-                console.log(`     ✅ Done.`);
             } catch (error) {
                 console.error(`  ❌ Failed to process ${symbol.displayName}:`, error instanceof Error ? error.message : 'Unknown error');
             }
