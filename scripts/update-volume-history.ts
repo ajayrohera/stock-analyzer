@@ -17,7 +17,7 @@ const isMarketClosedForDay = (): boolean => {
     return false;
 };
 
-async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string }[]> {
+async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string, instrumentToken: string }[]> {
     try {
         const auth = new google.auth.GoogleAuth({
             credentials: {
@@ -33,24 +33,23 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
         const sheets = google.sheets({ version: 'v4', auth });
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.GOOGLE_SHEET_ID,
-            range: 'stocks!A2:B',
+            range: 'stocks!A2:C',
         });
         const rows = response.data.values;
         if (!rows || rows.length === 0) return [];
         return rows
-            .map(row => ({ displayName: row[0], tradingSymbol: row[1] }))
-            .filter(s => s.displayName && s.tradingSymbol);
+            .map(row => ({ displayName: row[0], tradingSymbol: row[1], instrumentToken: row[2] }))
+            .filter(s => s.displayName && s.tradingSymbol && s.instrumentToken);
     } catch (error) {
         console.error('❌ Error fetching symbols from Google Sheets:', error);
         return [];
     }
 }
 
-// Helper to introduce a delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function updateVolumeHistory() {
-    console.log('--- Starting Daily Data Update Cron Job (Final Robust Version) ---');
+    console.log('--- Starting Daily Data Rebuild Cron Job (Slow & Steady Version) ---');
 
     if (!isMarketClosedForDay()) {
         console.log('Market is not yet closed. Aborting cron job.');
@@ -75,108 +74,83 @@ async function updateVolumeHistory() {
 
         const symbols = await getAllSymbols();
         if (symbols.length === 0) throw new Error('No symbols found.');
-        console.log(`📊 Found ${symbols.length} symbols to update.`);
-        
-        const existingHistoryStr = await redisClient.get('volume_history');
-        const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
-        console.log(`📚 Loaded existing history for ${Object.keys(history).length} symbols.`);
-        
-        console.log('📡 Batch fetching all stock quotes...');
-        const stockIdentifiers = symbols.map(s => {
-          const exchange = (s.displayName === 'NIFTY' || s.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
-          return `${exchange}:${s.tradingSymbol}`;
-        });
-        const allStockQuotes = await kc.getQuote(stockIdentifiers);
-        console.log('✅ Received all stock quotes.');
+        console.log(`📊 Found ${symbols.length} symbols to rebuild sequentially.`);
 
-        const today = new Date().toISOString().split('T')[0];
+        console.log('🔥 Deleting old Redis keys to ensure clean slate...');
+        await redisClient.del(['volume_history', 'daily_sentiment_data']);
+        console.log('✅ Old keys deleted.');
         
-        for (const symbol of symbols) {
-          const key = symbol.displayName.toUpperCase();
-          const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
-          const data = allStockQuotes[`${exchange}:${symbol.tradingSymbol}`];
-          
-          if (!history[key]) history[key] = [];
-          history[key] = history[key].filter((entry: any) => entry.date !== today);
-
-          if (data && data.volume !== undefined && data.last_price !== undefined) {
-            history[key].push({
-              date: today,
-              totalVolume: data.volume,
-              lastPrice: data.last_price,
-              timestamp: Date.now(),
-            });
-            history[key] = history[key].slice(-30);
-          }
-        }
-
+        const newHistory: Record<string, any[]> = {};
         const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
-        const allInstruments = await kc.getInstruments('NFO');
-        const masterTokenList: string[] = [];
-        const symbolToOptionsMap: Record<string, any[]> = {};
-
-        for (const symbol of symbols) {
-            const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
-            if (unfilteredOptionsChain.length > 0) {
-                const todayDt = new Date();
-                todayDt.setHours(0, 0, 0, 0);
-                let nearestExpiry = new Date('2999-12-31');
-                unfilteredOptionsChain.forEach((opt: any) => {
-                    const expiryDate = new Date(opt.expiry);
-                    if (expiryDate >= todayDt && expiryDate < nearestExpiry) nearestExpiry = expiryDate;
-                });
-                const optionsChain = unfilteredOptionsChain.filter((i: any) => new Date(i.expiry).getTime() === nearestExpiry.getTime());
-                symbolToOptionsMap[symbol.displayName.toUpperCase()] = optionsChain;
-                optionsChain.forEach((o: any) => masterTokenList.push(`NFO:${o.tradingsymbol}`));
-            }
-        }
         
-        // === THE DEFINITIVE FIX: Fetching options data in safe chunks ===
-        let allOptionQuotes: Record<string, any> = {};
-        const chunkSize = 500; // Fetch 500 at a time, a safe number
-        console.log(`📡 Preparing to fetch ${masterTokenList.length} option quotes in chunks of ${chunkSize}...`);
+        const toDate = new Date();
+        const fromDate = new Date();
+        fromDate.setDate(toDate.getDate() - 45);
+        
+        const allInstruments = await kc.getInstruments('NFO');
 
-        for (let i = 0; i < masterTokenList.length; i += chunkSize) {
-            const chunk = masterTokenList.slice(i, i + chunkSize);
-            console.log(`  -> Fetching chunk ${i / chunkSize + 1}...`);
-            const chunkQuotes = await kc.getQuote(chunk);
-            allOptionQuotes = { ...allOptionQuotes, ...chunkQuotes };
-            await delay(500); // Wait half a second between chunks to be polite to the API
-        }
-        console.log('✅ All option quotes received.');
-        // =============================================================
+        // === THE DEFINITIVE FIX: Slow, sequential, rate-limit-safe loop ===
+        for (const [index, symbol] of symbols.entries()) {
+            try {
+                console.log(`  -> Processing ${index + 1}/${symbols.length}: ${symbol.displayName}...`);
+                
+                // 1. Rebuild Historical Data for one symbol
+                const records = await kc.getHistoricalData(symbol.instrumentToken, 'day', fromDate, toDate);
+                newHistory[symbol.displayName.toUpperCase()] = records.map((r: any) => ({
+                    date: new Date(r.date).toISOString().split('T')[0],
+                    totalVolume: r.volume,
+                    lastPrice: r.close,
+                    timestamp: new Date(r.date).getTime(),
+                }));
 
-        for (const symbol of symbols) {
-            const key = symbol.displayName.toUpperCase();
-            const optionsChain = symbolToOptionsMap[key];
-            if (optionsChain && optionsChain.length > 0) {
-                let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
-                for (const instrument of optionsChain) {
-                    const quote = allOptionQuotes[`NFO:${instrument.tradingsymbol}`];
-                    if (quote) {
-                        if (instrument.instrument_type === 'CE') {
-                            totalCallOI += quote.oi || 0;
-                            totalCallVolume += quote.volume || 0;
-                        } else {
-                            totalPutOI += quote.oi || 0;
-                            totalPutVolume += quote.volume || 0;
+                // 2. Calculate EOD Sentiment Data for one symbol
+                const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
+                if (unfilteredOptionsChain.length > 0) {
+                    const todayDt = new Date();
+                    todayDt.setHours(0, 0, 0, 0);
+                    let nearestExpiry = new Date('2999-12-31');
+                    unfilteredOptionsChain.forEach((opt: any) => {
+                        const expiryDate = new Date(opt.expiry);
+                        if (expiryDate >= todayDt && expiryDate < nearestExpiry) nearestExpiry = expiryDate;
+                    });
+                    const optionsChain = unfilteredOptionsChain.filter((i: any) => new Date(i.expiry).getTime() === nearestExpiry.getTime());
+                    
+                    if (optionsChain.length > 0) {
+                        const instrumentTokens = optionsChain.map((o: any) => `NFO:${o.tradingsymbol}`);
+                        const optionQuoteData = await kc.getQuote(instrumentTokens);
+                        let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
+                        for (const token of instrumentTokens) {
+                            const quote = optionQuoteData[token];
+                            const instrument = optionsChain.find((o: any) => `NFO:${o.tradingsymbol}` === token);
+                            if (quote && instrument) {
+                                if (instrument.instrument_type === 'CE') {
+                                    totalCallOI += quote.oi || 0;
+                                    totalCallVolume += quote.volume || 0;
+                                } else {
+                                    totalPutOI += quote.oi || 0;
+                                    totalPutVolume += quote.volume || 0;
+                                }
+                            }
                         }
+                        dailySentimentData[symbol.displayName.toUpperCase()] = {
+                            oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
+                            volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
+                        };
                     }
                 }
-                dailySentimentData[key] = {
-                    oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
-                    volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
-                };
+                await delay(200); // Wait 200ms to be polite to the API
+            } catch (error) {
+                console.error(`  ❌ Failed to process ${symbol.displayName}:`, error instanceof Error ? error.message : 'Unknown error');
             }
         }
 
-        console.log('💾 Saving all processed data to Redis...');
-        await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
+        console.log('💾 Saving all rebuilt data to Redis...');
+        await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(newHistory));
         await redisClient.setEx('daily_sentiment_data', 7 * 24 * 60 * 60, JSON.stringify(dailySentimentData));
         console.log('✅ All data saved successfully.');
         
     } catch (error) {
-        console.error('❌ CRITICAL ERROR in daily update process:', error);
+        console.error('❌ CRITICAL ERROR in daily rebuild process:', error);
         throw error;
     } finally {
         if (redisClient.isOpen) {
