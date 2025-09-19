@@ -99,7 +99,6 @@ const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sen
 const ErrorToast = React.memo(({ error }: { error: AppError }) => ( 
   <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg border-l-4 ${ 
     error.type === 'NETWORK' ? 'border-red-500 bg-red-900/50' : 
-    error.type === 'SERVER' ? 'border-orange-500 bg-orange-900/50' : 
     'border-gray-500 bg-gray-900/50' 
   } backdrop-blur-sm z-50 max-w-md`}>
     <div className="flex items-start"><XCircle size={20} className="mr-2 flex-shrink-0 mt-0.5" /><p className="text-sm">{error.message}</p></div>
@@ -107,7 +106,6 @@ const ErrorToast = React.memo(({ error }: { error: AppError }) => (
 ));
 ErrorToast.displayName = 'ErrorToast';
 
-// === FIX: Renamed component to avoid conflict ===
 const DataCard = React.memo(({ icon: Icon, title, value, color = 'text-white', tooltip, subValue, sentimentColor }: { 
   icon?: React.ElementType;
   title: string; 
@@ -234,12 +232,7 @@ const FeatureCard = React.memo(({ icon, title, description }: { icon: React.Reac
 ));
 FeatureCard.displayName = 'FeatureCard';
 
-const VolumeCard = React.memo(({ 
-  avg20DayVolume, 
-  todayVolumePercentage, 
-  estimatedTodayVolume,
-  marketStatus
-}: { 
+const VolumeCard = React.memo(({ avg20DayVolume, todayVolumePercentage, estimatedTodayVolume, marketStatus }: { 
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
@@ -277,30 +270,19 @@ const VolumeCard = React.memo(({
         </p>
       )}
       
-      {estimatedTodayVolume !== undefined && marketStatus === 'OPEN' && (
+      {estimatedTodayVolume !== undefined && (
         <p className="text-md text-gray-300 mt-1">
           Est. Today: {formatVolume(estimatedTodayVolume)}
         </p>
-      )}
-      
-      {marketStatus !== 'OPEN' && (
-        <p className="text-yellow-400 text-sm mt-2">Data from previous session</p>
       )}
     </div>
   );
 });
 VolumeCard.displayName = 'VolumeCard';
 
-const PCRStatCard = React.memo(({ 
-  title, 
-  value, 
-  marketStatus,
-  sentiment,
-  sentimentColor 
-}: { 
+const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: { 
   title: string; 
   value: number;
-  marketStatus: MarketStatus;
   sentiment?: string; 
   sentimentColor?: string; 
 }) => (
@@ -320,13 +302,88 @@ const PCRStatCard = React.memo(({
     {sentiment && sentimentColor && (
       <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
     )}
-    {marketStatus !== 'OPEN' && (
-      <p className="text-yellow-400 text-xs mt-1">Data from previous close</p>
-    )}
   </div>
 ));
 PCRStatCard.displayName = 'PCRStatCard';
 
+const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
+  const isCall = type === 'CALL';
+  const isPositive = changeOi > 0;
+  
+  return (
+    <div className="flex justify-between items-center py-2 border-b border-gray-700 last:border-b-0">
+      <div className="flex items-center">
+        <span className={`w-16 font-mono ${isCall ? 'text-green-400' : 'text-red-400'}`}>
+          {strike}
+        </span>
+        <span className={`flex items-center ml-2 ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
+          {isPositive ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+          <span className="ml-1">{Math.abs(changeOi).toLocaleString()}</span>
+        </span>
+      </div>
+      <span className="text-gray-400 text-sm">{totalOi.toLocaleString()}</span>
+    </div>
+  );
+});
+OIChangeRow.displayName = 'OIChangeRow';
+
+const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
+  oiAnalysis?: AnalysisResult['oiAnalysis'];
+  marketStatus: MarketStatus; 
+}) => {
+  if (marketStatus === 'PRE_MARKET') {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-3">
+        <h3 className="text-lg font-bold text-center mb-2 text-white">Intraday OI Changes</h3>
+        <p className="text-yellow-400 text-sm text-center">Data from previous close. Live changes will appear after market open.</p>
+      </div>
+    );
+  }
+
+  if (!oiAnalysis) {
+    return null;
+  }
+
+  return (
+    <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-3">
+      <h3 className="text-lg font-bold text-center mb-4 text-white">Intraday OI Changes</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <h4 className="text-green-400 font-semibold mb-2 text-center">Top Call OI Additions</h4>
+          <div className="max-h-40 overflow-y-auto">
+            {oiAnalysis.calls.length > 0 ? (
+              oiAnalysis.calls.map((item, index) => (
+                <OIChangeRow key={`call-${index}`} {...item} />
+              ))
+            ) : (
+              <p className="text-gray-400 text-sm text-center py-2">No significant call OI changes</p>
+            )}
+          </div>
+        </div>
+        
+        <div>
+          <h4 className="text-red-400 font-semibold mb-2 text-center">Top Put OI Additions</h4>
+          <div className="max-h-40 overflow-y-auto">
+            {oiAnalysis.puts.length > 0 ? (
+              oiAnalysis.puts.map((item, index) => (
+                <OIChangeRow key={`put-${index}`} {...item} />
+              ))
+            ) : (
+              <p className="text-gray-400 text-sm text-center py-2">No significant put OI changes</p>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      {oiAnalysis.summary && (
+        <div className="mt-4 p-3 bg-gray-800/50 rounded-lg">
+          <p className="text-sm text-gray-300">{oiAnalysis.summary}</p>
+        </div>
+      )}
+    </div>
+  );
+});
+OIAnalysisCard.displayName = 'OIAnalysisCard';
 
 // === MAIN COMPONENT ===
 export default function Home() {
@@ -352,9 +409,9 @@ export default function Home() {
     if (selectedSymbol) localStorage.setItem('selectedSymbol', selectedSymbol); 
   }, [selectedSymbol]);
   
-  const addError = useCallback((message: string, type: AppError['type'] = 'UNKNOWN') => { 
+  const addError = useCallback((message: string, type: string = 'UNKNOWN') => { 
     console.error(`Error [${type}]:`, message); 
-    setErrors(prev => [{ message, type, timestamp: new Date() }, ...prev]); 
+    setErrors(prev => [{ message, type, timestamp: new Date() } as AppError, ...prev]); 
   }, []);
 
   useEffect(() => { 
@@ -443,7 +500,7 @@ export default function Home() {
         } 
       } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        addError(errorMessage === 'TOKEN_EXPIRED' ? 'API token has expired. Please contact support.' : errorMessage || "Could not load symbol list.", errorMessage === 'TOKEN_EXPIRED' ? 'TOKEN_EXPIRED' : 'NETWORK'); 
+        addError(errorMessage === 'TOKEN_EXPIRED' ? 'API token has expired. Please contact support.' : 'NETWORK'); 
       } finally { 
         setLoadingState('IDLE'); 
       } 
@@ -482,11 +539,11 @@ export default function Home() {
       setResults(data); 
       setLastRequestTime(currentTime); 
     } catch (error) { 
-      const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
+      const errorMap: { [key: string]: { type: string; message: string } } = { 
         TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
         SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
       }; 
-      const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER' as const, message: error.message } : { type: 'UNKNOWN' as const, message: 'Unknown error occurred' };
+      const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER', message: error.message } : { type: 'UNKNOWN', message: 'Unknown error occurred' };
       setApiError(errorDetails.message); 
       addError(errorDetails.message, errorDetails.type); 
     } 
@@ -541,7 +598,8 @@ export default function Home() {
         </section>
 
         <section className="w-full max-w-2xl mx-auto p-6 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10">
-          {marketStatus !== 'UNKNOWN' && (
+          {/* ... (Market Status, Symbol Selector, etc. remain the same) ... */}
+           {marketStatus !== 'UNKNOWN' && (
             <div className="flex items-center justify-center mb-4 text-sm flex-col">
               <div className="flex items-center">
                 <Clock size={16} className="mr-2" />
@@ -581,17 +639,10 @@ export default function Home() {
         </section>
 
         <section id="results" className="mt-12 w-full max-w-6xl mx-auto min-h-[100px]">
-          {isLoading && loadingState === 'ANALYZING' && !results && (
+          {isLoading && !results && (
             <div className="flex flex-col items-center justify-center p-8">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div>
               <p className="text-brand-cyan text-lg">Querying the chain, please wait...</p>
-            </div>
-          )}
-          
-          {isLoading && loadingState === 'REFRESHING' && results && (
-            <div className="flex flex-col items-center justify-center p-4">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-cyan mb-2"></div>
-              <p className="text-brand-cyan text-sm">Refreshing data...</p>
             </div>
           )}
           
@@ -633,14 +684,12 @@ export default function Home() {
                 <PCRStatCard 
                   title="OI PCR Ratio" 
                   value={results.pcr} 
-                  marketStatus={marketStatus}
                   sentiment={oiPcrSentiment?.sentiment} 
                   sentimentColor={oiPcrSentiment?.color} 
                 />
                 <PCRStatCard 
                   title="Volume PCR" 
                   value={results.volumePcr} 
-                  marketStatus={marketStatus}
                   sentiment={volumePcrSentiment?.sentiment} 
                   sentimentColor={volumePcrSentiment?.color} 
                 />
