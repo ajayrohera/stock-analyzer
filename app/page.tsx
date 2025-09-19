@@ -12,6 +12,14 @@ type SupportResistanceLevel = {
   type: 'support' | 'resistance';
   tooltip?: string;
 };
+
+type OiChange = {
+  strike: number;
+  changeOi: number;
+  totalOi: number;
+  type: 'CALL' | 'PUT';
+};
+
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -23,19 +31,32 @@ type AnalysisResult = {
   expiryDate: string; 
   ltp: number;
   lastRefreshed: string;
+  rsi?: number;
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
   changePercent?: number;
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
+  oiAnalysis?: {
+    calls: OiChange[];
+    puts: OiChange[];
+    summary: string;
+  };
 };
+
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
-type AppError = { message: string; type: string; timestamp: Date; };
+type AppError = {
+  message: string;
+  type: 'NETWORK' | 'SERVER' | 'VALIDATION' | 'UNKNOWN' | 'TOKEN_EXPIRED' | 'SYMBOL_NOT_FOUND';
+  timestamp: Date;
+};
 type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 
 // --- CONSTANTS AND HELPERS ---
 const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
+const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
+
 const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   try {
     const typedData = data as AnalysisResult;
@@ -47,6 +68,17 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
     return false; 
   }
 };
+
+const getNextWorkingDay = (currentDate: Date): string => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const nextDay = new Date(currentDate);
+  do {
+    nextDay.setDate(nextDay.getDate() + 1);
+    const nextDayKey = `${nextDay.getUTCFullYear()}-${String(nextDay.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDay.getUTCDate()).padStart(2, '0')}`;
+    if (nextDay.getUTCDay() !== 0 && nextDay.getUTCDay() !== 6 && !marketHolidays2025.has(nextDayKey)) return days[nextDay.getUTCDay()];
+  } while (true);
+};
+
 const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sentiment: string, color: string } => {
   if (type === 'OI') {
     if (pcrValue > 1.3) return { sentiment: 'Highly Bullish', color: 'text-green-400' };
@@ -108,6 +140,7 @@ DataCard.displayName = 'DataCard';
 const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportResistanceLevel[], type: 'Support' | 'Resistance' }) => {
   const isSupport = type === 'Support';
   const headerColor = isSupport ? 'text-green-400' : 'text-red-500';
+
   const getStrengthColor = (strength: string) => {
     switch (strength) {
       case 'strong': return 'bg-gray-700 text-white';
@@ -116,6 +149,7 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
       default: return 'bg-gray-800 text-gray-300';
     }
   };
+
   if (!levels || levels.length === 0) {
     return (
       <div className="bg-gray-900/50 p-4 rounded-lg h-full min-h-[140px] flex flex-col justify-center">
@@ -124,6 +158,7 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
       </div>
     );
   }
+
   return (
     <div className="bg-gray-900/50 p-4 rounded-lg h-full min-h-[140px]">
       <h3 className={`text-lg font-bold text-center mb-4 ${headerColor}`}>{type} Levels</h3>
@@ -186,6 +221,19 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
 });
 SentimentCard.displayName = 'SentimentCard';
 
+// === RESTORED COMPONENT ===
+const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
+  <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
+    <div className="inline-block p-4 bg-gray-900/50 rounded-full mb-4 text-brand-cyan">
+      {icon}
+    </div>
+    <h3 className="text-xl font-bold mb-2 text-white">{title}</h3>
+    <p className="text-gray-400">{description}</p>
+  </div> 
+));
+FeatureCard.displayName = 'FeatureCard';
+
+
 const VolumeCard = React.memo(({ avg20DayVolume, todayVolumePercentage, estimatedTodayVolume, marketStatus }: { 
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
@@ -209,7 +257,6 @@ const VolumeCard = React.memo(({ avg20DayVolume, todayVolumePercentage, estimate
         <BarChart size={14} className="mr-1.5" />
         <span>Volume Analysis</span>
       </div>
-      {/* === FIX: Check for undefined before displaying === */}
       {typeof avg20DayVolume === 'number' ? (
         <p className="text-lg font-semibold text-white mt-2">
           20D Avg: {formatVolume(avg20DayVolume)}
@@ -222,7 +269,7 @@ const VolumeCard = React.memo(({ avg20DayVolume, todayVolumePercentage, estimate
           {todayVolumePercentage.toFixed(1)}% of Avg
         </p>
       )}
-      {typeof estimatedTodayVolume === 'number' && marketStatus === 'OPEN' && (
+      {typeof estimatedTodayVolume === 'number' && (
         <p className="text-md text-gray-300 mt-1">
           Est. Today: {formatVolume(estimatedTodayVolume)}
         </p>
@@ -258,6 +305,84 @@ const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: {
 ));
 PCRStatCard.displayName = 'PCRStatCard';
 
+const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
+  const isCall = type === 'CALL';
+  const isPositive = changeOi > 0;
+  
+  return (
+    <div className="flex justify-between items-center py-2 border-b border-gray-700 last:border-b-0">
+      <div className="flex items-center">
+        <span className={`w-16 font-mono ${isCall ? 'text-green-400' : 'text-red-400'}`}>
+          {strike}
+        </span>
+        <span className={`flex items-center ml-2 ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
+          {isPositive ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+          <span className="ml-1">{Math.abs(changeOi).toLocaleString()}</span>
+        </span>
+      </div>
+      <span className="text-gray-400 text-sm">{totalOi.toLocaleString()}</span>
+    </div>
+  );
+});
+OIChangeRow.displayName = 'OIChangeRow';
+
+const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
+  oiAnalysis?: AnalysisResult['oiAnalysis'];
+  marketStatus: MarketStatus; 
+}) => {
+  if (marketStatus === 'PRE_MARKET') {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-3">
+        <h3 className="text-lg font-bold text-center mb-2 text-white">Intraday OI Changes</h3>
+        <p className="text-yellow-400 text-sm text-center">Data from previous close. Live changes will appear after market open.</p>
+      </div>
+    );
+  }
+
+  if (!oiAnalysis) {
+    return null;
+  }
+
+  return (
+    <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-3">
+      <h3 className="text-lg font-bold text-center mb-4 text-white">Intraday OI Changes</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <h4 className="text-green-400 font-semibold mb-2 text-center">Top Call OI Additions</h4>
+          <div className="max-h-40 overflow-y-auto">
+            {oiAnalysis.calls.length > 0 ? (
+              oiAnalysis.calls.map((item, index) => (
+                <OIChangeRow key={`call-${index}`} {...item} />
+              ))
+            ) : (
+              <p className="text-gray-400 text-sm text-center py-2">No significant call OI changes</p>
+            )}
+          </div>
+        </div>
+        
+        <div>
+          <h4 className="text-red-400 font-semibold mb-2 text-center">Top Put OI Additions</h4>
+          <div className="max-h-40 overflow-y-auto">
+            {oiAnalysis.puts.length > 0 ? (
+              oiAnalysis.puts.map((item, index) => (
+                <OIChangeRow key={`put-${index}`} {...item} />
+              ))
+            ) : (
+              <p className="text-gray-400 text-sm text-center py-2">No significant put OI changes</p>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      {oiAnalysis.summary && (
+        <div className="mt-4 p-3 bg-gray-800/50 rounded-lg">
+          <p className="text-sm text-gray-300">{oiAnalysis.summary}</p>
+        </div>
+      )}
+    </div>
+  );
+});
+OIAnalysisCard.displayName = 'OIAnalysisCard';
 
 // === MAIN COMPONENT ===
 export default function Home() {
@@ -534,7 +659,6 @@ export default function Home() {
                 <div className="flex items-center justify-center mt-2">
                     <span className="text-white font-bold text-lg">
                     {marketStatus === 'PRE_MARKET' ? 'Previous Close: ' : 'CMP: '}{results.ltp}
-                    {/* === FIX for undefined changePercent === */}
                     {typeof results.changePercent === 'number' && (
                         <span className={results.changePercent >= 0 ? 'text-green-400' : 'text-red-500'}>
                         {` (${results.changePercent > 0 ? '+' : ''}${results.changePercent.toFixed(2)}%)`}
@@ -588,6 +712,12 @@ export default function Home() {
                 <div className="bg-gray-900/50 p-4 rounded-lg"></div>
                 <div className="bg-gray-900/50 p-4 rounded-lg"></div>
               </div>
+
+              {results.oiAnalysis && (
+                <div className="grid grid-cols-1 mt-6">
+                  <OIAnalysisCard oiAnalysis={results.oiAnalysis} marketStatus={marketStatus} />
+                </div>
+              )}
             </div>
           )}
         </section>
