@@ -46,8 +46,11 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
     }
 }
 
+// Helper to introduce a delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function updateVolumeHistory() {
-    console.log('--- Starting Daily Data Update Cron Job (Final Performance Version) ---');
+    console.log('--- Starting Daily Data Update Cron Job (Final Robust Version) ---');
 
     if (!isMarketClosedForDay()) {
         console.log('Market is not yet closed. Aborting cron job.');
@@ -74,12 +77,10 @@ async function updateVolumeHistory() {
         if (symbols.length === 0) throw new Error('No symbols found.');
         console.log(`📊 Found ${symbols.length} symbols to update.`);
         
-        // Load existing history from Redis to build upon it
         const existingHistoryStr = await redisClient.get('volume_history');
         const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
         console.log(`📚 Loaded existing history for ${Object.keys(history).length} symbols.`);
         
-        // Fetch closing prices and volumes for all stocks in ONE batch call
         console.log('📡 Batch fetching all stock quotes...');
         const stockIdentifiers = symbols.map(s => {
           const exchange = (s.displayName === 'NIFTY' || s.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
@@ -90,16 +91,12 @@ async function updateVolumeHistory() {
 
         const today = new Date().toISOString().split('T')[0];
         
-        // Update history in memory
         for (const symbol of symbols) {
           const key = symbol.displayName.toUpperCase();
           const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
           const data = allStockQuotes[`${exchange}:${symbol.tradingSymbol}`];
           
-          if (!history[key]) {
-            history[key] = [];
-          }
-
+          if (!history[key]) history[key] = [];
           history[key] = history[key].filter((entry: any) => entry.date !== today);
 
           if (data && data.volume !== undefined && data.last_price !== undefined) {
@@ -113,7 +110,6 @@ async function updateVolumeHistory() {
           }
         }
 
-        // Now, efficiently get all options data
         const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
         const allInstruments = await kc.getInstruments('NFO');
         const masterTokenList: string[] = [];
@@ -134,34 +130,43 @@ async function updateVolumeHistory() {
                 optionsChain.forEach((o: any) => masterTokenList.push(`NFO:${o.tradingsymbol}`));
             }
         }
+        
+        // === THE DEFINITIVE FIX: Fetching options data in safe chunks ===
+        let allOptionQuotes: Record<string, any> = {};
+        const chunkSize = 500; // Fetch 500 at a time, a safe number
+        console.log(`📡 Preparing to fetch ${masterTokenList.length} option quotes in chunks of ${chunkSize}...`);
 
-        if (masterTokenList.length > 0) {
-            console.log(`📡 Fetching all ${masterTokenList.length} option quotes in one batch...`);
-            const allOptionQuotes = await kc.getQuote(masterTokenList);
-            console.log('✅ All option quotes received.');
+        for (let i = 0; i < masterTokenList.length; i += chunkSize) {
+            const chunk = masterTokenList.slice(i, i + chunkSize);
+            console.log(`  -> Fetching chunk ${i / chunkSize + 1}...`);
+            const chunkQuotes = await kc.getQuote(chunk);
+            allOptionQuotes = { ...allOptionQuotes, ...chunkQuotes };
+            await delay(500); // Wait half a second between chunks to be polite to the API
+        }
+        console.log('✅ All option quotes received.');
+        // =============================================================
 
-            for (const symbol of symbols) {
-                const key = symbol.displayName.toUpperCase();
-                const optionsChain = symbolToOptionsMap[key];
-                if (optionsChain && optionsChain.length > 0) {
-                    let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
-                    for (const instrument of optionsChain) {
-                        const quote = allOptionQuotes[`NFO:${instrument.tradingsymbol}`];
-                        if (quote) {
-                            if (instrument.instrument_type === 'CE') {
-                                totalCallOI += quote.oi || 0;
-                                totalCallVolume += quote.volume || 0;
-                            } else {
-                                totalPutOI += quote.oi || 0;
-                                totalPutVolume += quote.volume || 0;
-                            }
+        for (const symbol of symbols) {
+            const key = symbol.displayName.toUpperCase();
+            const optionsChain = symbolToOptionsMap[key];
+            if (optionsChain && optionsChain.length > 0) {
+                let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
+                for (const instrument of optionsChain) {
+                    const quote = allOptionQuotes[`NFO:${instrument.tradingsymbol}`];
+                    if (quote) {
+                        if (instrument.instrument_type === 'CE') {
+                            totalCallOI += quote.oi || 0;
+                            totalCallVolume += quote.volume || 0;
+                        } else {
+                            totalPutOI += quote.oi || 0;
+                            totalPutVolume += quote.volume || 0;
                         }
                     }
-                    dailySentimentData[key] = {
-                        oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
-                        volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
-                    };
                 }
+                dailySentimentData[key] = {
+                    oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
+                    volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
+                };
             }
         }
 
@@ -171,7 +176,7 @@ async function updateVolumeHistory() {
         console.log('✅ All data saved successfully.');
         
     } catch (error) {
-        console.error('❌ CRITICAL ERROR in daily update process:', error instanceof Error ? error.message : 'Unknown error');
+        console.error('❌ CRITICAL ERROR in daily update process:', error);
         throw error;
     } finally {
         if (redisClient.isOpen) {
