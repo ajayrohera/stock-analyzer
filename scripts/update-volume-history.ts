@@ -17,7 +17,7 @@ const isMarketClosedForDay = (): boolean => {
     return false;
 };
 
-async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string, instrumentToken: string }[]> {
+async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string }[]> {
     try {
         const auth = new google.auth.GoogleAuth({
             credentials: {
@@ -33,24 +33,21 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
         const sheets = google.sheets({ version: 'v4', auth });
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.GOOGLE_SHEET_ID,
-            range: 'stocks!A2:C',
+            range: 'stocks!A2:B',
         });
         const rows = response.data.values;
         if (!rows || rows.length === 0) return [];
         return rows
-            .map(row => ({ displayName: row[0], tradingSymbol: row[1], instrumentToken: row[2] }))
-            .filter(s => s.displayName && s.tradingSymbol && s.instrumentToken);
+            .map(row => ({ displayName: row[0], tradingSymbol: row[1] }))
+            .filter(s => s.displayName && s.tradingSymbol);
     } catch (error) {
         console.error('❌ Error fetching symbols from Google Sheets:', error);
         return [];
     }
 }
 
-// Helper to delay execution
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 async function updateVolumeHistory() {
-    console.log('--- Starting Daily Data Rebuild Cron Job (Chunked Parallel Version) ---');
+    console.log('--- Starting Daily Data Update Cron Job (Final Performance Version) ---');
 
     if (!isMarketClosedForDay()) {
         console.log('Market is not yet closed. Aborting cron job.');
@@ -75,49 +72,49 @@ async function updateVolumeHistory() {
 
         const symbols = await getAllSymbols();
         if (symbols.length === 0) throw new Error('No symbols found.');
-        console.log(`📊 Found ${symbols.length} symbols to rebuild.`);
-
-        console.log('🔥 Deleting old Redis keys...');
-        await redisClient.del(['volume_history', 'daily_sentiment_data']);
-        console.log('✅ Old keys deleted.');
+        console.log(`📊 Found ${symbols.length} symbols to update.`);
         
-        const newHistory: Record<string, any[]> = {};
-        const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
+        // Load existing history from Redis to build upon it
+        const existingHistoryStr = await redisClient.get('volume_history');
+        const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
+        console.log(`📚 Loaded existing history for ${Object.keys(history).length} symbols.`);
         
-        const toDate = new Date();
-        const fromDate = new Date();
-        fromDate.setDate(toDate.getDate() - 45);
+        // Fetch closing prices and volumes for all stocks in ONE batch call
+        console.log('📡 Batch fetching all stock quotes...');
+        const stockIdentifiers = symbols.map(s => {
+          const exchange = (s.displayName === 'NIFTY' || s.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
+          return `${exchange}:${s.tradingSymbol}`;
+        });
+        const allStockQuotes = await kc.getQuote(stockIdentifiers);
+        console.log('✅ Received all stock quotes.');
 
-        // === RATE-LIMIT SAFE PARALLEL FETCHING ===
-        console.log(`📡 Fetching historical data in chunks to respect rate limits...`);
-        const chunkSize = 50;
-        for (let i = 0; i < symbols.length; i += chunkSize) {
-            const chunk = symbols.slice(i, i + chunkSize);
-            console.log(`  -> Fetching chunk ${i / chunkSize + 1}...`);
-            const promises = chunk.map(symbol => 
-                kc.getHistoricalData(symbol.instrumentToken, 'day', fromDate, toDate)
-                  .catch((e: any) => {
-                      console.error(`  ⚠️ History fetch failed for ${symbol.displayName}: ${e.message}`);
-                      return [];
-                  })
-            );
-            const chunkResults = await Promise.all(promises);
-            chunk.forEach((symbol, index) => {
-                const records = chunkResults[index];
-                if (records && records.length > 0) {
-                    newHistory[symbol.displayName.toUpperCase()] = records.map((r: any) => ({
-                        date: new Date(r.date).toISOString().split('T')[0],
-                        totalVolume: r.volume,
-                        lastPrice: r.close,
-                        timestamp: new Date(r.date).getTime(),
-                    }));
-                }
+        const today = new Date().toISOString().split('T')[0];
+        
+        // Update history in memory
+        for (const symbol of symbols) {
+          const key = symbol.displayName.toUpperCase();
+          const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
+          const data = allStockQuotes[`${exchange}:${symbol.tradingSymbol}`];
+          
+          if (!history[key]) {
+            history[key] = [];
+          }
+
+          history[key] = history[key].filter((entry: any) => entry.date !== today);
+
+          if (data && data.volume !== undefined && data.last_price !== undefined) {
+            history[key].push({
+              date: today,
+              totalVolume: data.volume,
+              lastPrice: data.last_price,
+              timestamp: Date.now(),
             });
-            await delay(1000); // Wait 1 second between chunks to be safe
+            history[key] = history[key].slice(-30);
+          }
         }
-        console.log('✅ All historical data fetched.');
-        
-        // === EFFICIENT OPTIONS PROCESSING ===
+
+        // Now, efficiently get all options data
+        const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
         const allInstruments = await kc.getInstruments('NFO');
         const masterTokenList: string[] = [];
         const symbolToOptionsMap: Record<string, any[]> = {};
@@ -137,7 +134,7 @@ async function updateVolumeHistory() {
                 optionsChain.forEach((o: any) => masterTokenList.push(`NFO:${o.tradingsymbol}`));
             }
         }
-        
+
         if (masterTokenList.length > 0) {
             console.log(`📡 Fetching all ${masterTokenList.length} option quotes in one batch...`);
             const allOptionQuotes = await kc.getQuote(masterTokenList);
@@ -168,13 +165,13 @@ async function updateVolumeHistory() {
             }
         }
 
-        console.log('💾 Saving all rebuilt data to Redis...');
-        await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(newHistory));
+        console.log('💾 Saving all processed data to Redis...');
+        await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
         await redisClient.setEx('daily_sentiment_data', 7 * 24 * 60 * 60, JSON.stringify(dailySentimentData));
         console.log('✅ All data saved successfully.');
         
     } catch (error) {
-        console.error('❌ CRITICAL ERROR in daily rebuild process:', error instanceof Error ? error.message : 'Unknown error');
+        console.error('❌ CRITICAL ERROR in daily update process:', error instanceof Error ? error.message : 'Unknown error');
         throw error;
     } finally {
         if (redisClient.isOpen) {
