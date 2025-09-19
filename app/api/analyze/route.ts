@@ -95,11 +95,10 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   return ((currentPrice - previousClose) / previousClose) * 100;
 }
 
-// === FINAL FIX IS HERE === This function is now timezone-aware and robust.
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
   if (!historicalData || historicalData.length === 0) return {};
   
-  const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(-20); // Use last 20 available days
+  const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(-20);
   if (recentData.length === 0) return {};
   
   const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
@@ -108,31 +107,26 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   let todayVolumePercentage = 0, estimatedTodayVolume = 0;
 
   if (currentVolume && currentVolume > 0 && avg20DayVolume > 0) {
-    // Create a date object specifically for the IST timezone
     const nowInIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
     const hoursIST = nowInIST.getHours();
     const minutesIST = nowInIST.getMinutes();
 
-    const marketOpenTime = 9 * 60 + 15; // 9:15 AM in minutes from midnight
-    const marketCloseTime = 15 * 60 + 30; // 3:30 PM in minutes from midnight
+    const marketOpenTime = 9 * 60 + 15;
+    const marketCloseTime = 15 * 60 + 30;
     const currentTimeInMinutes = hoursIST * 60 + minutesIST;
 
-    // Check if the current IST time is within market hours
     if (currentTimeInMinutes >= marketOpenTime && currentTimeInMinutes <= marketCloseTime) {
         
-        const totalMarketMinutes = marketCloseTime - marketOpenTime; // 375 minutes
+        const totalMarketMinutes = marketCloseTime - marketOpenTime;
         const minutesPassed = currentTimeInMinutes - marketOpenTime;
         const marketProgressPercent = minutesPassed / totalMarketMinutes;
 
-        // Calculate the expected volume for this point in the day based on linear progression
         const expectedVolumeSoFar = avg20DayVolume * marketProgressPercent;
 
         if (expectedVolumeSoFar > 0) {
-          // This is the percentage of the expected volume for this time of day.
           todayVolumePercentage = (currentVolume / expectedVolumeSoFar) * 100;
         }
 
-        // Extrapolate the estimated full-day volume based on current progress
         if (marketProgressPercent > 0) {
           estimatedTodayVolume = currentVolume / marketProgressPercent;
         }
@@ -226,6 +220,7 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   return levels;
 }
 
+// === FINAL FIX IS HERE === The typo 'l' has been corrected.
 function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -235,29 +230,37 @@ function getFinalLevels(
 ): { supports: SupportResistanceLevel[], resistances: SupportResistanceLevel[] } {
   const allSupports: SupportResistanceLevel[] = [];
   const allResistances: SupportResistanceLevel[] = [];
+  
   const addLevel = (levelToAdd: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
+    // Corrected variable name from 'l' to 'existingLevel'
     if (!list.some(existingLevel => existingLevel.price === levelToAdd.price)) {
       list.push(levelToAdd);
     }
   };
-  findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allSupports));
-  findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allResistances));
-  calculateSupportResistance(history, currentPrice).forEach(l => {
-    if (l.type === 'support') addLevel(l, allSupports);
-    else addLevel(l, allResistances);
+
+  findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(level => addLevel(level, allSupports));
+  findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(level => addLevel(level, allResistances));
+  
+  calculateSupportResistance(history, currentPrice).forEach(level => {
+    if (level.type === 'support') addLevel(level, allSupports);
+    else addLevel(level, allResistances);
   });
+  
   getPsychologicalLevels(symbol, currentPrice).forEach(price => {
     const level: SupportResistanceLevel = { price, strength: 'medium', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological Level' };
-    if (level.type === 'support') addLevel(l, allSupports);
-    else addLevel(l, allResistances);
+    if (level.type === 'support') addLevel(level, allSupports);
+    else addLevel(level, allResistances);
   });
+
   allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
   allResistances.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
+
   return {
     supports: allSupports.slice(0, 2),
     resistances: allResistances.slice(0, 2)
   };
 }
+
 
 function calculateSmartSentiment(
   pcr: number,
