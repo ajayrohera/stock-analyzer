@@ -79,17 +79,14 @@ const getNextWorkingDay = (currentDate: Date): string => {
   } while (true);
 };
 
-// === NEW UNIFIED FUNCTION === This one function now handles both PCR types with the correct logic.
 const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sentiment: string, color: string } => {
   if (type === 'OI') {
-    // For OI PCR: High is Bullish
     if (pcrValue > 1.3) return { sentiment: 'Highly Bullish', color: 'text-green-400' };
     if (pcrValue > 1.1) return { sentiment: 'Slightly Bullish', color: 'text-green-300' };
     if (pcrValue < 0.7) return { sentiment: 'Highly Bearish', color: 'text-red-500' };
     if (pcrValue < 0.9) return { sentiment: 'Slightly Bearish', color: 'text-red-400' };
     return { sentiment: 'Neutral', color: 'text-gray-400' };
   } else {
-    // For Volume PCR: Low is Bullish
     if (pcrValue < 0.7) return { sentiment: 'Highly Bullish', color: 'text-green-400' };
     if (pcrValue < 0.9) return { sentiment: 'Slightly Bullish', color: 'text-green-300' };
     if (pcrValue > 1.3) return { sentiment: 'Highly Bearish', color: 'text-red-500' };
@@ -97,7 +94,6 @@ const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sen
     return { sentiment: 'Neutral', color: 'text-gray-400' };
   }
 };
-
 
 // --- HELPER COMPONENTS ---
 const ErrorToast = React.memo(({ error }: { error: AppError }) => ( 
@@ -111,14 +107,15 @@ const ErrorToast = React.memo(({ error }: { error: AppError }) => (
 ));
 ErrorToast.displayName = 'ErrorToast';
 
-const StatCard = React.memo(({ icon: Icon, title, value, color = 'text-white', tooltip, sentimentColor, subValue }: { 
+// === FIX: Renamed component to avoid conflict ===
+const DataCard = React.memo(({ icon: Icon, title, value, color = 'text-white', tooltip, subValue, sentimentColor }: { 
   icon?: React.ElementType;
   title: string; 
   value: number | string; 
   color?: string; 
   tooltip?: string; 
-  sentimentColor?: string; 
   subValue?: string;
+  sentimentColor?: string;
 }) => ( 
   <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
     <div className="flex items-center justify-center text-sm text-gray-400">
@@ -139,7 +136,8 @@ const StatCard = React.memo(({ icon: Icon, title, value, color = 'text-white', t
     )}
   </div>
 ));
-StatCard.displayName = 'StatCard';
+DataCard.displayName = 'DataCard';
+
 
 const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportResistanceLevel[], type: 'Support' | 'Resistance' }) => {
   const isSupport = type === 'Support';
@@ -319,7 +317,7 @@ const PCRStatCard = React.memo(({
       </div>
     </div>
     <p className={`text-3xl font-bold text-white`}>{value.toFixed(2)}</p>
-    {sentiment && sentimentColor && marketStatus !== 'PRE_MARKET' && (
+    {sentiment && sentimentColor && (
       <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
     )}
     {marketStatus !== 'OPEN' && (
@@ -328,87 +326,6 @@ const PCRStatCard = React.memo(({
   </div>
 ));
 PCRStatCard.displayName = 'PCRStatCard';
-
-
-const OIChangeRow = React.memo(({ strike, changeOi, totalOi, type }: OiChange) => {
-  const isCall = type === 'CALL';
-  const isPositive = changeOi > 0;
-  
-  return (
-    <div className="flex justify-between items-center py-2 border-b border-gray-700 last:border-b-0">
-      <div className="flex items-center">
-        <span className={`w-16 font-mono ${isCall ? 'text-green-400' : 'text-red-400'}`}>
-          {strike}
-        </span>
-        <span className={`flex items-center ml-2 ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-          {isPositive ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
-          <span className="ml-1">{Math.abs(changeOi).toLocaleString()}</span>
-        </span>
-      </div>
-      <span className="text-gray-400 text-sm">{totalOi.toLocaleString()}</span>
-    </div>
-  );
-});
-OIChangeRow.displayName = 'OIChangeRow';
-
-
-const OIAnalysisCard = React.memo(({ oiAnalysis, marketStatus }: { 
-  oiAnalysis?: AnalysisResult['oiAnalysis'];
-  marketStatus: MarketStatus; 
-}) => {
-  if (marketStatus === 'PRE_MARKET') {
-    return (
-      <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-3">
-        <h3 className="text-lg font-bold text-center mb-2 text-white">Intraday OI Changes</h3>
-        <p className="text-yellow-400 text-sm text-center">Data from previous close. Live changes will appear after market open.</p>
-      </div>
-    );
-  }
-
-  if (!oiAnalysis) {
-    return null;
-  }
-
-  return (
-    <div className="bg-gray-900/50 p-4 rounded-lg col-span-1 md:col-span-3">
-      <h3 className="text-lg font-bold text-center mb-4 text-white">Intraday OI Changes</h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <h4 className="text-green-400 font-semibold mb-2 text-center">Top Call OI Additions</h4>
-          <div className="max-h-40 overflow-y-auto">
-            {oiAnalysis.calls.length > 0 ? (
-              oiAnalysis.calls.map((item, index) => (
-                <OIChangeRow key={`call-${index}`} {...item} />
-              ))
-            ) : (
-              <p className="text-gray-400 text-sm text-center py-2">No significant call OI changes</p>
-            )}
-          </div>
-        </div>
-        
-        <div>
-          <h4 className="text-red-400 font-semibold mb-2 text-center">Top Put OI Additions</h4>
-          <div className="max-h-40 overflow-y-auto">
-            {oiAnalysis.puts.length > 0 ? (
-              oiAnalysis.puts.map((item, index) => (
-                <OIChangeRow key={`put-${index}`} {...item} />
-              ))
-            ) : (
-              <p className="text-gray-400 text-sm text-center py-2">No significant put OI changes</p>
-            )}
-          </div>
-        </div>
-      </div>
-      
-      {oiAnalysis.summary && (
-        <div className="mt-4 p-3 bg-gray-800/50 rounded-lg">
-          <p className="text-sm text-gray-300">{oiAnalysis.summary}</p>
-        </div>
-      )}
-    </div>
-  );
-});
-OIAnalysisCard.displayName = 'OIAnalysisCard';
 
 
 // === MAIN COMPONENT ===
@@ -605,7 +522,6 @@ export default function Home() {
     setCooldownMessage('');
   }, []);
 
-  // === UPDATED LOGIC === Now calls the new unified function for both PCR types.
   const { oiPcrSentiment, volumePcrSentiment } = useMemo(() => { 
     if (!results) return { oiPcrSentiment: null, volumePcrSentiment: null }; 
     return { 
@@ -683,22 +599,37 @@ export default function Home() {
             <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl shadow-2xl text-left animate-fade-in">
               <div className="text-center mb-6">
                 <h2 className="text-3xl font-bold text-white">Analysis for <span className="text-brand-cyan">{results.symbol}</span></h2>
+                <p className="text-gray-400 text-sm">
+                  Expiry Date: {results.expiryDate}
+                </p>
+                <div className="flex items-center justify-center mt-2">
+                    <span className="text-white font-bold text-lg">
+                    {marketStatus === 'PRE_MARKET' ? 'Previous Close: ' : 'CMP: '}{results.ltp}
+                    {typeof results.changePercent === 'number' && (
+                        <span className={results.changePercent >= 0 ? 'text-green-400' : 'text-red-500'}>
+                        {` (${results.changePercent > 0 ? '+' : ''}${results.changePercent.toFixed(2)}%)`}
+                        </span>
+                    )}
+                    </span>
+                    <span className="text-gray-500 ml-2 text-sm">(last refreshed {results.lastRefreshed})</span>
+                    <button 
+                        onClick={handleRefreshCard} 
+                        disabled={refreshingCard} 
+                        className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50" 
+                        title="Refresh data"
+                    >
+                    <RefreshCw size={14} className={refreshingCard ? 'animate-spin' : ''} />
+                    </button>
+                </div>
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
                 {/* Row 1 */}
-                <StatCard 
-                  icon={Target}
-                  title="Current Price"
-                  value={results.ltp}
-                  subValue={typeof results.changePercent === 'number' ? `${results.changePercent > 0 ? '+' : ''}${results.changePercent.toFixed(2)}%` : '-'}
-                  sentimentColor={typeof results.changePercent === 'number' ? (results.changePercent >= 0 ? 'text-green-400' : 'text-red-500') : 'text-gray-400'}
-                />
                 <SupportResistanceList type="Support" levels={results.supports} />
                 <SupportResistanceList type="Resistance" levels={results.resistances} />
+                <SentimentCard sentiment={results.sentiment} />
 
                 {/* Row 2 */}
-                <SentimentCard sentiment={results.sentiment} />
                 <PCRStatCard 
                   title="OI PCR Ratio" 
                   value={results.pcr} 
@@ -713,31 +644,22 @@ export default function Home() {
                   sentiment={volumePcrSentiment?.sentiment} 
                   sentimentColor={volumePcrSentiment?.color} 
                 />
-
-                {/* Row 3 */}
-                <StatCard 
-                  title="Max Pain" 
-                  value={results.maxPain} 
-                  tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."
-                />
                 <VolumeCard 
                   avg20DayVolume={results.avg20DayVolume}
                   todayVolumePercentage={results.todayVolumePercentage}
                   estimatedTodayVolume={results.estimatedTodayVolume}
                   marketStatus={marketStatus}
                 />
-                <StatCard 
-                  icon={Calendar}
-                  title="Expiry Date"
-                  value={results.expiryDate}
-                />
-              </div>
 
-              {results.oiAnalysis && (
-                <div className="grid grid-cols-1 mt-6">
-                  <OIAnalysisCard oiAnalysis={results.oiAnalysis} marketStatus={marketStatus} />
-                </div>
-              )}
+                {/* Row 3 */}
+                <DataCard 
+                  title="Max Pain" 
+                  value={results.maxPain} 
+                  tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."
+                />
+                <div className="bg-gray-900/50 p-4 rounded-lg"></div>
+                <div className="bg-gray-900/50 p-4 rounded-lg"></div>
+              </div>
             </div>
           )}
         </section>
@@ -754,8 +676,8 @@ export default function Home() {
         <section className="w-full max-w-2xl mx-auto mt-24 p-8 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10">
           <h2 className="text-3xl font-bold text-center mb-6">Get In Touch</h2>
           <form className="flex flex-col gap-4">
-            <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
-            <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="email" placeholder="Your Email" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
+            <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1.2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
+            <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1.2 text-gray-500"/><input type="email" placeholder="Your Email" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
             <textarea placeholder="Your Message" rows={4} className="p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan"></textarea>
             <button type="submit" className="bg-brand-cyan hover:bg-cyan-5 text-brand-dark font-bold py-3 px-6 rounded-lg transition-all duration-300">Send Message</button>
           </form>
