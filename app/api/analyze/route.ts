@@ -1,4 +1,4 @@
-// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts.
+// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts
 
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
@@ -44,11 +44,11 @@ const specialPsychologicalLevels: Record<string, number[]> = {
   'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
 };
 
-
 const redis = createClient({ url: process.env.REDIS_URL });
 redis.connect().catch(console.error);
 
 // --- HELPER FUNCTIONS ---
+
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await redis.get('volume_history');
@@ -95,25 +95,57 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   return ((currentPrice - previousClose) / previousClose) * 100;
 }
 
+// === FINAL FIX IS HERE === This function is now timezone-aware and robust.
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
-  if (!historicalData.length) return {};
-  const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(0, 20);
+  if (!historicalData || historicalData.length === 0) return {};
+  
+  const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(-20); // Use last 20 available days
   if (recentData.length === 0) return {};
+  
   const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
   const avg20DayVolume = totalVolume / recentData.length;
+
   let todayVolumePercentage = 0, estimatedTodayVolume = 0;
-  if (currentVolume && currentVolume > 0) {
-    const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
-    const expectedDailyVolume = avg20DayVolume * (marketProgress / 6.25);
-    todayVolumePercentage = (currentVolume / expectedDailyVolume) * 100;
-    estimatedTodayVolume = currentVolume * (6.25 / marketProgress);
+
+  if (currentVolume && currentVolume > 0 && avg20DayVolume > 0) {
+    // Create a date object specifically for the IST timezone
+    const nowInIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const hoursIST = nowInIST.getHours();
+    const minutesIST = nowInIST.getMinutes();
+
+    const marketOpenTime = 9 * 60 + 15; // 9:15 AM in minutes from midnight
+    const marketCloseTime = 15 * 60 + 30; // 3:30 PM in minutes from midnight
+    const currentTimeInMinutes = hoursIST * 60 + minutesIST;
+
+    // Check if the current IST time is within market hours
+    if (currentTimeInMinutes >= marketOpenTime && currentTimeInMinutes <= marketCloseTime) {
+        
+        const totalMarketMinutes = marketCloseTime - marketOpenTime; // 375 minutes
+        const minutesPassed = currentTimeInMinutes - marketOpenTime;
+        const marketProgressPercent = minutesPassed / totalMarketMinutes;
+
+        // Calculate the expected volume for this point in the day based on linear progression
+        const expectedVolumeSoFar = avg20DayVolume * marketProgressPercent;
+
+        if (expectedVolumeSoFar > 0) {
+          // This is the percentage of the expected volume for this time of day.
+          todayVolumePercentage = (currentVolume / expectedVolumeSoFar) * 100;
+        }
+
+        // Extrapolate the estimated full-day volume based on current progress
+        if (marketProgressPercent > 0) {
+          estimatedTodayVolume = currentVolume / marketProgressPercent;
+        }
+    }
   }
+
   return {
     avg20DayVolume: Math.round(avg20DayVolume),
     todayVolumePercentage: parseFloat(todayVolumePercentage.toFixed(1)),
     estimatedTodayVolume: Math.round(estimatedTodayVolume)
   };
 }
+
 
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const candidates: SupportResistanceLevel[] = [];
@@ -194,7 +226,6 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   return levels;
 }
 
-// === FINAL FIX IS HERE === The typo 'l' has been corrected.
 function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -204,37 +235,29 @@ function getFinalLevels(
 ): { supports: SupportResistanceLevel[], resistances: SupportResistanceLevel[] } {
   const allSupports: SupportResistanceLevel[] = [];
   const allResistances: SupportResistanceLevel[] = [];
-  
   const addLevel = (levelToAdd: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
-    // Corrected variable name from 'l' to 'existingLevel'
     if (!list.some(existingLevel => existingLevel.price === levelToAdd.price)) {
       list.push(levelToAdd);
     }
   };
-
   findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allSupports));
   findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allResistances));
-  
   calculateSupportResistance(history, currentPrice).forEach(l => {
     if (l.type === 'support') addLevel(l, allSupports);
     else addLevel(l, allResistances);
   });
-  
   getPsychologicalLevels(symbol, currentPrice).forEach(price => {
     const level: SupportResistanceLevel = { price, strength: 'medium', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological Level' };
-    if (level.type === 'support') addLevel(level, allSupports);
-    else addLevel(level, allResistances);
+    if (level.type === 'support') addLevel(l, allSupports);
+    else addLevel(l, allResistances);
   });
-
   allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
   allResistances.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
-
   return {
     supports: allSupports.slice(0, 2),
     resistances: allResistances.slice(0, 2)
   };
 }
-
 
 function calculateSmartSentiment(
   pcr: number,
