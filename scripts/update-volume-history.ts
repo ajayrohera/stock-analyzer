@@ -8,6 +8,29 @@ import path from 'path';
 // Load environment variables from the root .env.local
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
+// === NEW HELPER FUNCTION: The "Safety Check" ===
+// This function checks if the market is safely closed for the day.
+const isMarketClosedForDay = (): boolean => {
+    const nowInIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const day = nowInIST.getDay(); // Sunday = 0, Saturday = 6
+    const hours = nowInIST.getHours();
+    const minutes = nowInIST.getMinutes();
+
+    // Not a weekday
+    if (day === 0 || day === 6) {
+        return true;
+    }
+
+    // It's a weekday, check if it's after market close (e.g., after 3:30 PM IST)
+    if (hours > 15 || (hours === 15 && minutes >= 30)) {
+        return true;
+    }
+
+    // Otherwise, the market is either open or not yet open.
+    return false;
+};
+
+
 // Helper to get all symbols from Google Sheets
 async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string }[]> {
   try {
@@ -45,6 +68,12 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
 // --- MAIN FUNCTION ---
 async function updateVolumeHistory() {
   console.log('--- Starting Daily Data Update Cron Job (High-Performance Version) ---');
+
+  // === THE SAFETY GATE ===
+  if (!isMarketClosedForDay()) {
+    console.log(' 시장이 아직 마감되지 않았습니다. 불완전한 데이터 저장을 방지하기 위해 크론 작업을 중단합니다.'); // Market is not yet closed. Aborting cron job to prevent saving incomplete data.
+    return; // Exit the function immediately
+  }
   
   const redisClient = createClient({ url: process.env.REDIS_URL });
   
@@ -72,7 +101,6 @@ async function updateVolumeHistory() {
     const history: Record<string, any[]> = {};
     const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
     
-    // === PERFORMANCE UPGRADE 1: BATCH FETCH ALL STOCK QUOTES ===
     console.log('📡 Batch fetching all stock quotes...');
     const stockIdentifiers = symbols.map(s => {
       const exchange = (s.displayName === 'NIFTY' || s.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
@@ -81,7 +109,6 @@ async function updateVolumeHistory() {
     const allStockQuotes = await kc.getQuote(stockIdentifiers);
     console.log('✅ Received all stock quotes.');
 
-    // === PERFORMANCE UPGRADE 2: PROCESS STOCK DATA IN MEMORY ===
     const today = new Date().toISOString().split('T')[0];
     const existingHistoryStr = await redisClient.get('volume_history');
     const previousHistory = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
@@ -91,7 +118,6 @@ async function updateVolumeHistory() {
       const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
       const data = allStockQuotes[`${exchange}:${symbol.tradingSymbol}`];
       
-      // Start with previous day's data, if it exists
       history[key] = previousHistory[key]?.filter((entry: any) => entry.date !== today) || [];
 
       if (data && data.volume !== undefined && data.last_price !== undefined) {
@@ -101,11 +127,10 @@ async function updateVolumeHistory() {
           lastPrice: data.last_price,
           timestamp: Date.now(),
         });
-        history[key] = history[key].slice(-30); // Keep last 30 entries
+        history[key] = history[key].slice(-30);
       }
     }
 
-    // === PERFORMANCE UPGRADE 3: EFFICIENTLY PROCESS OPTIONS DATA ===
     const allInstruments = await kc.getInstruments('NFO');
     for (const symbol of symbols) {
       try {
@@ -151,7 +176,6 @@ async function updateVolumeHistory() {
       }
     }
     
-    // === FINAL SAVE TO REDIS === This part is now reached quickly.
     console.log('💾 Saving all processed data to Redis...');
     await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
     await redisClient.setEx('daily_sentiment_data', 7 * 24 * 60 * 60, JSON.stringify(dailySentimentData));
