@@ -1,4 +1,4 @@
-// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts
+// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts.
 
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
