@@ -38,13 +38,13 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
 
   } catch (error) {
     console.error('❌ Error fetching symbols from Google Sheets:', error);
-    return [{ displayName: 'NIFTY', tradingSymbol: 'NIFTY 50' }];
+    return [];
   }
 }
 
 // --- MAIN FUNCTION ---
 async function updateVolumeHistory() {
-  console.log('--- Starting Daily Data Update Cron Job ---');
+  console.log('--- Starting Daily Data Update Cron Job (High-Performance Version) ---');
   
   const redisClient = createClient({ url: process.env.REDIS_URL });
   
@@ -59,7 +59,7 @@ async function updateVolumeHistory() {
     if (!tokenDataString) throw new Error('No Kite token in Redis. Please run daily login script.');
     
     const tokenData = JSON.parse(tokenDataString);
-    if (!tokenData.accessToken) throw new Error('Invalid token data in Redis: accessToken is missing.');
+    if (!tokenData.accessToken) throw new Error('Invalid token data in Redis.');
 
     const kc = new KiteConnect({ api_key: apiKey });
     kc.setAccessToken(tokenData.accessToken);
@@ -69,79 +69,93 @@ async function updateVolumeHistory() {
     if (symbols.length === 0) throw new Error('No symbols found.');
     console.log(`📊 Found ${symbols.length} symbols to update.`);
 
-    const existingHistoryStr = await redisClient.get('volume_history');
-    const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
-    
+    const history: Record<string, any[]> = {};
     const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
-    const allInstruments = await kc.getInstruments('NFO');
+    
+    // === PERFORMANCE UPGRADE 1: BATCH FETCH ALL STOCK QUOTES ===
+    console.log('📡 Batch fetching all stock quotes...');
+    const stockIdentifiers = symbols.map(s => {
+      const exchange = (s.displayName === 'NIFTY' || s.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
+      return `${exchange}:${s.tradingSymbol}`;
+    });
+    const allStockQuotes = await kc.getQuote(stockIdentifiers);
+    console.log('✅ Received all stock quotes.');
+
+    // === PERFORMANCE UPGRADE 2: PROCESS STOCK DATA IN MEMORY ===
+    const today = new Date().toISOString().split('T')[0];
+    const existingHistoryStr = await redisClient.get('volume_history');
+    const previousHistory = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
 
     for (const symbol of symbols) {
+      const key = symbol.displayName.toUpperCase();
+      const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
+      const data = allStockQuotes[`${exchange}:${symbol.tradingSymbol}`];
+      
+      // Start with previous day's data, if it exists
+      history[key] = previousHistory[key]?.filter((entry: any) => entry.date !== today) || [];
+
+      if (data && data.volume !== undefined && data.last_price !== undefined) {
+        history[key].push({
+          date: today,
+          totalVolume: data.volume,
+          lastPrice: data.last_price,
+          timestamp: Date.now(),
+        });
+        history[key] = history[key].slice(-30); // Keep last 30 entries
+      }
+    }
+
+    // === PERFORMANCE UPGRADE 3: EFFICIENTLY PROCESS OPTIONS DATA ===
+    const allInstruments = await kc.getInstruments('NFO');
+    for (const symbol of symbols) {
       try {
-        console.log(`  -> Processing ${symbol.displayName}...`);
-        const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
+        const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
         
-        // 1. Update Volume History
-        const quote = await kc.getQuote([`${exchange}:${symbol.tradingSymbol}`]);
-        const data = quote[`${exchange}:${symbol.tradingSymbol}`];
-        if (data && data.volume !== undefined && data.last_price !== undefined) {
-          const key = symbol.displayName.toUpperCase();
-          if (!history[key]) history[key] = [];
-          history[key] = history[key].filter(entry => entry.date !== new Date().toISOString().split('T')[0]);
-          history[key].push({
-            date: new Date().toISOString().split('T')[0],
-            totalVolume: data.volume,
-            lastPrice: data.last_price,
-            timestamp: Date.now(),
-          });
-          history[key] = history[key].slice(-30);
-        }
-
-        // 2. Calculate and Store Daily PCR Data
-        const unfilteredOptionsChain = allInstruments.filter(i => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
         if (unfilteredOptionsChain.length > 0) {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
+          const todayDt = new Date();
+          todayDt.setHours(0, 0, 0, 0);
           let nearestExpiry = new Date('2999-12-31');
-          unfilteredOptionsChain.forEach(opt => {
+          unfilteredOptionsChain.forEach((opt: any) => {
             const expiryDate = new Date(opt.expiry);
-            if (expiryDate >= today && expiryDate < nearestExpiry) nearestExpiry = expiryDate;
+            if (expiryDate >= todayDt && expiryDate < nearestExpiry) nearestExpiry = expiryDate;
           });
-          const optionsChain = unfilteredOptionsChain.filter(i => new Date(i.expiry).getTime() === nearestExpiry.getTime());
+          const optionsChain = unfilteredOptionsChain.filter((i: any) => new Date(i.expiry).getTime() === nearestExpiry.getTime());
           
-          const instrumentTokens = optionsChain.map(o => `NFO:${o.tradingsymbol}`);
-          const optionQuoteData = await kc.getQuote(instrumentTokens);
+          if (optionsChain.length > 0) {
+            const instrumentTokens = optionsChain.map((o: any) => `NFO:${o.tradingsymbol}`);
+            const optionQuoteData = await kc.getQuote(instrumentTokens);
 
-          let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
-          for (const token of instrumentTokens) {
-            const quote = optionQuoteData[token];
-            const instrument = optionsChain.find(o => `NFO:${o.tradingsymbol}` === token);
-            if (quote && instrument) {
-              if (instrument.instrument_type === 'CE') {
-                totalCallOI += quote.oi || 0;
-                totalCallVolume += quote.volume || 0;
-              } else if (instrument.instrument_type === 'PE') {
-                totalPutOI += quote.oi || 0;
-                totalPutVolume += quote.volume || 0;
+            let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
+            for (const token of instrumentTokens) {
+              const quote = optionQuoteData[token];
+              const instrument = optionsChain.find((o: any) => `NFO:${o.tradingsymbol}` === token);
+              if (quote && instrument) {
+                if (instrument.instrument_type === 'CE') {
+                  totalCallOI += quote.oi || 0;
+                  totalCallVolume += quote.volume || 0;
+                } else if (instrument.instrument_type === 'PE') {
+                  totalPutOI += quote.oi || 0;
+                  totalPutVolume += quote.volume || 0;
+                }
               }
             }
+            
+            dailySentimentData[symbol.displayName.toUpperCase()] = {
+              oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
+              volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
+            };
           }
-          
-          dailySentimentData[symbol.displayName.toUpperCase()] = {
-            oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
-            volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
-          };
         }
-        console.log(`     ✅ Done.`);
       } catch (error) {
-        console.error(`  ❌ Failed to process ${symbol.displayName}:`, error instanceof Error ? error.message : 'Unknown error');
+        console.error(`  ❌ Failed to process options for ${symbol.displayName}:`, error instanceof Error ? error.message : 'Unknown error');
       }
     }
     
-    // Save both data sets back to Redis
+    // === FINAL SAVE TO REDIS === This part is now reached quickly.
+    console.log('💾 Saving all processed data to Redis...');
     await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
-    await redisClient.setEx('daily_sentiment_data', 7 * 24 * 60 * 60, JSON.stringify(dailySentimentData)); // Store for 7 days
-    
-    console.log(`\n📈 Successfully updated data for ${symbols.length} symbols.`);
+    await redisClient.setEx('daily_sentiment_data', 7 * 24 * 60 * 60, JSON.stringify(dailySentimentData));
+    console.log('✅ All data saved successfully.');
     
   } catch (error) {
     console.error('❌ CRITICAL ERROR in daily update process:', error instanceof Error ? error.message : 'Unknown error');
