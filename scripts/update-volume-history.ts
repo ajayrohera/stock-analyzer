@@ -8,30 +8,16 @@ import path from 'path';
 // Load environment variables from the root .env.local
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
-// === NEW HELPER FUNCTION: The "Safety Check" ===
-// This function checks if the market is safely closed for the day.
 const isMarketClosedForDay = (): boolean => {
     const nowInIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const day = nowInIST.getDay(); // Sunday = 0, Saturday = 6
+    const day = nowInIST.getDay();
     const hours = nowInIST.getHours();
     const minutes = nowInIST.getMinutes();
-
-    // Not a weekday
-    if (day === 0 || day === 6) {
-        return true;
-    }
-
-    // It's a weekday, check if it's after market close (e.g., after 3:30 PM IST)
-    if (hours > 15 || (hours === 15 && minutes >= 30)) {
-        return true;
-    }
-
-    // Otherwise, the market is either open or not yet open.
+    if (day === 0 || day === 6) return true;
+    if (hours > 15 || (hours === 15 && minutes >= 30)) return true;
     return false;
 };
 
-
-// Helper to get all symbols from Google Sheets
 async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string }[]> {
   try {
     const auth = new google.auth.GoogleAuth({
@@ -67,12 +53,11 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
 
 // --- MAIN FUNCTION ---
 async function updateVolumeHistory() {
-  console.log('--- Starting Daily Data Update Cron Job (High-Performance Version) ---');
+  console.log('--- Starting Daily Data Update Cron Job (Corrected History Logic) ---');
 
-  // === THE SAFETY GATE ===
   if (!isMarketClosedForDay()) {
-    console.log(' 시장이 아직 마감되지 않았습니다. 불완전한 데이터 저장을 방지하기 위해 크론 작업을 중단합니다.'); // Market is not yet closed. Aborting cron job to prevent saving incomplete data.
-    return; // Exit the function immediately
+    console.log('Market is not yet closed. Aborting cron job to prevent saving incomplete data.');
+    return;
   }
   
   const redisClient = createClient({ url: process.env.REDIS_URL });
@@ -98,7 +83,12 @@ async function updateVolumeHistory() {
     if (symbols.length === 0) throw new Error('No symbols found.');
     console.log(`📊 Found ${symbols.length} symbols to update.`);
 
-    const history: Record<string, any[]> = {};
+    // === THE FIX IS HERE ===
+    // 1. Start with the complete history from Redis.
+    const existingHistoryStr = await redisClient.get('volume_history');
+    const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
+    // ========================
+
     const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
     
     console.log('📡 Batch fetching all stock quotes...');
@@ -110,15 +100,19 @@ async function updateVolumeHistory() {
     console.log('✅ Received all stock quotes.');
 
     const today = new Date().toISOString().split('T')[0];
-    const existingHistoryStr = await redisClient.get('volume_history');
-    const previousHistory = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
-
+    
+    // 2. Loop and MODIFY the history object instead of rebuilding it.
     for (const symbol of symbols) {
       const key = symbol.displayName.toUpperCase();
       const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
       const data = allStockQuotes[`${exchange}:${symbol.tradingSymbol}`];
       
-      history[key] = previousHistory[key]?.filter((entry: any) => entry.date !== today) || [];
+      if (!history[key]) {
+        history[key] = []; // Initialize if it's a new stock
+      }
+
+      // Filter out today's old data
+      history[key] = history[key].filter((entry: any) => entry.date !== today);
 
       if (data && data.volume !== undefined && data.last_price !== undefined) {
         history[key].push({
@@ -133,6 +127,7 @@ async function updateVolumeHistory() {
 
     const allInstruments = await kc.getInstruments('NFO');
     for (const symbol of symbols) {
+      // ... (The options processing logic remains the same and is correct) ...
       try {
         const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
         
