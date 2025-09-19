@@ -47,7 +47,7 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
 }
 
 async function updateVolumeHistory() {
-    console.log('--- Starting Daily Data Rebuild Cron Job (ULTRA Performance Version) ---');
+    console.log('--- Starting Daily Data Rebuild Cron Job (Parallel Performance Version) ---');
 
     if (!isMarketClosedForDay()) {
         console.log('Market is not yet closed. Aborting cron job.');
@@ -74,9 +74,9 @@ async function updateVolumeHistory() {
         if (symbols.length === 0) throw new Error('No symbols found.');
         console.log(`📊 Found ${symbols.length} symbols to rebuild.`);
 
-        console.log('🔥 Deleting old volume_history key to ensure clean slate...');
-        await redisClient.del('volume_history');
-        console.log('✅ Old history deleted.');
+        console.log('🔥 Deleting old Redis keys to ensure clean slate...');
+        await redisClient.del(['volume_history', 'daily_sentiment_data']);
+        console.log('✅ Old keys deleted.');
         
         const newHistory: Record<string, any[]> = {};
         const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
@@ -85,13 +85,33 @@ async function updateVolumeHistory() {
         const fromDate = new Date();
         fromDate.setDate(toDate.getDate() - 45);
 
-        // === PERFORMANCE UPGRADE 1: Fetch all instruments ONCE ===
-        console.log('📡 Fetching all NFO instruments...');
-        const allInstruments = await kc.getInstruments('NFO');
-        console.log(`✅ Received ${allInstruments.length} total instruments.`);
+        // === PARALLEL PERFORMANCE FIX 1: Fetch all historical data concurrently ===
+        console.log(`📡 Preparing to fetch historical data for ${symbols.length} symbols in parallel...`);
+        const historicalPromises = symbols.map(symbol => 
+            kc.getHistoricalData(symbol.instrumentToken, 'day', fromDate, toDate)
+              .catch((e: any) => {
+                  console.error(`  ⚠️ Could not fetch history for ${symbol.displayName}: ${e.message}`);
+                  return []; // Return empty array on failure for this symbol
+              })
+        );
+        const historicalResults = await Promise.all(historicalPromises);
+        console.log('✅ Received all historical data responses.');
 
-        // === PERFORMANCE UPGRADE 2: Build a master list of all option tokens needed ===
-        console.log('🛠️ Building master list of required option tokens...');
+        // Process the results in memory
+        symbols.forEach((symbol, index) => {
+            const records = historicalResults[index];
+            if (records && records.length > 0) {
+                newHistory[symbol.displayName.toUpperCase()] = records.map((r: any) => ({
+                    date: new Date(r.date).toISOString().split('T')[0],
+                    totalVolume: r.volume,
+                    lastPrice: r.close,
+                    timestamp: new Date(r.date).getTime(),
+                }));
+            }
+        });
+
+        // === PARALLEL PERFORMANCE FIX 2: Efficiently process options data ===
+        const allInstruments = await kc.getInstruments('NFO');
         const masterTokenList: string[] = [];
         const symbolToOptionsMap: Record<string, any[]> = {};
 
@@ -110,27 +130,15 @@ async function updateVolumeHistory() {
                 optionsChain.forEach((o: any) => masterTokenList.push(`NFO:${o.tradingsymbol}`));
             }
         }
-        console.log(`✅ Master list built with ${masterTokenList.length} unique option tokens.`);
+        
+        if (masterTokenList.length > 0) {
+            console.log(`📡 Fetching all ${masterTokenList.length} option quotes in a single batch...`);
+            const allOptionQuotes = await kc.getQuote(masterTokenList);
+            console.log('✅ Received all option quotes.');
 
-        // === PERFORMANCE UPGRADE 3: Make ONE massive API call for all options data ===
-        console.log('📡 Fetching all option quotes in a single batch...');
-        const allOptionQuotes = await kc.getQuote(masterTokenList);
-        console.log('✅ Received all option quotes.');
-
-        // Now, loop through and process everything from memory
-        for (const symbol of symbols) {
-            try {
-                // 1. Rebuild Historical Data
-                const records = await kc.getHistoricalData(symbol.instrumentToken, 'day', fromDate, toDate);
-                newHistory[symbol.displayName.toUpperCase()] = records.map((r: any) => ({
-                    date: new Date(r.date).toISOString().split('T')[0],
-                    totalVolume: r.volume,
-                    lastPrice: r.close,
-                    timestamp: new Date(r.date).getTime(),
-                }));
-
-                // 2. Calculate EOD Sentiment Data from pre-fetched quotes
-                const optionsChain = symbolToOptionsMap[symbol.displayName.toUpperCase()];
+            for (const symbol of symbols) {
+                const key = symbol.displayName.toUpperCase();
+                const optionsChain = symbolToOptionsMap[key];
                 if (optionsChain && optionsChain.length > 0) {
                     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
                     for (const instrument of optionsChain) {
@@ -145,13 +153,11 @@ async function updateVolumeHistory() {
                             }
                         }
                     }
-                    dailySentimentData[symbol.displayName.toUpperCase()] = {
+                    dailySentimentData[key] = {
                         oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
                         volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
                     };
                 }
-            } catch (error) {
-                console.error(`  ❌ Failed to process ${symbol.displayName}:`, error instanceof Error ? error.message : 'Unknown error');
             }
         }
 
