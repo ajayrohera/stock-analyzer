@@ -6,6 +6,7 @@ import { KiteConnect } from 'kiteconnect';
 import { createClient } from 'redis';
 
 // --- HELPER TYPES ---
+// ... (All helper types remain the same) ...
 interface QuoteData {
     [key:string]: { 
         instrument_token: number; 
@@ -44,11 +45,12 @@ const specialPsychologicalLevels: Record<string, number[]> = {
   'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
 };
 
+
 const redis = createClient({ url: process.env.REDIS_URL });
 redis.connect().catch(console.error);
 
 // --- HELPER FUNCTIONS ---
-
+// ... (All other helper functions remain the same, including the new calculateSmartSentiment) ...
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await redis.get('volume_history');
@@ -225,14 +227,12 @@ function getFinalLevels(
   };
 }
 
-// === UPGRADED SENTIMENT FUNCTION WITH DETAILED LOGGING ===
 function calculateSmartSentiment(
   pcr: number,
   volumePcr: number,
   highestPutOI: number,
   highestCallOI: number
 ): string {
-  // 1. Upgraded "PCR Score" (from OI PCR)
   let pcrScore = 0;
   if (pcr > 1.3) pcrScore = 2;
   else if (pcr > 1.1) pcrScore = 1;
@@ -240,14 +240,12 @@ function calculateSmartSentiment(
   else if (pcr < 0.7) pcrScore = -2;
   else if (pcr < 0.9) pcrScore = -1;
 
-  // 2. "Conviction Score" (from OI Walls)
   let convictionScore = 0;
   if (highestPutOI > highestCallOI * 2) convictionScore = 2;
   else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
   else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
   else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
   
-  // 3. Upgraded "Volume Modifier" (from Volume PCR)
   let volumeModifier = 0;
   if (volumePcr < 0.7) volumeModifier = 2;
   else if (volumePcr < 0.9) volumeModifier = 1;
@@ -256,15 +254,7 @@ function calculateSmartSentiment(
   else if (volumePcr > 1.1) volumeModifier = -1;
 
   const finalScore = pcrScore + convictionScore + volumeModifier;
-
-  // --- DETAILED DIAGNOSTIC LOG ---
-  console.log(`[SENTIMENT DIAGNOSTIC]
-    - OI PCR: ${pcr.toFixed(2)} -> pcrScore: ${pcrScore}
-    - Highest PUT OI: ${highestPutOI}, Highest CALL OI: ${highestCallOI} -> convictionScore: ${convictionScore}
-    - Volume PCR: ${volumePcr.toFixed(2)} -> volumeModifier: ${volumeModifier}
-    - ==> FINAL SCORE: ${finalScore}`);
-  // -----------------------------
-
+  
   if (finalScore >= 5) return "Strongly Bullish";
   if (finalScore >= 3) return "Bullish";
   if (finalScore >= 1) return "Slightly Bullish";
@@ -272,13 +262,30 @@ function calculateSmartSentiment(
   if (finalScore <= -1 && finalScore > -2) return "Slightly Bearish";
   if (finalScore <= -3 && finalScore > -4) return "Bearish";
   if (finalScore <= -5) return "Strongly Bearish";
-  
-  // Fallback for scores -2 and -4 to map to a sentiment
   if (finalScore === -2) return "Slightly Bearish";
   if (finalScore === -4) return "Bearish";
 
-  return "Neutral"; // Default
+  return "Neutral";
 }
+
+// === NEW HELPER FUNCTION === To check market status
+const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
+    const now = new Date();
+    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const day = istTime.getDay();
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+
+    if (day > 0 && day < 6) { // Monday to Friday
+        if (hours > 9 || (hours === 9 && minutes >= 15)) {
+            if (hours < 15 || (hours === 15 && minutes <= 30)) {
+                return 'OPEN';
+            }
+        }
+    }
+    return 'CLOSED';
+};
+
 
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
@@ -355,27 +362,55 @@ export async function POST(request: Request) {
     
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
     let highestCallOI = 0, highestPutOI = 0;
+    let pcr = 0, volumePcr = 0;
+    const marketStatus = getMarketStatus();
 
-    for (const strike of strikePrices) {
-        const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
-        const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
-        const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
-        const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
-        const ce_oi = ceLiveData?.oi || 0;
-        const pe_oi = peLiveData?.oi || 0;
-        optionsByStrike[strike] = { ce_oi, pe_oi };
-        totalCallOI += ce_oi;
-        totalPutOI += pe_oi;
-        totalCallVolume += ceLiveData?.volume || 0;
-        totalPutVolume += peLiveData?.volume || 0;
-        
-        if (strike > ltp && ce_oi > highestCallOI) {
-            highestCallOI = ce_oi;
+    if (marketStatus === 'OPEN') {
+        console.log("Market is OPEN. Calculating live PCR data.");
+        for (const strike of strikePrices) {
+            const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
+            const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
+            const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
+            const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
+            const ce_oi = ceLiveData?.oi || 0;
+            const pe_oi = peLiveData?.oi || 0;
+            optionsByStrike[strike] = { ce_oi, pe_oi };
+            totalCallOI += ce_oi;
+            totalPutOI += pe_oi;
+            totalCallVolume += ceLiveData?.volume || 0;
+            totalPutVolume += peLiveData?.volume || 0;
+            
+            if (strike > ltp && ce_oi > highestCallOI) highestCallOI = ce_oi;
+            if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
         }
-        if (strike < ltp && pe_oi > highestPutOI) {
-            highestPutOI = pe_oi;
+        pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
+        volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+    } else {
+        console.log("Market is CLOSED. Fetching stored daily sentiment data from Redis.");
+        const dailyDataStr = await redis.get('daily_sentiment_data');
+        if (dailyDataStr) {
+            const dailyData = JSON.parse(dailyDataStr);
+            const symbolData = dailyData[displayName.toUpperCase()];
+            if (symbolData) {
+                pcr = symbolData.oiPcr;
+                volumePcr = symbolData.volumePcr;
+                console.log(`Using stored PCR for ${displayName.toUpperCase()}: OI PCR=${pcr}, Vol PCR=${volumePcr}`);
+            }
+        }
+         // During closed hours, OI conviction is more stable, so we calculate it anyway.
+        for (const strike of strikePrices) {
+            const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
+            const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
+            const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
+            const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
+            const ce_oi = ceLiveData?.oi || 0;
+            const pe_oi = peLiveData?.oi || 0;
+            optionsByStrike[strike] = { ce_oi, pe_oi };
+            if (strike > ltp && ce_oi > highestCallOI) highestCallOI = ce_oi;
+            if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
         }
     }
+
 
     const { supports: supportLevels, resistances: resistanceLevels } = getFinalLevels(
       displayName.toUpperCase(), 
@@ -387,9 +422,6 @@ export async function POST(request: Request) {
 
     const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : 0;
     const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : 0;
-    
-    const pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
-    const volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
     
     const sentiment = calculateSmartSentiment(pcr, volumePcr, highestPutOI, highestCallOI);
     
