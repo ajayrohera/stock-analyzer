@@ -55,6 +55,8 @@ async function updateVolumeHistory() {
     await redisClient.connect();
     console.log('✅ Connected to Redis');
 
+    console.log('Redis connection status:', redisClient.isOpen);
+
     // 2. Get API Key and Access Token
     const apiKey = process.env.KITE_API_KEY;
     if (!apiKey) throw new Error('KITE_API_KEY is not set in environment variables.');
@@ -80,6 +82,15 @@ async function updateVolumeHistory() {
 
     // 5. Fetch existing history from Redis
     const existingHistoryStr = await redisClient.get('volume_history');
+    console.log('Existing history from Redis:', existingHistoryStr ? 'Exists' : 'Null/Empty');
+    if (existingHistoryStr) {
+    try {
+        const parsedHistory = JSON.parse(existingHistoryStr);
+        console.log('Number of symbols in history:', Object.keys(parsedHistory).length);
+    } catch (e) {
+        console.log('Error parsing existing history:', e);
+    }
+    }
     const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
 
     // 6. Fetch latest data for all symbols
@@ -148,6 +159,9 @@ async function updateVolumeHistory() {
         failedCount++;
       }
     }
+
+    console.log('About to save history with symbols:', Object.keys(history));
+    console.log('Sample data for first symbol:', history[Object.keys(history)[0]]);
     
     // 7. Save updated history back to Redis
     await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
