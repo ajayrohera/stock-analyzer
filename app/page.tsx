@@ -12,6 +12,14 @@ type SupportResistanceLevel = {
   type: 'support' | 'resistance';
   tooltip?: string;
 };
+
+type OiChange = {
+  strike: number;
+  changeOi: number;
+  totalOi: number;
+  type: 'CALL' | 'PUT';
+};
+
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -23,20 +31,30 @@ type AnalysisResult = {
   expiryDate: string; 
   ltp: number;
   lastRefreshed: string;
+  rsi?: number;
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
   changePercent?: number;
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
+  oiAnalysis?: {
+    calls: OiChange[];
+    puts: OiChange[];
+    summary: string;
+  };
 };
+
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
-type AppError = { message: string; type: string; timestamp: Date; };
+type AppError = {
+  message: string;
+  type: 'NETWORK' | 'SERVER' | 'VALIDATION' | 'UNKNOWN' | 'TOKEN_EXPIRED' | 'SYMBOL_NOT_FOUND';
+  timestamp: Date;
+};
 type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 
 // --- CONSTANTS AND HELPERS ---
 const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
-// === RESTORED CONSTANT ===
 const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
 
 const isAnalysisResult = (data: unknown): data is AnalysisResult => {
@@ -51,7 +69,6 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   }
 };
 
-// === RESTORED FUNCTION ===
 const getNextWorkingDay = (currentDate: Date): string => {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const nextDay = new Date(currentDate);
@@ -204,7 +221,6 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
 });
 SentimentCard.displayName = 'SentimentCard';
 
-// === RESTORED COMPONENT === This was the cause of the build error.
 const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
   <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
     <div className="inline-block p-4 bg-gray-900/50 rounded-full mb-4 text-brand-cyan">
@@ -287,7 +303,6 @@ const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: {
   </div>
 ));
 PCRStatCard.displayName = 'PCRStatCard';
-
 
 // === MAIN COMPONENT ===
 export default function Home() {

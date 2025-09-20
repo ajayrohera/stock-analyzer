@@ -15,9 +15,6 @@ interface QuoteData {
         ohlc?: { open: number; high: number; low: number; close: number; };
     }
 }
-interface LtpQuote {
-    [key:string]: { instrument_token: number; last_price: number; }
-}
 interface Instrument {
     tradingsymbol: string;
     strike: number;
@@ -38,12 +35,6 @@ interface SupportResistanceLevel {
   tooltip?: string;
 }
 
-const specialPsychologicalLevels: Record<string, number[]> = {
-  'NIFTY': [24000, 24500, 25000, 25500, 26000],
-  'BANKNIFTY': [52000, 53000, 54000, 55000, 56000],
-  'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
-};
-
 const redis = createClient({ url: process.env.REDIS_URL });
 redis.connect().catch(console.error);
 
@@ -59,24 +50,6 @@ async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
     console.error('Error in getHistoricalData:', error); 
     return []; 
   }
-}
-
-function generatePsychologicalLevels(currentPrice: number): number[] {
-  const levels: number[] = [];
-  const priceRange = currentPrice * 0.2;
-  const increment = currentPrice > 1000 ? 100 : 50;
-  const start = Math.round((currentPrice - priceRange) / increment) * increment;
-  const end = Math.round((currentPrice + priceRange) / increment) * increment;
-  for (let price = start; price <= end; price += increment) {
-    if (price % 100 === 0 || (price % 50 === 0 && currentPrice < 500)) levels.push(price);
-  }
-  return levels.filter(level => Math.abs(level - currentPrice) > increment);
-}
-
-function getPsychologicalLevels(symbol: string, currentPrice: number): number[] {
-  const upperSymbol = symbol.toUpperCase();
-  if (specialPsychologicalLevels[upperSymbol]) return specialPsychologicalLevels[upperSymbol];
-  return generatePsychologicalLevels(currentPrice);
 }
 
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
@@ -97,49 +70,37 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
 
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
   if (!historicalData || historicalData.length === 0) return {};
-  
   const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(-20);
   if (recentData.length === 0) return {};
-  
   const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
   const avg20DayVolume = totalVolume / recentData.length;
-
   let todayVolumePercentage = 0, estimatedTodayVolume = 0;
-
   if (currentVolume && currentVolume > 0 && avg20DayVolume > 0) {
     const nowInIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
     const hoursIST = nowInIST.getHours();
     const minutesIST = nowInIST.getMinutes();
-
     const marketOpenTime = 9 * 60 + 15;
     const marketCloseTime = 15 * 60 + 30;
     const currentTimeInMinutes = hoursIST * 60 + minutesIST;
-
     if (currentTimeInMinutes >= marketOpenTime && currentTimeInMinutes <= marketCloseTime) {
-        
         const totalMarketMinutes = marketCloseTime - marketOpenTime;
         const minutesPassed = currentTimeInMinutes - marketOpenTime;
         const marketProgressPercent = minutesPassed / totalMarketMinutes;
-
         const expectedVolumeSoFar = avg20DayVolume * marketProgressPercent;
-
         if (expectedVolumeSoFar > 0) {
           todayVolumePercentage = (currentVolume / expectedVolumeSoFar) * 100;
         }
-
         if (marketProgressPercent > 0) {
           estimatedTodayVolume = currentVolume / marketProgressPercent;
         }
     }
   }
-
   return {
     avg20DayVolume: Math.round(avg20DayVolume),
     todayVolumePercentage: parseFloat(todayVolumePercentage.toFixed(1)),
     estimatedTodayVolume: Math.round(estimatedTodayVolume)
   };
 }
-
 
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const candidates: SupportResistanceLevel[] = [];
@@ -201,26 +162,6 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
   return significantLevels.sort((a, b) => b.price - a.price);
 }
 
-function calculateSupportResistance(history: HistoricalData[], currentPrice: number): SupportResistanceLevel[] {
-  if (!history || history.length === 0 || !currentPrice) return [];
-  const levels: SupportResistanceLevel[] = [];
-  const priceLevels = new Map<number, number>();
-  const priceRange = currentPrice * 0.20;
-  history.forEach(entry => {
-    if (entry.lastPrice && Math.abs(entry.lastPrice - currentPrice) <= priceRange) {
-      const roundedPrice = Math.round(entry.lastPrice / 5) * 5;
-      const volume = priceLevels.get(roundedPrice) || 0;
-      priceLevels.set(roundedPrice, volume + (entry.totalVolume || 0));
-    }
-  });
-  const sortedLevels = Array.from(priceLevels.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  sortedLevels.forEach(([price]) => {
-      levels.push({ price, strength: 'weak', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Historical Volume Level' });
-  });
-  return levels;
-}
-
-// === FINAL FIX IS HERE === The typo 'l' has been corrected.
 function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -230,28 +171,14 @@ function getFinalLevels(
 ): { supports: SupportResistanceLevel[], resistances: SupportResistanceLevel[] } {
   const allSupports: SupportResistanceLevel[] = [];
   const allResistances: SupportResistanceLevel[] = [];
-  
   const addLevel = (levelToAdd: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
-    // Corrected variable name from 'l' to 'existingLevel'
     if (!list.some(existingLevel => existingLevel.price === levelToAdd.price)) {
       list.push(levelToAdd);
     }
   };
-
   findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(level => addLevel(level, allSupports));
   findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(level => addLevel(level, allResistances));
   
-  calculateSupportResistance(history, currentPrice).forEach(level => {
-    if (level.type === 'support') addLevel(level, allSupports);
-    else addLevel(level, allResistances);
-  });
-  
-  getPsychologicalLevels(symbol, currentPrice).forEach(price => {
-    const level: SupportResistanceLevel = { price, strength: 'medium', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological Level' };
-    if (level.type === 'support') addLevel(level, allSupports);
-    else addLevel(level, allResistances);
-  });
-
   allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
   allResistances.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
 
@@ -260,7 +187,6 @@ function getFinalLevels(
     resistances: allResistances.slice(0, 2)
   };
 }
-
 
 function calculateSmartSentiment(
   pcr: number,
@@ -294,11 +220,9 @@ function calculateSmartSentiment(
   if (finalScore >= 3) return "Bullish";
   if (finalScore >= 1) return "Slightly Bullish";
   if (finalScore === 0) return "Neutral";
-  if (finalScore <= -1 && finalScore > -2) return "Slightly Bearish";
-  if (finalScore <= -3 && finalScore > -4) return "Bearish";
+  if (finalScore <= -1 && finalScore >= -2) return "Slightly Bearish";
+  if (finalScore <= -3 && finalScore >= -4) return "Bearish";
   if (finalScore <= -5) return "Strongly Bearish";
-  if (finalScore === -2) return "Slightly Bearish";
-  if (finalScore === -4) return "Bearish";
 
   return "Neutral";
 }
@@ -318,7 +242,6 @@ const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
     }
     return 'CLOSED';
 };
-
 
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
@@ -350,7 +273,6 @@ export async function POST(request: Request) {
     if (!row || !row[1]) return NextResponse.json({ error: `TradingSymbol for '${displayName}' not found.` }, { status: 404 }); 
     const tradingSymbol = row[1];
 
-
     const tokenData = await redis.get('kite_token');
     if (!tokenData) return NextResponse.json({ error: 'Kite token not found.' }, { status: 401 });
 
@@ -358,7 +280,7 @@ export async function POST(request: Request) {
     kc.setAccessToken(JSON.parse(tokenData).accessToken);
 
     const allInstruments = await kc.getInstruments('NFO');
-    const unfilteredOptionsChain = allInstruments.filter(instrument => 
+    const unfilteredOptionsChain = allInstruments.filter((instrument: any) => 
       instrument.name === tradingSymbol.toUpperCase() && (instrument.instrument_type === 'CE' || instrument.instrument_type === 'PE')
     );
     if (unfilteredOptionsChain.length === 0) {
@@ -375,7 +297,7 @@ export async function POST(request: Request) {
         }
     }
 
-    const optionsChain = unfilteredOptionsChain.filter(instrument => new Date(instrument.expiry).getTime() === nearestExpiry.getTime());
+    const optionsChain = unfilteredOptionsChain.filter((instrument: any) => new Date(instrument.expiry).getTime() === nearestExpiry.getTime());
     
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
     const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
@@ -392,14 +314,14 @@ export async function POST(request: Request) {
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
 
     const optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }> = {};
-    const strikePrices = [...new Set(optionsChain.map(o => o.strike))].sort((a, b) => a - b);
+    const strikePrices = [...new Set(optionsChain.map((o: any) => o.strike))].sort((a, b) => a - b);
     
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
     let highestCallOI = 0, highestPutOI = 0;
 
     for (const strike of strikePrices) {
-        const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
-        const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
+        const ceOpt = optionsChain.find((o: any) => o.strike === strike && o.instrument_type === 'CE');
+        const peOpt = optionsChain.find((o: any) => o.strike === strike && o.instrument_type === 'PE');
         const ceLiveData = ceOpt ? quoteData[`NFO:${ceOpt.tradingsymbol}`] : null;
         const peLiveData = peOpt ? quoteData[`NFO:${peOpt.tradingsymbol}`] : null;
         const ce_oi = ceLiveData?.oi || 0;
@@ -454,12 +376,12 @@ export async function POST(request: Request) {
         if (totalLoss < minLoss) { minLoss = totalLoss; maxPain = expiryStrike; }
     }
     
-    const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+    const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
     const responseData = {
         symbol: displayName.toUpperCase(),
         ltp: ltp,
-        lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
+        lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }),
         changePercent: parseFloat(changePercent.toFixed(2)),
         ...volumeMetrics,
         expiryDate: formattedExpiry,
@@ -471,16 +393,14 @@ export async function POST(request: Request) {
         resistance: finalResistance,
         supports: supportLevels,
         resistances: resistanceLevels,
+        historicalData: historicalData,
     };
     
     return NextResponse.json(responseData);
 
   } catch (error) {
-    const err = error as Error & { error_type?: string };
+    const err = error as Error;
     console.error("API Error:", err.message, err.stack);
-    if (err.error_type === 'TokenException') {
-        return NextResponse.json({ error: 'Kite token has expired. Please run the login script again.' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'An error occurred fetching data.' }, { status: 500 });
   }
 }

@@ -7,10 +7,15 @@ import path from 'path';
 
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
-const BATCH_SIZE = 10; // Process 10 stocks per run
-const PROCESSED_SET_KEY = 'cron:processed_stocks_today';
-const HISTORY_KEY = 'volume_history';
-const SENTIMENT_KEY = 'daily_sentiment_data';
+const isMarketClosedForDay = (): boolean => {
+    const nowInIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const day = nowInIST.getDay();
+    const hours = nowInIST.getHours();
+    const minutes = nowInIST.getMinutes();
+    if (day === 0 || day === 6) return true;
+    if (hours > 15 || (hours === 15 && minutes >= 45)) return true;
+    return false;
+};
 
 async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string, instrumentToken: string }[]> {
     try {
@@ -41,42 +46,20 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
     }
 }
 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function updateVolumeHistory() {
-    console.log(`--- Starting Cron Batch Run (Batch Size: ${BATCH_SIZE}) ---`);
+    console.log('--- Starting Daily Data Rebuild Cron Job (Slow & Steady, Reliable Version) ---');
+
+    if (!isMarketClosedForDay()) {
+        console.log('Market is not yet closed. Aborting cron job.');
+        return;
+    }
 
     const redisClient = createClient({ url: process.env.REDIS_URL });
     try {
         await redisClient.connect();
-
-        const symbols = await getAllSymbols();
-        if (symbols.length === 0) {
-            console.log("No symbols found. Exiting.");
-            return;
-        }
-
-        const processedSymbols = await redisClient.sMembers(PROCESSED_SET_KEY);
-        
-        if (processedSymbols.length >= symbols.length) {
-            console.log("✅ All symbols processed for today. Exiting.");
-            // Optional: Check if it's a new day to reset the processed set
-            const nowInIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-            if (nowInIST.getHours() < 15) { // If it's before 3 PM, reset for the new day
-                 await redisClient.del(PROCESSED_SET_KEY);
-                 console.log("New day detected. Resetting processed symbols list.");
-            }
-            return;
-        }
-
-        const symbolsToProcess = symbols
-            .filter(s => !processedSymbols.includes(s.displayName.toUpperCase()))
-            .slice(0, BATCH_SIZE);
-
-        if (symbolsToProcess.length === 0) {
-            console.log("No new symbols to process in this run. Exiting.");
-            return;
-        }
-        
-        console.log(`📊 Processing batch of ${symbolsToProcess.length} symbols: [${symbolsToProcess.map(s => s.displayName).join(', ')}]`);
+        console.log('✅ Connected to Redis');
 
         const apiKey = process.env.KITE_API_KEY;
         if (!apiKey) throw new Error('KITE_API_KEY is not set.');
@@ -87,34 +70,42 @@ async function updateVolumeHistory() {
 
         const kc = new KiteConnect({ api_key: apiKey });
         kc.setAccessToken(tokenData.accessToken);
+        console.log('🔑 KiteConnect initialized.');
 
+        const symbols = await getAllSymbols();
+        if (symbols.length === 0) throw new Error('No symbols found.');
+        console.log(`📊 Found ${symbols.length} symbols to rebuild sequentially.`);
+
+        console.log('🔥 Deleting old Redis keys to ensure clean slate...');
+        await redisClient.del(['volume_history', 'daily_sentiment_data']);
+        console.log('✅ Old keys deleted.');
+        
+        const newHistory: Record<string, any[]> = {};
+        const dailySentimentData: Record<string, { oiPcr: number, volumePcr: number }> = {};
+        
         const toDate = new Date();
         const fromDate = new Date();
         fromDate.setDate(toDate.getDate() - 45);
-
-        const historyStr = await redisClient.get(HISTORY_KEY);
-        const history = historyStr ? JSON.parse(historyStr) : {};
         
-        const sentimentStr = await redisClient.get(SENTIMENT_KEY);
-        const sentimentData = sentimentStr ? JSON.parse(sentimentStr) : {};
-
         const allInstruments = await kc.getInstruments('NFO');
 
-        for (const symbol of symbolsToProcess) {
+        // === THE DEFINITIVE FIX: Slow, sequential, rate-limit-safe loop ===
+        for (const [index, symbol] of symbols.entries()) {
             try {
-                // 1. Fetch and update historical data
+                console.log(`  -> Processing ${index + 1}/${symbols.length}: ${symbol.displayName}...`);
+                
+                // 1. Rebuild Historical Data for one symbol
                 const records = await kc.getHistoricalData(symbol.instrumentToken, 'day', fromDate, toDate);
-                const key = symbol.displayName.toUpperCase();
-                history[key] = records.map((r: any) => ({
+                newHistory[symbol.displayName.toUpperCase()] = records.map((r: any) => ({
                     date: new Date(r.date).toISOString().split('T')[0],
                     totalVolume: r.volume,
                     lastPrice: r.close,
                     timestamp: new Date(r.date).getTime(),
                 }));
 
-                // 2. Fetch and update options data
-                const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase());
-                 if (unfilteredOptionsChain.length > 0) {
+                // 2. Calculate EOD Sentiment Data for one symbol
+                const unfilteredOptionsChain = allInstruments.filter((i: any) => i.name === symbol.tradingSymbol.toUpperCase() && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
+                if (unfilteredOptionsChain.length > 0) {
                     const todayDt = new Date();
                     todayDt.setHours(0, 0, 0, 0);
                     let nearestExpiry = new Date('2999-12-31');
@@ -141,36 +132,33 @@ async function updateVolumeHistory() {
                                 }
                             }
                         }
-                        sentimentData[key] = {
+                        dailySentimentData[symbol.displayName.toUpperCase()] = {
                             oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
                             volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
                         };
                     }
                 }
-                
-                await redisClient.sAdd(PROCESSED_SET_KEY, key);
-                console.log(`  ✅ Processed and marked ${symbol.displayName} as complete.`);
-
+                // 3. Wait for a short period to be polite to the API
+                await delay(250); // Wait 250ms between each symbol
             } catch (error) {
                 console.error(`  ❌ Failed to process ${symbol.displayName}:`, error instanceof Error ? error.message : 'Unknown error');
+                // If one symbol fails, wait a bit longer before trying the next one
+                await delay(1000); 
             }
         }
 
-        // Save the updated data back to Redis
-        await redisClient.set(HISTORY_KEY, JSON.stringify(history));
-        await redisClient.set(SENTIMENT_KEY, JSON.stringify(sentimentData));
-
-        // Set an expiry on the "processed" set so it automatically resets for the next day
-        await redisClient.expire(PROCESSED_SET_KEY, 24 * 60 * 60);
-
-        console.log(`✅ Batch complete. Total processed today: ${processedSymbols.length + symbolsToProcess.length} / ${symbols.length}`);
-
+        console.log('💾 Saving all rebuilt data to Redis...');
+        await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(newHistory));
+        await redisClient.setEx('daily_sentiment_data', 7 * 24 * 60 * 60, JSON.stringify(dailySentimentData));
+        console.log('✅ All data saved successfully.');
+        
     } catch (error) {
-        console.error('❌ CRITICAL ERROR in cron batch process:', error);
+        console.error('❌ CRITICAL ERROR in daily rebuild process:', error);
         throw error;
     } finally {
         if (redisClient.isOpen) {
             await redisClient.quit();
+            console.log('🔌 Disconnected from Redis.');
         }
     }
 }
