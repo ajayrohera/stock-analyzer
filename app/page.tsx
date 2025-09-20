@@ -12,14 +12,6 @@ type SupportResistanceLevel = {
   type: 'support' | 'resistance';
   tooltip?: string;
 };
-
-type OiChange = {
-  strike: number;
-  changeOi: number;
-  totalOi: number;
-  type: 'CALL' | 'PUT';
-};
-
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -31,30 +23,20 @@ type AnalysisResult = {
   expiryDate: string; 
   ltp: number;
   lastRefreshed: string;
-  rsi?: number;
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
   changePercent?: number;
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
-  oiAnalysis?: {
-    calls: OiChange[];
-    puts: OiChange[];
-    summary: string;
-  };
 };
-
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
-type AppError = {
-  message: string;
-  type: 'NETWORK' | 'SERVER' | 'VALIDATION' | 'UNKNOWN' | 'TOKEN_EXPIRED' | 'SYMBOL_NOT_FOUND';
-  timestamp: Date;
-};
+type AppError = { message: string; type: string; timestamp: Date; };
 type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 
 // --- CONSTANTS AND HELPERS ---
 const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
+// === RESTORED CONSTANT ===
 const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
 
 const isAnalysisResult = (data: unknown): data is AnalysisResult => {
@@ -69,6 +51,7 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   }
 };
 
+// === RESTORED FUNCTION ===
 const getNextWorkingDay = (currentDate: Date): string => {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const nextDay = new Date(currentDate);
@@ -99,7 +82,6 @@ const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sen
 const ErrorToast = React.memo(({ error }: { error: AppError }) => ( 
   <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg border-l-4 ${ 
     error.type === 'NETWORK' ? 'border-red-500 bg-red-900/50' : 
-    error.type === 'SERVER' ? 'border-orange-500 bg-orange-900/50' : 
     'border-gray-500 bg-gray-900/50' 
   } backdrop-blur-sm z-50 max-w-md`}>
     <div className="flex items-start"><XCircle size={20} className="mr-2 flex-shrink-0 mt-0.5" /><p className="text-sm">{error.message}</p></div>
@@ -107,7 +89,6 @@ const ErrorToast = React.memo(({ error }: { error: AppError }) => (
 ));
 ErrorToast.displayName = 'ErrorToast';
 
-// === FIX: Renamed component to avoid conflict ===
 const DataCard = React.memo(({ icon: Icon, title, value, color = 'text-white', tooltip, subValue, sentimentColor }: { 
   icon?: React.ElementType;
   title: string; 
@@ -223,6 +204,7 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
 });
 SentimentCard.displayName = 'SentimentCard';
 
+// === RESTORED COMPONENT === This was the cause of the build error.
 const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
   <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
     <div className="inline-block p-4 bg-gray-900/50 rounded-full mb-4 text-brand-cyan">
@@ -234,12 +216,8 @@ const FeatureCard = React.memo(({ icon, title, description }: { icon: React.Reac
 ));
 FeatureCard.displayName = 'FeatureCard';
 
-const VolumeCard = React.memo(({ 
-  avg20DayVolume, 
-  todayVolumePercentage, 
-  estimatedTodayVolume,
-  marketStatus
-}: { 
+
+const VolumeCard = React.memo(({ avg20DayVolume, todayVolumePercentage, estimatedTodayVolume, marketStatus }: { 
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
@@ -250,57 +228,43 @@ const VolumeCard = React.memo(({
     if (volume >= 1000) return `${(volume / 1000).toFixed(1)}K`;
     return volume.toString();
   };
-
   const getPercentageColor = (percentage: number) => {
     if (percentage > 100) return 'text-green-400';
     if (percentage > 75) return 'text-yellow-400';
     if (percentage > 50) return 'text-orange-400';
     return 'text-red-400';
   };
-  
   return (
     <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
       <div className="flex items-center justify-center text-sm text-gray-400">
         <BarChart size={14} className="mr-1.5" />
         <span>Volume Analysis</span>
       </div>
-      
-      {avg20DayVolume !== undefined && (
+      {typeof avg20DayVolume === 'number' ? (
         <p className="text-lg font-semibold text-white mt-2">
           20D Avg: {formatVolume(avg20DayVolume)}
         </p>
+      ) : (
+        <p className="text-gray-500 text-sm mt-2">Avg volume not available</p>
       )}
-      
-      {todayVolumePercentage !== undefined && marketStatus === 'OPEN' && (
+      {typeof todayVolumePercentage === 'number' && marketStatus === 'OPEN' && (
         <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-1`}>
           {todayVolumePercentage.toFixed(1)}% of Avg
         </p>
       )}
-      
-      {estimatedTodayVolume !== undefined && marketStatus === 'OPEN' && (
+      {typeof estimatedTodayVolume === 'number' && marketStatus === 'OPEN' && (
         <p className="text-md text-gray-300 mt-1">
           Est. Today: {formatVolume(estimatedTodayVolume)}
         </p>
-      )}
-      
-      {marketStatus !== 'OPEN' && (
-        <p className="text-yellow-400 text-sm mt-2">Data from previous session</p>
       )}
     </div>
   );
 });
 VolumeCard.displayName = 'VolumeCard';
 
-const PCRStatCard = React.memo(({ 
-  title, 
-  value, 
-  marketStatus,
-  sentiment,
-  sentimentColor 
-}: { 
+const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: { 
   title: string; 
   value: number;
-  marketStatus: MarketStatus;
   sentiment?: string; 
   sentimentColor?: string; 
 }) => (
@@ -319,9 +283,6 @@ const PCRStatCard = React.memo(({
     <p className={`text-3xl font-bold text-white`}>{value.toFixed(2)}</p>
     {sentiment && sentimentColor && (
       <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
-    )}
-    {marketStatus !== 'OPEN' && (
-      <p className="text-yellow-400 text-xs mt-1">Data from previous close</p>
     )}
   </div>
 ));
@@ -352,9 +313,9 @@ export default function Home() {
     if (selectedSymbol) localStorage.setItem('selectedSymbol', selectedSymbol); 
   }, [selectedSymbol]);
   
-  const addError = useCallback((message: string, type: AppError['type'] = 'UNKNOWN') => { 
+  const addError = useCallback((message: string, type: string = 'UNKNOWN') => { 
     console.error(`Error [${type}]:`, message); 
-    setErrors(prev => [{ message, type, timestamp: new Date() }, ...prev]); 
+    setErrors(prev => [{ message, type, timestamp: new Date() } as AppError, ...prev]); 
   }, []);
 
   useEffect(() => { 
@@ -399,35 +360,38 @@ export default function Home() {
   useEffect(() => {
     const checkMarketStatus = () => { 
       const now = new Date(); 
-      const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); 
-      const todayKey = `${istTime.getUTCFullYear()}-${String(istTime.getUTCMonth() + 1).padStart(2, '0')}-${String(istTime.getUTCDate()).padStart(2, '0')}`; 
+      const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      const day = istTime.getDay();
+      const hours = istTime.getHours();
+      const minutes = istTime.getMinutes();
       
-      if (marketHolidays2025.has(todayKey)) { 
+      const todayKey = `${istTime.getFullYear()}-${String(istTime.getMonth() + 1).padStart(2, '0')}-${String(istTime.getDate()).padStart(2, '0')}`;
+      
+      if (marketHolidays2025.has(todayKey)) {
         setMarketStatus('CLOSED'); 
         setMarketMessage(`Market closed for ${marketHolidaysWithNames[todayKey]}. Opens ${getNextWorkingDay(istTime)} at 9:15 AM`); 
         return; 
       } 
       
-      const day = istTime.getUTCDay(); 
-      if (day === 0 || day === 6) { 
+      if (day === 0 || day === 6) {
         setMarketStatus('CLOSED'); 
         setMarketMessage(`Market closed for weekend. Opens Monday at 9:15 AM`); 
         return; 
       } 
       
-      const timeInMinutes = istTime.getUTCHours() * 60 + istTime.getUTCMinutes(); 
+      const timeInMinutes = hours * 60 + minutes; 
       
-      if (timeInMinutes >= 540 && timeInMinutes < 555) {
+      if (timeInMinutes >= (9 * 60) && timeInMinutes < (9 * 60 + 15)) {
         setMarketStatus('PRE_MARKET');
-        setMarketMessage('Pre-market hours: Data from previous close. Live data available at 9:15 AM');
+        setMarketMessage('Pre-market hours. Live data available at 9:15 AM');
       }
-      else if (timeInMinutes >= 555 && timeInMinutes <= 930) {
+      else if (timeInMinutes >= (9 * 60 + 15) && timeInMinutes <= (15 * 60 + 30)) {
         setMarketStatus('OPEN');
         setMarketMessage('Market is open');
       }
       else {
         setMarketStatus('CLOSED');
-        setMarketMessage(`Market closed. Showing data from last trading session. Opens ${getNextMarketOpenTime(now)}`);
+        setMarketMessage(`Market closed. Opens ${getNextMarketOpenTime(now)}`);
       }
     };
 
@@ -442,8 +406,8 @@ export default function Home() {
           setSelectedSymbol(savedSymbol && data.includes(savedSymbol) ? savedSymbol : data.includes('NIFTY') ? 'NIFTY' : data[0]); 
         } 
       } catch (error) { 
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        addError(errorMessage === 'TOKEN_EXPIRED' ? 'API token has expired. Please contact support.' : errorMessage || "Could not load symbol list.", errorMessage === 'TOKEN_EXPIRED' ? 'TOKEN_EXPIRED' : 'NETWORK'); 
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        addError(errorMessage, 'NETWORK'); 
       } finally { 
         setLoadingState('IDLE'); 
       } 
@@ -453,19 +417,22 @@ export default function Home() {
     fetchSymbols(); 
     const interval = setInterval(checkMarketStatus, 60000); 
     return () => clearInterval(interval);
-  }, [fetchWithRetry, addError, getNextMarketOpenTime, selectedSymbol]);
+  }, [addError, getNextMarketOpenTime, selectedSymbol]);
 
   const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
+    if (!symbolToAnalyze) return;
     const currentTime = Date.now();
     if (lastRequestTime > 0 && currentTime - lastRequestTime < 10000) {
-      setCooldownMessage('Please wait 10 seconds before making another request.');
+      setCooldownMessage('Please wait 10 seconds before another request.');
       setTimeout(() => setCooldownMessage(''), 3000);
       return; 
     } 
     
-    if (!symbolToAnalyze) return; 
+    setIsLoading(true);
+    setLoadingState('ANALYZING');
     setApiError(''); 
     setCooldownMessage('');
+
     try { 
       const response = await fetchWithRetry('/api/analyze', { 
         method: 'POST', 
@@ -482,24 +449,22 @@ export default function Home() {
       setResults(data); 
       setLastRequestTime(currentTime); 
     } catch (error) { 
-      const errorMap: { [key: string]: { type: AppError['type']; message: string } } = { 
+      const errorMap: { [key: string]: { type: string; message: string } } = { 
         TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
         SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
       }; 
-      const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER' as const, message: error.message } : { type: 'UNKNOWN' as const, message: 'Unknown error occurred' };
+      const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER', message: error.message } : { type: 'UNKNOWN', message: 'Unknown error occurred' };
       setApiError(errorDetails.message); 
       addError(errorDetails.message, errorDetails.type); 
-    } 
+    } finally {
+        setIsLoading(false);
+        setLoadingState('IDLE');
+    }
   }, [lastRequestTime, fetchWithRetry, addError]);
 
   const handleAnalyze = useCallback(() => { 
     if (isLoading) return; 
-    setIsLoading(true); 
-    setLoadingState('ANALYZING'); 
-    performAnalysis(selectedSymbol).finally(() => { 
-      setIsLoading(false); 
-      setLoadingState('IDLE'); 
-    }); 
+    performAnalysis(selectedSymbol); 
   }, [selectedSymbol, isLoading, performAnalysis]);
 
   const handleRefreshCard = useCallback(() => { 
@@ -541,7 +506,7 @@ export default function Home() {
         </section>
 
         <section className="w-full max-w-2xl mx-auto p-6 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10">
-          {marketStatus !== 'UNKNOWN' && (
+           {marketStatus !== 'UNKNOWN' && (
             <div className="flex items-center justify-center mb-4 text-sm flex-col">
               <div className="flex items-center">
                 <Clock size={16} className="mr-2" />
@@ -581,17 +546,10 @@ export default function Home() {
         </section>
 
         <section id="results" className="mt-12 w-full max-w-6xl mx-auto min-h-[100px]">
-          {isLoading && loadingState === 'ANALYZING' && !results && (
+          {isLoading && !results && (
             <div className="flex flex-col items-center justify-center p-8">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div>
               <p className="text-brand-cyan text-lg">Querying the chain, please wait...</p>
-            </div>
-          )}
-          
-          {isLoading && loadingState === 'REFRESHING' && results && (
-            <div className="flex flex-col items-center justify-center p-4">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-cyan mb-2"></div>
-              <p className="text-brand-cyan text-sm">Refreshing data...</p>
             </div>
           )}
           
@@ -633,14 +591,12 @@ export default function Home() {
                 <PCRStatCard 
                   title="OI PCR Ratio" 
                   value={results.pcr} 
-                  marketStatus={marketStatus}
                   sentiment={oiPcrSentiment?.sentiment} 
                   sentimentColor={oiPcrSentiment?.color} 
                 />
                 <PCRStatCard 
                   title="Volume PCR" 
                   value={results.volumePcr} 
-                  marketStatus={marketStatus}
                   sentiment={volumePcrSentiment?.sentiment} 
                   sentimentColor={volumePcrSentiment?.color} 
                 />
@@ -676,8 +632,8 @@ export default function Home() {
         <section className="w-full max-w-2xl mx-auto mt-24 p-8 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10">
           <h2 className="text-3xl font-bold text-center mb-6">Get In Touch</h2>
           <form className="flex flex-col gap-4">
-            <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1.2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
-            <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1.2 text-gray-500"/><input type="email" placeholder="Your Email" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
+            <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
+            <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="email" placeholder="Your Email" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
             <textarea placeholder="Your Message" rows={4} className="p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan"></textarea>
             <button type="submit" className="bg-brand-cyan hover:bg-cyan-5 text-brand-dark font-bold py-3 px-6 rounded-lg transition-all duration-300">Send Message</button>
           </form>
