@@ -1,4 +1,4 @@
-// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts
+// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts.
 
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
@@ -44,11 +44,11 @@ const specialPsychologicalLevels: Record<string, number[]> = {
   'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
 };
 
+
 const redis = createClient({ url: process.env.REDIS_URL });
 redis.connect().catch(console.error);
 
 // --- HELPER FUNCTIONS ---
-
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await redis.get('volume_history');
@@ -96,50 +96,24 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
 }
 
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
-  if (!historicalData || historicalData.length === 0) return {};
-  
-  const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(-20);
+  if (!historicalData.length) return {};
+  const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(0, 20);
   if (recentData.length === 0) return {};
-  
   const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
   const avg20DayVolume = totalVolume / recentData.length;
-
   let todayVolumePercentage = 0, estimatedTodayVolume = 0;
-
-  if (currentVolume && currentVolume > 0 && avg20DayVolume > 0) {
-    const nowInIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const hoursIST = nowInIST.getHours();
-    const minutesIST = nowInIST.getMinutes();
-
-    const marketOpenTime = 9 * 60 + 15;
-    const marketCloseTime = 15 * 60 + 30;
-    const currentTimeInMinutes = hoursIST * 60 + minutesIST;
-
-    if (currentTimeInMinutes >= marketOpenTime && currentTimeInMinutes <= marketCloseTime) {
-        
-        const totalMarketMinutes = marketCloseTime - marketOpenTime;
-        const minutesPassed = currentTimeInMinutes - marketOpenTime;
-        const marketProgressPercent = minutesPassed / totalMarketMinutes;
-
-        const expectedVolumeSoFar = avg20DayVolume * marketProgressPercent;
-
-        if (expectedVolumeSoFar > 0) {
-          todayVolumePercentage = (currentVolume / expectedVolumeSoFar) * 100;
-        }
-
-        if (marketProgressPercent > 0) {
-          estimatedTodayVolume = currentVolume / marketProgressPercent;
-        }
-    }
+  if (currentVolume && currentVolume > 0) {
+    const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
+    const expectedDailyVolume = avg20DayVolume * (marketProgress / 6.25);
+    todayVolumePercentage = (currentVolume / expectedDailyVolume) * 100;
+    estimatedTodayVolume = currentVolume * (6.25 / marketProgress);
   }
-
   return {
     avg20DayVolume: Math.round(avg20DayVolume),
     todayVolumePercentage: parseFloat(todayVolumePercentage.toFixed(1)),
     estimatedTodayVolume: Math.round(estimatedTodayVolume)
   };
 }
-
 
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
   const candidates: SupportResistanceLevel[] = [];
@@ -238,12 +212,12 @@ function getFinalLevels(
     }
   };
 
-  findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(level => addLevel(level, allSupports));
-  findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(level => addLevel(level, allResistances));
+  findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allSupports));
+  findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allResistances));
   
-  calculateSupportResistance(history, currentPrice).forEach(level => {
-    if (level.type === 'support') addLevel(level, allSupports);
-    else addLevel(level, allResistances);
+  calculateSupportResistance(history, currentPrice).forEach(l => {
+    if (l.type === 'support') addLevel(l, allSupports);
+    else addLevel(l, allResistances);
   });
   
   getPsychologicalLevels(symbol, currentPrice).forEach(price => {
