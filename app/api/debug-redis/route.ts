@@ -1,34 +1,40 @@
+// app/api/debug-redis/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from 'redis';
 
-const redis = createClient({
-  url: process.env.REDIS_URL,
-});
+async function getRedisData(key: string) {
+  const client = createClient({ url: process.env.REDIS_URL });
+  try {
+    await client.connect();
+    return await client.get(key);
+  } finally {
+    await client.quit();
+  }
+}
 
 export async function GET() {
   try {
-    await redis.connect();
-    const allKeys = await redis.keys('*');
-    const values: Record<string, any> = {};
+    const volumeHistory = await getRedisData('volume_history');
+    const parsedHistory = volumeHistory ? JSON.parse(volumeHistory) : {};
     
-    for (const key of allKeys) {
-      const value = await redis.get(key);
-      try {
-  values[key] = value ? JSON.parse(value) : value;
-} catch {
-  values[key] = value; // Keep as string if not JSON
-}
-    }
+    // Get first 3 symbols as sample
+    const sampleSymbols = Object.keys(parsedHistory).slice(0, 3);
+    const sampleData: any = {};
     
-    await redis.disconnect();
+    sampleSymbols.forEach(symbol => {
+      sampleData[symbol] = parsedHistory[symbol];
+    });
     
-    return NextResponse.json({ 
-      keys: allKeys,
-      values: values
+    return NextResponse.json({
+      success: true,
+      totalSymbols: Object.keys(parsedHistory).length,
+      allSymbols: Object.keys(parsedHistory),
+      sampleData: sampleData
     });
   } catch (error) {
     return NextResponse.json({ 
-      error: error instanceof Error ? error.message : 'Unknown error'
+      success: false, 
+      error: String(error) 
     }, { status: 500 });
   }
 }
