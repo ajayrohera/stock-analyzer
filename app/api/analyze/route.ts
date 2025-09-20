@@ -121,7 +121,11 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   return changePercent;
 }
 
-function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
+function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number): {
+  avg20DayVolume?: number;
+  todayVolumePercentage?: number;
+  estimatedTodayVolume?: number;
+} {
   console.log('📊 calculateVolumeMetrics called with:', {
     historicalDataLength: historicalData.length,
     currentVolume: currentVolume
@@ -145,23 +149,29 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   
   console.log('📊 Calculated 20-day avg:', avg20DayVolume);
   
-  let todayVolumePercentage = 0, estimatedTodayVolume = 0;
+  // Always return at least the 20-day average, even when market is closed
+  const result: {
+    avg20DayVolume?: number;
+    todayVolumePercentage?: number;
+    estimatedTodayVolume?: number;
+  } = {
+    avg20DayVolume: Math.round(avg20DayVolume),
+    todayVolumePercentage: 0, // Default to 0 when market closed
+    estimatedTodayVolume: 0   // Default to 0 when market closed
+  };
+  
   if (currentVolume && currentVolume > 0) {
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
     const expectedDailyVolume = avg20DayVolume * (marketProgress / 6.25);
-    todayVolumePercentage = (currentVolume / expectedDailyVolume) * 100;
-    estimatedTodayVolume = currentVolume * (6.25 / marketProgress);
+    result.todayVolumePercentage = parseFloat((currentVolume / expectedDailyVolume * 100).toFixed(1));
+    result.estimatedTodayVolume = Math.round(currentVolume * (6.25 / marketProgress));
     
-    console.log('📊 Market progress calc:', {marketProgress, expectedDailyVolume, todayVolumePercentage, estimatedTodayVolume});
+    console.log('📊 Market progress calc:', {marketProgress, expectedDailyVolume, todayVolumePercentage: result.todayVolumePercentage, estimatedTodayVolume: result.estimatedTodayVolume});
   } else {
-    console.log('📊 No current volume data available');
+    console.log('📊 No current volume data available - returning 20-day average only');
   }
   
-  return {
-    avg20DayVolume: Math.round(avg20DayVolume),
-    todayVolumePercentage: parseFloat(todayVolumePercentage.toFixed(1)),
-    estimatedTodayVolume: Math.round(estimatedTodayVolume)
-  };
+  return result;
 }
 
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
