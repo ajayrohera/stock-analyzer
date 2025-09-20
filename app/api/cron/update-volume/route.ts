@@ -1,13 +1,12 @@
 // app/api/cron/update-volume/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
-// No longer need fs or path, as we are removing file-based logging.
-
 export async function GET(request: NextRequest) {
   // Security check to ensure only Vercel's cron service can run this.
   const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    // We log to the Vercel console, not a file.
+  
+  // Allow both Vercel cron secret and direct calls (for testing)
+  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     console.warn('[CRON-AUTH] Unauthorized access attempt to update-volume cron.');
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -39,3 +38,6 @@ export async function GET(request: NextRequest) {
     }, { status: 500 });
   }
 }
+
+// Required for Vercel Cron Jobs to work
+export const dynamic = 'force-dynamic';

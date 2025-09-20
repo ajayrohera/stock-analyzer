@@ -1,5 +1,3 @@
-// This is the final, complete, and unabbreviated code for app/api/analyze/route.ts.
-
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { KiteConnect } from 'kiteconnect';
@@ -44,14 +42,20 @@ const specialPsychologicalLevels: Record<string, number[]> = {
   'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
 };
 
-
-const redis = createClient({ url: process.env.REDIS_URL });
-redis.connect().catch(console.error);
+async function getRedisData(key: string) {
+  const client = createClient({ url: process.env.REDIS_URL });
+  try {
+    await client.connect();
+    return await client.get(key);
+  } finally {
+    await client.quit();
+  }
+}
 
 // --- HELPER FUNCTIONS ---
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
-    const historyData = await redis.get('volume_history');
+    const historyData = await getRedisData('volume_history');
     if (!historyData) return [];
     const history = JSON.parse(historyData as string);
     return history[symbol.toUpperCase()] || [];
@@ -194,7 +198,6 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   return levels;
 }
 
-// === FINAL FIX IS HERE === The typo 'l' has been corrected.
 function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -206,7 +209,6 @@ function getFinalLevels(
   const allResistances: SupportResistanceLevel[] = [];
   
   const addLevel = (levelToAdd: SupportResistanceLevel, list: SupportResistanceLevel[]) => {
-    // Corrected variable name from 'l' to 'existingLevel'
     if (!list.some(existingLevel => existingLevel.price === levelToAdd.price)) {
       list.push(levelToAdd);
     }
@@ -234,7 +236,6 @@ function getFinalLevels(
     resistances: allResistances.slice(0, 2)
   };
 }
-
 
 function calculateSmartSentiment(
   pcr: number,
@@ -293,7 +294,6 @@ const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
     return 'CLOSED';
 };
 
-
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
   try {
@@ -324,8 +324,7 @@ export async function POST(request: Request) {
     if (!row || !row[1]) return NextResponse.json({ error: `TradingSymbol for '${displayName}' not found.` }, { status: 404 }); 
     const tradingSymbol = row[1];
 
-
-    const tokenData = await redis.get('kite_token');
+    const tokenData = await getRedisData('kite_token');
     if (!tokenData) return NextResponse.json({ error: 'Kite token not found.' }, { status: 401 });
 
     const kc = new KiteConnect({ api_key: apiKey });
@@ -393,7 +392,7 @@ export async function POST(request: Request) {
 
     const marketStatus = getMarketStatus();
     if (marketStatus === 'CLOSED') {
-        const dailyDataStr = await redis.get('daily_sentiment_data');
+        const dailyDataStr = await getRedisData('daily_sentiment_data');
         if (dailyDataStr) {
             const dailyData = JSON.parse(dailyDataStr);
             const symbolData = dailyData[displayName.toUpperCase()];
