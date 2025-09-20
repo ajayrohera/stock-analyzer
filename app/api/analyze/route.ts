@@ -56,9 +56,21 @@ async function getRedisData(key: string) {
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await getRedisData('volume_history');
-    if (!historyData) return [];
-    const history = JSON.parse(historyData as string);
-    return history[symbol.toUpperCase()] || [];
+    if (!historyData) {
+      console.log('❌ No volume_history data found in Redis');
+      return [];
+    }
+    
+    const history = JSON.parse(historyData);
+    const symbolData = history[symbol.toUpperCase()] || [];
+    
+    console.log(`📊 Historical data for ${symbol}:`, {
+      found: symbolData.length > 0,
+      entries: symbolData.length,
+      latest: symbolData.length > 0 ? symbolData[symbolData.length - 1] : null
+    });
+    
+    return symbolData;
   } catch (error) { 
     console.error('Error in getHistoricalData:', error); 
     return []; 
@@ -84,34 +96,67 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
 }
 
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
+  console.log(`📈 Calculating change percent for price: ${currentPrice}, historical entries: ${historicalData.length}`);
+  
   if (!historicalData || historicalData.length < 2 || !currentPrice) {
+    console.log('⚠️ Insufficient data for change calculation');
     return 0;
   }
+  
   const todayDateString = new Date().toISOString().split('T')[0];
   const previousDayEntry = historicalData
     .filter(entry => entry.date !== todayDateString)
-    .sort((a, b) => b.timestamp - a.timestamp)
-    [0];
+    .sort((a, b) => b.timestamp - a.timestamp)[0];
+  
   if (!previousDayEntry || !previousDayEntry.lastPrice) {
+    console.log('⚠️ No previous day data found');
     return 0;
   }
+  
   const previousClose = previousDayEntry.lastPrice;
-  return ((currentPrice - previousClose) / previousClose) * 100;
+  const changePercent = ((currentPrice - previousClose) / previousClose) * 100;
+  
+  console.log(`📊 Change calculation: ${currentPrice} - ${previousClose} = ${changePercent.toFixed(2)}%`);
+  
+  return changePercent;
 }
 
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number) {
-  if (!historicalData.length) return {};
+  console.log('📊 calculateVolumeMetrics called with:', {
+    historicalDataLength: historicalData.length,
+    currentVolume: currentVolume
+  });
+  
+  if (!historicalData.length) {
+    console.log('❌ No historical data available');
+    return {};
+  }
+  
   const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(0, 20);
-  if (recentData.length === 0) return {};
+  console.log('📊 Recent data with volume:', recentData.length, 'entries');
+  
+  if (recentData.length === 0) {
+    console.log('❌ No recent data with volume > 0');
+    return {};
+  }
+  
   const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
   const avg20DayVolume = totalVolume / recentData.length;
+  
+  console.log('📊 Calculated 20-day avg:', avg20DayVolume);
+  
   let todayVolumePercentage = 0, estimatedTodayVolume = 0;
   if (currentVolume && currentVolume > 0) {
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
     const expectedDailyVolume = avg20DayVolume * (marketProgress / 6.25);
     todayVolumePercentage = (currentVolume / expectedDailyVolume) * 100;
     estimatedTodayVolume = currentVolume * (6.25 / marketProgress);
+    
+    console.log('📊 Market progress calc:', {marketProgress, expectedDailyVolume, todayVolumePercentage, estimatedTodayVolume});
+  } else {
+    console.log('📊 No current volume data available');
   }
+  
   return {
     avg20DayVolume: Math.round(avg20DayVolume),
     todayVolumePercentage: parseFloat(todayVolumePercentage.toFixed(1)),
@@ -428,6 +473,16 @@ export async function POST(request: Request) {
     }
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+
+    // Add debug code before returning the response
+    console.log('🔍 VOLUME ANALYSIS DEBUG:');
+    console.log('Market status:', marketStatus);
+    console.log('Historical data entries:', historicalData.length);
+    console.log('Current volume:', currentVolume);
+    console.log('Volume metrics:', volumeMetrics);
+    console.log('20-day avg volume:', volumeMetrics.avg20DayVolume);
+    console.log('Today volume %:', volumeMetrics.todayVolumePercentage);
+    console.log('Estimated volume:', volumeMetrics.estimatedTodayVolume);
 
     const responseData = {
         symbol: displayName.toUpperCase(),
