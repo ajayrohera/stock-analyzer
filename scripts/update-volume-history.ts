@@ -11,6 +11,7 @@ dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 // Helper function to get all symbols from Google Sheets
 async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string }[]> {
   try {
+    console.log('🔍 Fetching symbols from Google Sheets...');
     const auth = new google.auth.GoogleAuth({
       credentials: {
         type: 'service_account',
@@ -30,11 +31,17 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
     });
 
     const rows = response.data.values;
-    if (!rows || rows.length === 0) return [];
+    if (!rows || rows.length === 0) {
+      console.log('⚠️ No rows found in Google Sheets');
+      return [];
+    }
     
-    return rows
+    const symbols = rows
       .map(row => ({ displayName: row[0], tradingSymbol: row[1] }))
       .filter(s => s.displayName && s.tradingSymbol);
+
+    console.log(`✅ Found ${symbols.length} symbols in Google Sheets`);
+    return symbols;
 
   } catch (error) {
     console.error('❌ Error fetching symbols from Google Sheets:', error);
@@ -43,25 +50,26 @@ async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: st
   }
 }
 
-
 // --- MAIN FUNCTION ---
 async function updateVolumeHistory() {
-  console.log('--- Starting Volume History Update ---');
+  console.log('🔄 --- Starting Volume History Update ---');
   
   const redisClient = createClient({ url: process.env.REDIS_URL });
   
   try {
     // 1. Connect to Redis
+    console.log('🔌 Attempting to connect to Redis...');
     await redisClient.connect();
     console.log('✅ Connected to Redis');
-
-    console.log('Redis connection status:', redisClient.isOpen);
+    console.log('🔍 REDIS CONNECTION DEBUG - isOpen:', redisClient.isOpen);
+    console.log('🔍 REDIS URL:', process.env.REDIS_URL ? 'Set' : 'Not set');
 
     // 2. Get API Key and Access Token
     const apiKey = process.env.KITE_API_KEY;
     if (!apiKey) throw new Error('KITE_API_KEY is not set in environment variables.');
 
     const tokenDataString = await redisClient.get('kite_token');
+    console.log('🔍 Kite token exists:', !!tokenDataString);
     if (!tokenDataString) {
       throw new Error('No Kite token found in Redis. Please run the daily manual login script first.');
     }
@@ -78,20 +86,14 @@ async function updateVolumeHistory() {
     // 4. Get all symbols to track
     const symbols = await getAllSymbols();
     if (symbols.length === 0) throw new Error('No symbols found in Google Sheet.');
-    console.log(`📊 Found ${symbols.length} symbols to update.`);
+    console.log(`📊 Found ${symbols.length} symbols to update:`, symbols.map(s => s.displayName));
 
     // 5. Fetch existing history from Redis
     const existingHistoryStr = await redisClient.get('volume_history');
-    console.log('Existing history from Redis:', existingHistoryStr ? 'Exists' : 'Null/Empty');
-    if (existingHistoryStr) {
-    try {
-        const parsedHistory = JSON.parse(existingHistoryStr);
-        console.log('Number of symbols in history:', Object.keys(parsedHistory).length);
-    } catch (e) {
-        console.log('Error parsing existing history:', e);
-    }
-    }
+    console.log('📦 EXISTING HISTORY DEBUG - raw data:', existingHistoryStr ? existingHistoryStr.substring(0, 100) + '...' : 'NULL');
+    
     const history: Record<string, any[]> = existingHistoryStr ? JSON.parse(existingHistoryStr) : {};
+    console.log(`📊 Existing history contains ${Object.keys(history).length} symbols`);
 
     // 6. Fetch latest data for all symbols
     const today = new Date().toISOString().split('T')[0];
@@ -104,9 +106,9 @@ async function updateVolumeHistory() {
       return `${exchange}:${s.tradingSymbol}`;
     });
 
+    console.log(`📡 Fetching quotes for ${instrumentIdentifiers.length} instruments...`);
     let quoteData;
     try {
-      console.log(`📡 Fetching quotes for ${instrumentIdentifiers.length} instruments...`);
       quoteData = await kc.getQuote(instrumentIdentifiers);
       console.log('✅ Successfully received quote data from API.');
     } catch (apiError) {
@@ -132,10 +134,8 @@ async function updateVolumeHistory() {
             timestamp: timestamp,
           };
 
-          // === THE FIX IS HERE ===
           // Always use a consistent, uppercase key for storing in the history object.
           const key = symbol.displayName.toUpperCase();
-          // =======================
 
           if (!history[key]) {
             history[key] = [];
@@ -149,7 +149,7 @@ async function updateVolumeHistory() {
           history[key] = history[key].slice(-30);
           
           updatedCount++;
-          // No need to log every single success, it clutters the logs.
+          console.log(`✅ Updated ${symbol.displayName}: Volume=${data.volume}, Price=${data.last_price}`);
         } else {
           console.warn(`  ⚠️ No volume or price data for ${symbol.displayName}`);
           failedCount++;
@@ -159,14 +159,16 @@ async function updateVolumeHistory() {
         failedCount++;
       }
     }
-
-    console.log('About to save history with symbols:', Object.keys(history));
-    console.log('Sample data for first symbol:', history[Object.keys(history)[0]]);
     
     // 7. Save updated history back to Redis
+    console.log(`💾 About to save history with ${Object.keys(history).length} symbols`);
+    if (Object.keys(history).length > 0) {
+      console.log('📊 Sample data for first symbol:', history[Object.keys(history)[0]]);
+    }
+    
     await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
     
-    console.log(`\n📈 Successfully updated volume history for ${updatedCount}/${symbols.length} symbols.`);
+    console.log(`📈 Successfully updated volume history for ${updatedCount}/${symbols.length} symbols.`);
     if (failedCount > 0) {
       console.log(`❌ Failed to update ${failedCount} symbols.`);
     }

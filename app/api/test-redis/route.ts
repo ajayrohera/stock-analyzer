@@ -3,29 +3,22 @@ import { NextResponse } from 'next/server';
 import { createClient } from 'redis';
 
 export async function GET() {
-  let redis;
+  const redisClient = createClient({ url: process.env.REDIS_URL });
+  
   try {
-    // Use Redis client directly (NOT @vercel/kv)
-    redis = createClient({
-      url: process.env.REDIS_URL,
+    await redisClient.connect();
+    const volumeHistory = await redisClient.get('volume_history');
+    const kiteToken = await redisClient.get('kite_token');
+    
+    return NextResponse.json({
+      volumeHistoryExists: !!volumeHistory,
+      volumeHistoryLength: volumeHistory ? Object.keys(JSON.parse(volumeHistory)).length : 0,
+      kiteTokenExists: !!kiteToken,
+      redisConnected: redisClient.isOpen
     });
-    
-    await redis.connect();
-    const result = await redis.ping();
-    
-    return NextResponse.json({ 
-      status: 'Redis connected successfully',
-      ping: result 
-    });
-    
   } catch (error) {
-    return NextResponse.json({ 
-      status: 'Redis connection failed',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+    return NextResponse.json({ error: String(error) }, { status: 500 });
   } finally {
-    if (redis) {
-      await redis.disconnect();
-    }
+    await redisClient.quit();
   }
 }
