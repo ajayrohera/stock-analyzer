@@ -122,18 +122,25 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
 }
 
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number): {
-  avg20DayVolume?: number;
-  todayVolumePercentage?: number;
-  estimatedTodayVolume?: number;
+  avg20DayVolume: number;
+  todayVolumePercentage: number;
+  estimatedTodayVolume: number;
 } {
   console.log('📊 calculateVolumeMetrics called with:', {
     historicalDataLength: historicalData.length,
     currentVolume: currentVolume
   });
   
+  // Default values
+  let result = {
+    avg20DayVolume: 0,
+    todayVolumePercentage: 0,
+    estimatedTodayVolume: 0
+  };
+  
   if (!historicalData.length) {
     console.log('❌ No historical data available');
-    return {};
+    return result;
   }
   
   const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(0, 20);
@@ -141,7 +148,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   
   if (recentData.length === 0) {
     console.log('❌ No recent data with volume > 0');
-    return {};
+    return result;
   }
   
   const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
@@ -149,16 +156,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   
   console.log('📊 Calculated 20-day avg:', avg20DayVolume);
   
-  // Always return at least the 20-day average, even when market is closed
-  const result: {
-    avg20DayVolume?: number;
-    todayVolumePercentage?: number;
-    estimatedTodayVolume?: number;
-  } = {
-    avg20DayVolume: Math.round(avg20DayVolume),
-    todayVolumePercentage: 0, // Default to 0 when market closed
-    estimatedTodayVolume: 0   // Default to 0 when market closed
-  };
+  result.avg20DayVolume = Math.round(avg20DayVolume);
   
   if (currentVolume && currentVolume > 0) {
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
@@ -168,7 +166,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     
     console.log('📊 Market progress calc:', {marketProgress, expectedDailyVolume, todayVolumePercentage: result.todayVolumePercentage, estimatedTodayVolume: result.estimatedTodayVolume});
   } else {
-    console.log('📊 No current volume data available - returning 20-day average only');
+    console.log('📊 No current volume data available - returning default values');
   }
   
   return result;
@@ -414,7 +412,18 @@ export async function POST(request: Request) {
     
     const historicalData = await getHistoricalData(displayName);
     const changePercent = calculateChangePercent(ltp, historicalData);
+    
+    console.log('🔍 BEFORE volumeMetrics calculation');
+    console.log('Historical data length:', historicalData.length);
+    console.log('Current volume:', currentVolume);
+    
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
+    
+    console.log('🔍 AFTER volumeMetrics calculation');
+    console.log('Volume metrics result:', volumeMetrics);
+    console.log('Has avg20DayVolume:', 'avg20DayVolume' in volumeMetrics);
+    console.log('Has todayVolumePercentage:', 'todayVolumePercentage' in volumeMetrics);
+    console.log('Has estimatedTodayVolume:', 'estimatedTodayVolume' in volumeMetrics);
 
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
@@ -499,7 +508,9 @@ export async function POST(request: Request) {
         ltp: ltp,
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
         changePercent: parseFloat(changePercent.toFixed(2)),
-        ...volumeMetrics,
+        avg20DayVolume: volumeMetrics.avg20DayVolume,
+        todayVolumePercentage: volumeMetrics.todayVolumePercentage,
+        estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
         expiryDate: formattedExpiry,
         sentiment,
         pcr: parseFloat(pcr.toFixed(2)),
