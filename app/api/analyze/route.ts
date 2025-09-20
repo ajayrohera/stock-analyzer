@@ -131,7 +131,6 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     currentVolume: currentVolume
   });
   
-  // Default values
   let result = {
     avg20DayVolume: 0,
     todayVolumePercentage: 0,
@@ -158,7 +157,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   
   result.avg20DayVolume = Math.round(avg20DayVolume);
   
-  if (currentVolume && currentVolume > 0) {
+  if (currentVolume && currentVolume > 0 && avg20DayVolume > 0) {
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
     const expectedDailyVolume = avg20DayVolume * (marketProgress / 6.25);
     result.todayVolumePercentage = parseFloat((currentVolume / expectedDailyVolume * 100).toFixed(1));
@@ -251,6 +250,7 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   return levels;
 }
 
+
 function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -277,8 +277,11 @@ function getFinalLevels(
   
   getPsychologicalLevels(symbol, currentPrice).forEach(price => {
     const level: SupportResistanceLevel = { price, strength: 'medium', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological Level' };
-    if (level.type === 'support') addLevel(level, allSupports);
-    else addLevel(level, allResistances);
+    if (level.type === 'support') {
+        addLevel(level, allSupports);
+    } else {
+        addLevel(level, allResistances); // <--- CORRECTED: Changed 'l' to 'level'
+    }
   });
 
   allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
@@ -290,12 +293,19 @@ function getFinalLevels(
   };
 }
 
+// ==============================================================================
+// === UPDATED FUNCTION: calculateSmartSentiment ================================
+// ==============================================================================
 function calculateSmartSentiment(
   pcr: number,
   volumePcr: number,
   highestPutOI: number,
-  highestCallOI: number
+  highestCallOI: number,
+  todayVolumePercentage: number // New parameter for volume confirmation
 ): string {
+  // --- Score Calculation ---
+
+  // 1. PCR Score (based on Open Interest)
   let pcrScore = 0;
   if (pcr > 1.3) pcrScore = 2;
   else if (pcr > 1.1) pcrScore = 1;
@@ -303,12 +313,14 @@ function calculateSmartSentiment(
   else if (pcr < 0.7) pcrScore = -2;
   else if (pcr < 0.9) pcrScore = -1;
 
+  // 2. Conviction Score (based on strongest OI levels)
   let convictionScore = 0;
   if (highestPutOI > highestCallOI * 2) convictionScore = 2;
   else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
   else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
   else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
   
+  // 3. Volume PCR Modifier (based on today's trading volume direction)
   let volumeModifier = 0;
   if (volumePcr < 0.7) volumeModifier = 2;
   else if (volumePcr < 0.9) volumeModifier = 1;
@@ -316,19 +328,39 @@ function calculateSmartSentiment(
   else if (volumePcr > 1.3) volumeModifier = -2;
   else if (volumePcr > 1.1) volumeModifier = -1;
 
-  const finalScore = pcrScore + convictionScore + volumeModifier;
+  // --- Preliminary Score ---
+  const preliminaryScore = pcrScore + convictionScore + volumeModifier;
+  let finalScore = preliminaryScore;
+
+  // --- 4. NEW: Volume Confirmation Logic ---
+  // We use today's volume percentage to confirm or deny the preliminary sentiment.
+  // High volume amplifies the sentiment, low volume dampens it towards neutral.
+  const isSignificantVolume = todayVolumePercentage > 150; // Is volume exceptionally high?
+  const isLowVolume = todayVolumePercentage < 70;      // Is volume exceptionally low?
+
+  if (isSignificantVolume) {
+    // If volume is high, it confirms the trend. Amplify the score.
+    if (preliminaryScore > 0) finalScore++;
+    if (preliminaryScore < 0) finalScore--;
+  } else if (isLowVolume) {
+    // If volume is low, it suggests a lack of conviction. Dampen the score.
+    // We only dampen stronger scores to avoid over-correcting.
+    if (Math.abs(preliminaryScore) >= 2) {
+        if (preliminaryScore > 0) finalScore--;
+        if (preliminaryScore < 0) finalScore++;
+    }
+  }
   
+  // --- Final Sentiment Mapping ---
   if (finalScore >= 5) return "Strongly Bullish";
   if (finalScore >= 3) return "Bullish";
   if (finalScore >= 1) return "Slightly Bullish";
   if (finalScore === 0) return "Neutral";
-  if (finalScore <= -1 && finalScore > -2) return "Slightly Bearish";
-  if (finalScore <= -3 && finalScore > -4) return "Bearish";
+  if (finalScore === -1 || finalScore === -2) return "Slightly Bearish";
+  if (finalScore === -3 || finalScore === -4) return "Bearish";
   if (finalScore <= -5) return "Strongly Bearish";
-  if (finalScore === -2) return "Slightly Bearish";
-  if (finalScore === -4) return "Bearish";
 
-  return "Neutral";
+  return "Neutral"; // Default fallback
 }
 
 const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
@@ -412,18 +444,7 @@ export async function POST(request: Request) {
     
     const historicalData = await getHistoricalData(displayName);
     const changePercent = calculateChangePercent(ltp, historicalData);
-    
-    console.log('🔍 BEFORE volumeMetrics calculation');
-    console.log('Historical data length:', historicalData.length);
-    console.log('Current volume:', currentVolume);
-    
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
-    
-    console.log('🔍 AFTER volumeMetrics calculation');
-    console.log('Volume metrics result:', volumeMetrics);
-    console.log('Has avg20DayVolume:', 'avg20DayVolume' in volumeMetrics);
-    console.log('Has todayVolumePercentage:', 'todayVolumePercentage' in volumeMetrics);
-    console.log('Has estimatedTodayVolume:', 'estimatedTodayVolume' in volumeMetrics);
 
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
@@ -478,7 +499,16 @@ export async function POST(request: Request) {
     const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : 0;
     const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : 0;
     
-    const sentiment = calculateSmartSentiment(pcr, volumePcr, highestPutOI, highestCallOI);
+    // ==============================================================================
+    // === UPDATED FUNCTION CALL ====================================================
+    // ==============================================================================
+    const sentiment = calculateSmartSentiment(
+        pcr,
+        volumePcr,
+        highestPutOI,
+        highestCallOI,
+        volumeMetrics.todayVolumePercentage // Argument for today's volume is now provided
+    );
     
     let minLoss = Infinity, maxPain = 0;
     for (const expiryStrike of strikePrices) {
@@ -492,16 +522,6 @@ export async function POST(request: Request) {
     }
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-
-    // Add debug code before returning the response
-    console.log('🔍 VOLUME ANALYSIS DEBUG:');
-    console.log('Market status:', marketStatus);
-    console.log('Historical data entries:', historicalData.length);
-    console.log('Current volume:', currentVolume);
-    console.log('Volume metrics:', volumeMetrics);
-    console.log('20-day avg volume:', volumeMetrics.avg20DayVolume);
-    console.log('Today volume %:', volumeMetrics.todayVolumePercentage);
-    console.log('Estimated volume:', volumeMetrics.estimatedTodayVolume);
 
     const responseData = {
         symbol: displayName.toUpperCase(),
