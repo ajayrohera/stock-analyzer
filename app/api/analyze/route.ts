@@ -273,8 +273,8 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
       
       // Determine strength based on volume
       let strength: 'weak' | 'medium' | 'strong' = 'weak';
-      if (newVolume > currentPrice * 1000) strength = 'medium';  // Adjust threshold as needed
-      if (newVolume > currentPrice * 5000) strength = 'strong';  // Adjust threshold as needed
+      if (newVolume > currentPrice * 1000) strength = 'medium';
+      if (newVolume > currentPrice * 5000) strength = 'strong';
       
       priceLevels.set(roundedPrice, {volume: newVolume, strength});
     }
@@ -282,7 +282,7 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   
   const sortedLevels = Array.from(priceLevels.entries())
     .sort((a, b) => b[1].volume - a[1].volume)
-    .slice(0, 10);
+    .slice(0, 15); // Get more levels to filter by distance
   
   console.log('🔍 Historical levels found:', sortedLevels.map(([price, data]) => 
     `${price} (vol: ${data.volume}, strength: ${data.strength})`
@@ -290,31 +290,36 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   
   sortedLevels.forEach(([price, data]) => {
     const distancePercent = Math.abs(price - currentPrice) / currentPrice * 100;
+    const isSupport = price < currentPrice;
     
-    // Different distance thresholds based on strength
+    // Same distance rules for both support and resistance
     let includeLevel = false;
     
     if (data.strength === 'strong' && distancePercent >= 0.5) {
-      includeLevel = true; // Strong support needs at least 0.5% distance
+      includeLevel = true; // Strong levels need at least 0.5% distance
     } else if (data.strength === 'medium' && distancePercent >= 1) {
-      includeLevel = true; // Medium support needs at least 1% distance  
+      includeLevel = true; // Medium levels need at least 1% distance  
     } else if (data.strength === 'weak' && distancePercent >= 5) {
-      includeLevel = true; // Weak support needs at least 5% distance
+      includeLevel = true; // Weak levels need at least 5% distance
     }
     
     if (includeLevel) {
       levels.push({ 
         price, 
         strength: data.strength, 
-        type: price < currentPrice ? 'support' : 'resistance', 
+        type: isSupport ? 'support' : 'resistance', 
         tooltip: `Historical Volume Level (${data.strength})` 
       });
+      console.log(`✅ Included ${price} as ${isSupport ? 'support' : 'resistance'} (${data.strength}, ${distancePercent.toFixed(1)}% away)`);
     } else {
-      console.log(`🔍 Excluded ${price} (${data.strength}) - too close: ${distancePercent.toFixed(1)}%`);
+      console.log(`❌ Excluded ${price} (${data.strength} ${isSupport ? 'support' : 'resistance'}) - too close: ${distancePercent.toFixed(1)}%`);
     }
   });
   
-  return levels;
+  // Sort by distance from current price
+  levels.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
+  
+  return levels.slice(0, 10); // Return top 10 closest valid levels
 }
 
 function getFinalLevels(
