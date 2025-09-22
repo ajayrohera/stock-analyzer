@@ -2,6 +2,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
+  // ADDED: Debug logging to track automatic vs manual runs
+  console.log('🕒 CRON EXECUTION DEBUG:', {
+    timestamp: new Date().toISOString(),
+    timeIST: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+    userAgent: request.headers.get('user-agent'),
+    referer: request.headers.get('referer'),
+    origin: request.headers.get('origin'),
+    viaCron: request.headers.get('user-agent')?.includes('cron') ? 'YES' : 'NO',
+    hasAuthHeader: !!request.headers.get('authorization')
+  });
+
   // Security check to ensure only Vercel's cron service can run this.
   const authHeader = request.headers.get('authorization');
   
@@ -23,7 +34,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ 
       success: true, 
       message: 'Volume history updated successfully',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      executedAt: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
     });
 
   } catch (error) {
