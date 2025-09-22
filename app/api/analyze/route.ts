@@ -262,27 +262,56 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   
   console.log('🔍 HISTORICAL SUPPORT/RESISTANCE CALCULATION:');
   const levels: SupportResistanceLevel[] = [];
-  const priceLevels = new Map<number, number>();
+  const priceLevels = new Map<number, {volume: number, strength: 'weak' | 'medium' | 'strong'}>();
   const priceRange = currentPrice * 0.20;
   
   history.forEach(entry => {
     if (entry.lastPrice && Math.abs(entry.lastPrice - currentPrice) <= priceRange) {
       const roundedPrice = Math.round(entry.lastPrice / 5) * 5;
-      const volume = priceLevels.get(roundedPrice) || 0;
-      priceLevels.set(roundedPrice, volume + (entry.totalVolume || 0));
+      const currentData = priceLevels.get(roundedPrice) || {volume: 0, strength: 'weak'};
+      const newVolume = currentData.volume + (entry.totalVolume || 0);
+      
+      // Determine strength based on volume
+      let strength: 'weak' | 'medium' | 'strong' = 'weak';
+      if (newVolume > currentPrice * 1000) strength = 'medium';  // Adjust threshold as needed
+      if (newVolume > currentPrice * 5000) strength = 'strong';  // Adjust threshold as needed
+      
+      priceLevels.set(roundedPrice, {volume: newVolume, strength});
     }
   });
   
-  const sortedLevels = Array.from(priceLevels.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  console.log('🔍 Historical levels found:', sortedLevels.map(([price, volume]) => `${price} (vol: ${volume})`));
+  const sortedLevels = Array.from(priceLevels.entries())
+    .sort((a, b) => b[1].volume - a[1].volume)
+    .slice(0, 10);
   
-  sortedLevels.forEach(([price]) => {
+  console.log('🔍 Historical levels found:', sortedLevels.map(([price, data]) => 
+    `${price} (vol: ${data.volume}, strength: ${data.strength})`
+  ));
+  
+  sortedLevels.forEach(([price, data]) => {
+    const distancePercent = Math.abs(price - currentPrice) / currentPrice * 100;
+    
+    // Different distance thresholds based on strength
+    let includeLevel = false;
+    
+    if (data.strength === 'strong' && distancePercent >= 0.5) {
+      includeLevel = true; // Strong support needs at least 0.5% distance
+    } else if (data.strength === 'medium' && distancePercent >= 1) {
+      includeLevel = true; // Medium support needs at least 1% distance  
+    } else if (data.strength === 'weak' && distancePercent >= 5) {
+      includeLevel = true; // Weak support needs at least 5% distance
+    }
+    
+    if (includeLevel) {
       levels.push({ 
         price, 
-        strength: 'weak', 
+        strength: data.strength, 
         type: price < currentPrice ? 'support' : 'resistance', 
-        tooltip: 'Historical Volume Level' 
+        tooltip: `Historical Volume Level (${data.strength})` 
       });
+    } else {
+      console.log(`🔍 Excluded ${price} (${data.strength}) - too close: ${distancePercent.toFixed(1)}%`);
+    }
   });
   
   return levels;
