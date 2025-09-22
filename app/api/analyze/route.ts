@@ -449,8 +449,19 @@ export async function POST(request: Request) {
     if (ltp === 0) return NextResponse.json({ error: `Could not fetch live price for '${tradingSymbol}'.` }, { status: 404 });
     
     const historicalData = await getHistoricalData(displayName);
+    console.log('🔍 ANALYSIS DEBUG - Historical data for', displayName, ':', {
+  length: historicalData.length,
+  sample: historicalData.slice(0, 3), // First 3 entries
+  hasData: historicalData.length > 0,
+  hasVolume: historicalData.filter(entry => entry.totalVolume > 0).length
+});
     const changePercent = calculateChangePercent(ltp, historicalData);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
+    console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
+  ...volumeMetrics,
+  hasAvg: volumeMetrics.avg20DayVolume > 0,
+  hasTodayPercent: volumeMetrics.todayVolumePercentage > 0
+});
 
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
