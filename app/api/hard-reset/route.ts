@@ -1,4 +1,4 @@
-// app/api/hard-reset/route.ts.
+// app/api/hard-reset/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from 'redis';
 
