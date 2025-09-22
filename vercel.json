@@ -13,7 +13,7 @@
   "crons": [
     {
       "path": "/api/cron/update-volume",
-      "schedule": "0 10 * * 1-5"
+      "schedule": "10 14 * * *"
     }
   ],
   "routes": [
