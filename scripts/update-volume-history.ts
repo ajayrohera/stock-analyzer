@@ -8,6 +8,23 @@ import path from 'path';
 // Load environment variables from the root .env.local
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
+// Add market status function
+const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
+    const now = new Date();
+    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const day = istTime.getDay();
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+    if (day > 0 && day < 6) {
+        if (hours > 9 || (hours === 9 && minutes >= 15)) {
+            if (hours < 15 || (hours === 15 && minutes <= 30)) {
+                return 'OPEN';
+            }
+        }
+    }
+    return 'CLOSED';
+};
+
 // Helper function to get all symbols from Google Sheets
 async function getAllSymbols(): Promise<{ displayName: string, tradingSymbol: string }[]> {
   try {
@@ -99,7 +116,7 @@ async function updateVolumeHistory() {
     const today = new Date().toISOString().split('T')[0];
     const timestamp = Date.now();
     let updatedCount = 0;
-    let failedCount = 0;
+    let skippedCount = 0;
 
     const instrumentIdentifiers = symbols.map(s => {
       const exchange = (s.displayName === 'NIFTY' || s.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
@@ -121,64 +138,69 @@ async function updateVolumeHistory() {
       throw new Error('Failed to fetch quote data from Kite API.');
     }
 
+    // 7. Check market status
+    const marketStatus = getMarketStatus();
+    console.log(`🏛️ Market status: ${marketStatus}`);
+
     for (const symbol of symbols) {
       try {
         const exchange = (symbol.displayName === 'NIFTY' || symbol.displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
         const data = quoteData[`${exchange}:${symbol.tradingSymbol}`];
 
         if (data && data.volume !== undefined && data.last_price !== undefined) {
-          const newEntry = {
-            date: today,
-            totalVolume: data.volume,
-            lastPrice: data.last_price,
-            timestamp: timestamp,
-          };
+          // UPDATED CRON JOB LOGIC: Only store data when market is CLOSED
+          if (marketStatus === 'CLOSED' && data.volume > 0) {
+            const newEntry = {
+              date: today,
+              totalVolume: data.volume,
+              lastPrice: data.last_price,
+              timestamp: timestamp,
+            };
 
-          // Always use a consistent, uppercase key for storing in the history object.
-          const key = symbol.displayName.toUpperCase();
+            const key = symbol.displayName.toUpperCase();
+            if (!history[key]) {
+              history[key] = [];
+            }
 
-          if (!history[key]) {
-            history[key] = [];
+            // Remove old entry for today to ensure data is fresh
+            history[key] = history[key].filter(entry => entry.date !== today);
+            history[key].push(newEntry);
+
+            // Keep only last 30 entries (approx. 1.5 months of trading days)
+            history[key] = history[key].slice(-30);
+            
+            updatedCount++;
+            console.log(`✅ Stored EOD data for ${symbol.displayName}: Volume=${data.volume}, Price=${data.last_price}`);
+          } else {
+            skippedCount++;
+            console.log(`⏸️ Skipped ${symbol.displayName} (market status: ${marketStatus}, volume: ${data.volume})`);
           }
-
-          // Remove old entry for today to ensure data is fresh
-          history[key] = history[key].filter(entry => entry.date !== today);
-          history[key].push(newEntry);
-
-          // Keep only last 30 entries (approx. 1.5 months of trading days)
-          history[key] = history[key].slice(-30);
-          
-          updatedCount++;
-          console.log(`✅ Updated ${symbol.displayName}: Volume=${data.volume}, Price=${data.last_price}`);
         } else {
           console.warn(`  ⚠️ No volume or price data for ${symbol.displayName}`);
-          failedCount++;
+          skippedCount++;
         }
       } catch (error) {
         console.error(`  ❌ Failed to process ${symbol.displayName}:`, error instanceof Error ? error.message : 'Unknown error');
-        failedCount++;
+        skippedCount++;
       }
     }
     
-    // 7. Save updated history back to Redis
-    console.log(`💾 About to save history with ${Object.keys(history).length} symbols`);
-    if (Object.keys(history).length > 0) {
-      console.log('📊 Sample data for first symbol:', history[Object.keys(history)[0]]);
+    // 8. Save updated history back to Redis only if we have changes
+    if (updatedCount > 0) {
+      console.log(`💾 Saving updated history with ${Object.keys(history).length} symbols`);
+      await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
+    } else {
+      console.log('💾 No updates to save (market open or no valid data)');
     }
     
-    await redisClient.setEx('volume_history', 90 * 24 * 60 * 60, JSON.stringify(history));
-    
-    console.log(`📈 Successfully updated volume history for ${updatedCount}/${symbols.length} symbols.`);
-    if (failedCount > 0) {
-      console.log(`❌ Failed to update ${failedCount} symbols.`);
-    }
+    console.log(`📈 Volume update completed. Updated: ${updatedCount}, Skipped: ${skippedCount}/${symbols.length} symbols.`);
     
   } catch (error) {
     console.error('❌ CRITICAL ERROR in volume update process:', error instanceof Error ? error.message : 'Unknown error');
     // Re-throw the error so the calling API route knows it failed
     throw error;
   } finally {
-    // 8. Cleanup Redis connection
+    // 9. Cleanup Redis connection
     if (redisClient.isOpen) {
       await redisClient.quit();
       console.log('🔌 Disconnected from Redis.');

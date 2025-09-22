@@ -131,6 +131,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     currentVolume: currentVolume
   });
   
+  // Default values
   let result = {
     avg20DayVolume: 0,
     todayVolumePercentage: 0,
@@ -142,22 +143,27 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     return result;
   }
   
-  const recentData = historicalData.filter(entry => entry.totalVolume > 0).slice(0, 20);
-  console.log('📊 Recent data with volume:', recentData.length, 'entries');
+  // EXCLUDE TODAY'S DATA for 20-day average calculation
+  const today = new Date().toISOString().split('T')[0];
+  const historicalDataExcludingToday = historicalData.filter(entry => entry.date !== today);
+  
+  const recentData = historicalDataExcludingToday.filter(entry => entry.totalVolume > 0).slice(0, 20);
+  console.log('📊 Recent data (excluding today) with volume:', recentData.length, 'entries');
   
   if (recentData.length === 0) {
-    console.log('❌ No recent data with volume > 0');
+    console.log('❌ No recent data with volume > 0 (excluding today)');
     return result;
   }
   
   const totalVolume = recentData.reduce((sum, entry) => sum + entry.totalVolume, 0);
   const avg20DayVolume = totalVolume / recentData.length;
   
-  console.log('📊 Calculated 20-day avg:', avg20DayVolume);
+  console.log('📊 Calculated 20-day avg (excluding today):', avg20DayVolume);
   
   result.avg20DayVolume = Math.round(avg20DayVolume);
   
-  if (currentVolume && currentVolume > 0 && avg20DayVolume > 0) {
+  // Only calculate today's metrics if market is open and we have current volume
+  if (currentVolume && currentVolume > 0) {
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
     const expectedDailyVolume = avg20DayVolume * (marketProgress / 6.25);
     result.todayVolumePercentage = parseFloat((currentVolume / expectedDailyVolume * 100).toFixed(1));
@@ -165,7 +171,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     
     console.log('📊 Market progress calc:', {marketProgress, expectedDailyVolume, todayVolumePercentage: result.todayVolumePercentage, estimatedTodayVolume: result.estimatedTodayVolume});
   } else {
-    console.log('📊 No current volume data available - returning default values');
+    console.log('📊 No current volume data available');
   }
   
   return result;
