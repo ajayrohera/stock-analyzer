@@ -206,13 +206,29 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
 }
 
 function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
+  console.log('🔍 OI SUPPORT CALCULATION DETAILS:');
+  console.log('CMP:', currentPrice);
+  
   const candidates: SupportResistanceLevel[] = [];
   for (const strike of allStrikes) {
     if (strike < currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
-      if (pe_oi < 30000 || ce_oi < 1000) continue;
       const oiRatio = pe_oi / ce_oi;
+      
+      // Debug strikes around 1390
+      if (strike >= 1380 && strike <= 1400) {
+        console.log(`Strike ${strike}: PE=${pe_oi}, CE=${ce_oi}, Ratio=${oiRatio.toFixed(2)}`);
+      }
+      
+      if (pe_oi < 30000 || ce_oi < 1000) {
+        if (strike >= 1380 && strike <= 1400) {
+          console.log(`  ❌ Skipped - PE<30k or CE<1k`);
+        }
+        continue;
+      }
+      
       if (oiRatio >= 1.3) {
+        console.log(`  ✅ OI SUPPORT CANDIDATE - Strike ${strike}, Ratio ${oiRatio.toFixed(2)}`);
         let strength: 'weak' | 'medium' | 'strong';
         let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
@@ -226,9 +242,15 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
             tooltip += ' | Weak';
         }
         candidates.push({ price: strike, strength, type: 'support', tooltip });
+      } else {
+        if (strike >= 1380 && strike <= 1400) {
+          console.log(`  ❌ Not OI support - Ratio ${oiRatio.toFixed(2)} < 1.3`);
+        }
       }
     }
   }
+  
+  console.log('🔍 OI Supports found:', candidates.map(c => `${c.price} (${c.strength})`));
   if (candidates.length === 0) return [];
   candidates.sort((a, b) => (optionsByStrike[b.price]?.pe_oi || 0) - (optionsByStrike[a.price]?.pe_oi || 0));
   const significantLevels = candidates.slice(0, 5);
@@ -237,9 +259,12 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
 
 function calculateSupportResistance(history: HistoricalData[], currentPrice: number): SupportResistanceLevel[] {
   if (!history || history.length === 0 || !currentPrice) return [];
+  
+  console.log('🔍 HISTORICAL SUPPORT/RESISTANCE CALCULATION:');
   const levels: SupportResistanceLevel[] = [];
   const priceLevels = new Map<number, number>();
   const priceRange = currentPrice * 0.20;
+  
   history.forEach(entry => {
     if (entry.lastPrice && Math.abs(entry.lastPrice - currentPrice) <= priceRange) {
       const roundedPrice = Math.round(entry.lastPrice / 5) * 5;
@@ -247,13 +272,21 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
       priceLevels.set(roundedPrice, volume + (entry.totalVolume || 0));
     }
   });
+  
   const sortedLevels = Array.from(priceLevels.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  console.log('🔍 Historical levels found:', sortedLevels.map(([price, volume]) => `${price} (vol: ${volume})`));
+  
   sortedLevels.forEach(([price]) => {
-      levels.push({ price, strength: 'weak', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Historical Volume Level' });
+      levels.push({ 
+        price, 
+        strength: 'weak', 
+        type: price < currentPrice ? 'support' : 'resistance', 
+        tooltip: 'Historical Volume Level' 
+      });
   });
+  
   return levels;
 }
-
 
 function getFinalLevels(
   symbol: string, 
@@ -262,6 +295,12 @@ function getFinalLevels(
   optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, 
   allStrikes: number[]
 ): { supports: SupportResistanceLevel[], resistances: SupportResistanceLevel[] } {
+  
+  console.log('🔍 FINAL LEVELS DEBUG =================');
+  console.log('Symbol:', symbol);
+  console.log('Current Price:', currentPrice);
+  console.log('1390 Strike Data:', optionsByStrike[1390]);
+  
   const allSupports: SupportResistanceLevel[] = [];
   const allResistances: SupportResistanceLevel[] = [];
   
@@ -271,45 +310,75 @@ function getFinalLevels(
     }
   };
 
-  findSupportLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allSupports));
+  // 1. OI-based support levels
+  console.log('📊 OI-BASED SUPPORT ANALYSIS:');
+  const oiSupports = findSupportLevels(currentPrice, optionsByStrike, allStrikes);
+  console.log('OI Supports found:', oiSupports.map(s => `${s.price} (${s.strength})`));
+  oiSupports.forEach(l => addLevel(l, allSupports));
+  
+  // 2. Historical support levels
+  console.log('📊 HISTORICAL SUPPORT ANALYSIS:');
+  const historicalLevels = calculateSupportResistance(history, currentPrice);
+  const historicalSupports = historicalLevels.filter(l => l.type === 'support');
+  console.log('Historical Supports found:', historicalSupports.map(s => `${s.price} (${s.strength})`));
+  historicalSupports.forEach(l => addLevel(l, allSupports));
+  
+  // 3. Psychological levels
+  console.log('📊 PSYCHOLOGICAL LEVELS:');
+  const psychLevels = getPsychologicalLevels(symbol, currentPrice);
+  const psychSupports = psychLevels.filter(price => price < currentPrice)
+    .map(price => ({ 
+      price, 
+      strength: 'medium' as const, 
+      type: 'support' as const, 
+      tooltip: 'Psychological Level' 
+    }));
+  console.log('Psychological Supports found:', psychSupports.map(s => `${s.price} (${s.strength})`));
+  psychSupports.forEach(l => addLevel(l, allSupports));
+  
+  console.log('📊 ALL SUPPORTS BEFORE DEDUPE:');
+  allSupports.forEach((support, index) => {
+    console.log(`  ${index + 1}. ${support.price} - ${support.strength} - ${support.tooltip}`);
+  });
+  
+  // Dedupe and sort
+  const uniqueSupports = allSupports.filter((support, index, array) => 
+    index === array.findIndex(s => s.price === support.price)
+  );
+  
+  const finalSupports = uniqueSupports
+    .sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice))
+    .slice(0, 2);
+  
+  console.log('🎯 FINAL SUPPORTS:', finalSupports.map(s => `${s.price} (${s.strength})`));
+  console.log('====================================');
+  
+  // Similar for resistances (simplified)
   findResistanceLevels(currentPrice, optionsByStrike, allStrikes).forEach(l => addLevel(l, allResistances));
-  
-  calculateSupportResistance(history, currentPrice).forEach(l => {
-    if (l.type === 'support') addLevel(l, allSupports);
-    else addLevel(l, allResistances);
-  });
-  
-  getPsychologicalLevels(symbol, currentPrice).forEach(price => {
-    const level: SupportResistanceLevel = { price, strength: 'medium', type: price < currentPrice ? 'support' : 'resistance', tooltip: 'Psychological Level' };
-    if (level.type === 'support') {
-        addLevel(level, allSupports);
-    } else {
-        addLevel(level, allResistances); // <--- CORRECTED: Changed 'l' to 'level'
-    }
-  });
+  const historicalResistances = historicalLevels.filter(l => l.type === 'resistance');
+  historicalResistances.forEach(l => addLevel(l, allResistances));
+  const psychResistances = psychLevels.filter(price => price > currentPrice)
+    .map(price => ({ price, strength: 'medium' as const, type: 'resistance' as const, tooltip: 'Psychological Level' }));
+  psychResistances.forEach(l => addLevel(l, allResistances));
 
-  allSupports.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
-  allResistances.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
+  const finalResistances = allResistances
+    .filter((resistance, index, array) => index === array.findIndex(r => r.price === resistance.price))
+    .sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice))
+    .slice(0, 2);
 
   return {
-    supports: allSupports.slice(0, 2),
-    resistances: allResistances.slice(0, 2)
+    supports: finalSupports,
+    resistances: finalResistances
   };
 }
 
-// ==============================================================================
-// === UPDATED FUNCTION: calculateSmartSentiment ================================
-// ==============================================================================
 function calculateSmartSentiment(
   pcr: number,
   volumePcr: number,
   highestPutOI: number,
   highestCallOI: number,
-  todayVolumePercentage: number // New parameter for volume confirmation
+  todayVolumePercentage: number
 ): string {
-  // --- Score Calculation ---
-
-  // 1. PCR Score (based on Open Interest)
   let pcrScore = 0;
   if (pcr > 1.3) pcrScore = 2;
   else if (pcr > 1.1) pcrScore = 1;
@@ -317,14 +386,12 @@ function calculateSmartSentiment(
   else if (pcr < 0.7) pcrScore = -2;
   else if (pcr < 0.9) pcrScore = -1;
 
-  // 2. Conviction Score (based on strongest OI levels)
   let convictionScore = 0;
   if (highestPutOI > highestCallOI * 2) convictionScore = 2;
   else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
   else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
   else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
   
-  // 3. Volume PCR Modifier (based on today's trading volume direction)
   let volumeModifier = 0;
   if (volumePcr < 0.7) volumeModifier = 2;
   else if (volumePcr < 0.9) volumeModifier = 1;
@@ -332,39 +399,33 @@ function calculateSmartSentiment(
   else if (volumePcr > 1.3) volumeModifier = -2;
   else if (volumePcr > 1.1) volumeModifier = -1;
 
-  // --- Preliminary Score ---
   const preliminaryScore = pcrScore + convictionScore + volumeModifier;
   let finalScore = preliminaryScore;
 
-  // --- 4. NEW: Volume Confirmation Logic ---
-  // We use today's volume percentage to confirm or deny the preliminary sentiment.
-  // High volume amplifies the sentiment, low volume dampens it towards neutral.
-  const isSignificantVolume = todayVolumePercentage > 150; // Is volume exceptionally high?
-  const isLowVolume = todayVolumePercentage < 70;      // Is volume exceptionally low?
+  const isSignificantVolume = todayVolumePercentage > 150;
+  const isLowVolume = todayVolumePercentage < 70;
 
   if (isSignificantVolume) {
-    // If volume is high, it confirms the trend. Amplify the score.
     if (preliminaryScore > 0) finalScore++;
     if (preliminaryScore < 0) finalScore--;
   } else if (isLowVolume) {
-    // If volume is low, it suggests a lack of conviction. Dampen the score.
-    // We only dampen stronger scores to avoid over-correcting.
     if (Math.abs(preliminaryScore) >= 2) {
         if (preliminaryScore > 0) finalScore--;
         if (preliminaryScore < 0) finalScore++;
     }
   }
   
-  // --- Final Sentiment Mapping ---
   if (finalScore >= 5) return "Strongly Bullish";
   if (finalScore >= 3) return "Bullish";
   if (finalScore >= 1) return "Slightly Bullish";
   if (finalScore === 0) return "Neutral";
-  if (finalScore === -1 || finalScore === -2) return "Slightly Bearish";
-  if (finalScore === -3 || finalScore === -4) return "Bearish";
+  if (finalScore <= -1 && finalScore > -2) return "Slightly Bearish";
+  if (finalScore <= -3 && finalScore > -4) return "Bearish";
   if (finalScore <= -5) return "Strongly Bearish";
+  if (finalScore === -2) return "Slightly Bearish";
+  if (finalScore === -4) return "Bearish";
 
-  return "Neutral"; // Default fallback
+  return "Neutral";
 }
 
 const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
@@ -448,18 +509,20 @@ export async function POST(request: Request) {
     
     const historicalData = await getHistoricalData(displayName);
     console.log('🔍 ANALYSIS DEBUG - Historical data for', displayName, ':', {
-  length: historicalData.length,
-  sample: historicalData.slice(0, 3), // First 3 entries
-  hasData: historicalData.length > 0,
-  hasVolume: historicalData.filter(entry => entry.totalVolume > 0).length
-});
+      length: historicalData.length,
+      sample: historicalData.slice(0, 3),
+      hasData: historicalData.length > 0,
+      hasVolume: historicalData.filter(entry => entry.totalVolume > 0).length
+    });
+    
     const changePercent = calculateChangePercent(ltp, historicalData);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
+    
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
-  ...volumeMetrics,
-  hasAvg: volumeMetrics.avg20DayVolume > 0,
-  hasTodayPercent: volumeMetrics.todayVolumePercentage > 0
-});
+      ...volumeMetrics,
+      hasAvg: volumeMetrics.avg20DayVolume > 0,
+      hasTodayPercent: volumeMetrics.todayVolumePercentage > 0
+    });
 
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
@@ -514,15 +577,12 @@ export async function POST(request: Request) {
     const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : 0;
     const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : 0;
     
-    // ==============================================================================
-    // === UPDATED FUNCTION CALL ====================================================
-    // ==============================================================================
     const sentiment = calculateSmartSentiment(
         pcr,
         volumePcr,
         highestPutOI,
         highestCallOI,
-        volumeMetrics.todayVolumePercentage // Argument for today's volume is now provided
+        volumeMetrics.todayVolumePercentage
     );
     
     let minLoss = Infinity, maxPain = 0;
@@ -537,6 +597,18 @@ export async function POST(request: Request) {
     }
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+
+    // Final debug before response
+    console.log('🔍 ANALYSIS DEBUG - Final check:', {
+      symbol: displayName,
+      ltp: ltp,
+      changePercent: changePercent,
+      volumeMetrics: volumeMetrics,
+      hasSupport: supportLevels.length > 0,
+      hasResistance: resistanceLevels.length > 0,
+      finalSupports: supportLevels,
+      finalResistances: resistanceLevels
+    });
 
     const responseData = {
         symbol: displayName.toUpperCase(),
