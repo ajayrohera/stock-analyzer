@@ -1,14 +1,16 @@
-// scripts/kite-login.js (CommonJS version)
-const { createClient } = require('redis');
-const { KiteConnect } = require('kiteconnect');
-const dotenv = require('dotenv');
-const path = require('path');
-const readline = require('readline');
-const open = require('open');
+// scripts/kite-login.js (ES Modules version)
+import { createClient } from 'redis';
+import { KiteConnect } from 'kiteconnect';
+import dotenv from 'dotenv';
+import readline from 'readline';
+import open from 'open';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Load environment variables
-// Load from .env.local
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+// Load environment variables from .env.local
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '..', '.env.local') });
 
 const redis = createClient({
   url: process.env.REDIS_URL,
