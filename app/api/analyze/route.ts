@@ -98,12 +98,18 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
   console.log(`📈 Calculating change percent for price: ${currentPrice}, historical entries: ${historicalData.length}`);
   
-  if (!historicalData || historicalData.length < 2 || !currentPrice) {
+  if (!historicalData || historicalData.length === 0 || !currentPrice) {
     console.log('⚠️ Insufficient data for change calculation');
     return 0;
   }
   
-  const todayDateString = new Date().toISOString().split('T')[0];
+  // Use IST timezone for today's date calculation
+  const now = new Date();
+  const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); // UTC+5:30
+  const todayDateString = istTime.toISOString().split('T')[0];
+  
+  console.log(`📊 Date debug: Today(IST)=${todayDateString}, Historical dates=`, historicalData.map(d => d.date));
+  
   const previousDayEntry = historicalData
     .filter(entry => entry.date !== todayDateString)
     .sort((a, b) => b.timestamp - a.timestamp)[0];
@@ -116,7 +122,7 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   const previousClose = previousDayEntry.lastPrice;
   const changePercent = ((currentPrice - previousClose) / previousClose) * 100;
   
-  console.log(`📊 Change calculation: ${currentPrice} - ${previousClose} = ${changePercent.toFixed(2)}%`);
+  console.log(`📊 Change calculation: ${currentPrice} vs ${previousClose} (${previousDayEntry.date}) = ${changePercent.toFixed(2)}%`);
   
   return changePercent;
 }
