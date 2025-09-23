@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown, Calendar, Target } from 'lucide-react';
+import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown, Calendar, Target, AlertTriangle } from 'lucide-react';
 
 // --- HELPER TYPES ---
 type SupportResistanceLevel = {
@@ -221,12 +221,14 @@ const VolumeCard = React.memo(({
   avg20DayVolume, 
   todayVolumePercentage, 
   estimatedTodayVolume,
-  marketStatus
+  marketStatus,
+  symbol
 }: { 
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
   marketStatus: MarketStatus;
+  symbol?: string;
 }) => {
   const formatVolume = (volume: number) => {
     if (volume >= 1000000) return `${(volume / 1000000).toFixed(1)}M`;
@@ -241,6 +243,17 @@ const VolumeCard = React.memo(({
     return 'text-red-400';
   };
 
+  // Check if both today's metrics are available
+  const areTodayMetricsAvailable = todayVolumePercentage !== null && 
+                                  todayVolumePercentage !== undefined &&
+                                  estimatedTodayVolume !== null && 
+                                  estimatedTodayVolume !== undefined;
+
+  // Check for unusual volume (more than 1000% or less than -1000%)
+  const isUnusualVolume = todayVolumePercentage !== null && 
+                         todayVolumePercentage !== undefined &&
+                         (todayVolumePercentage > 1000 || todayVolumePercentage < -1000);
+
   return (
     <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
       <div className="flex items-center justify-center text-sm text-gray-400">
@@ -251,27 +264,52 @@ const VolumeCard = React.memo(({
             {marketStatus === 'OPEN' 
               ? "Compares today's volume against 20-day average. Percentage shows progress vs daily average. Estimated projects full day volume."
               : "Historical 20-day average volume data."}
+            {marketStatus === 'OPEN' && !areTodayMetricsAvailable && (
+              <div className="text-yellow-400 mt-1">
+                Today's volume data temporarily unavailable
+              </div>
+            )}
           </div>
         </div>
       </div>
       
-      {avg20DayVolume !== undefined && (
+      {avg20DayVolume !== undefined && avg20DayVolume > 0 && (
         <p className="text-lg font-semibold text-white mt-2">
           20D Avg: {formatVolume(avg20DayVolume)}
         </p>
       )}
       
-      {marketStatus === 'OPEN' && todayVolumePercentage !== undefined && (
-        <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
-          {todayVolumePercentage.toFixed(1)}% of Avg
-        </p>
-      )}
-      
-      {marketStatus === 'OPEN' && estimatedTodayVolume !== undefined && (
-        <p className="text-md text-gray-300 mt-2">
-          Est. Today: {formatVolume(estimatedTodayVolume)}
-        </p>
-      )}
+      {/* Show both metrics together or show helpful message */}
+      {marketStatus === 'OPEN' && areTodayMetricsAvailable ? (
+        <>
+          <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
+            {todayVolumePercentage.toFixed(1)}% of Avg
+          </p>
+          
+          {isUnusualVolume && (
+            <div className="flex items-center justify-center mt-1 text-amber-400 text-xs">
+              <AlertTriangle size={12} className="mr-1" />
+              <span>Unusual volume detected - verify on NSE website</span>
+            </div>
+          )}
+          
+          <p className="text-md text-gray-300 mt-2">
+            Est. Today: {formatVolume(estimatedTodayVolume)}
+          </p>
+        </>
+      ) : marketStatus === 'OPEN' ? (
+        <div className="mt-2">
+          <p className="text-yellow-400 text-sm mb-1">
+            Today's volume data temporarily unavailable
+          </p>
+          <p className="text-gray-400 text-xs">
+            Please try: 
+            <br />• Refreshing the page (F5)
+            <br />• Clearing browser cache
+            <br />• Reopening the browser
+          </p>
+        </div>
+      ) : null}
       
       {marketStatus !== 'OPEN' && (
         <p className="text-gray-400 text-sm mt-2">
@@ -626,6 +664,7 @@ export default function Home() {
                   todayVolumePercentage={results.todayVolumePercentage}
                   estimatedTodayVolume={results.estimatedTodayVolume}
                   marketStatus={marketStatus}
+                  symbol={results.symbol}
                 />
 
                 {/* Row 3 */}
