@@ -484,6 +484,25 @@ const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
     return 'CLOSED';
 };
 
+async function getDailyCandleTestForSymbol(symbol: string) {
+  const client = createClient({ url: process.env.REDIS_URL! });
+  
+  try {
+    await client.connect();
+    const dailyCandleTestData = await client.get('daily_candle_test');
+    
+    if (!dailyCandleTestData) return null;
+    
+    const allResults = JSON.parse(dailyCandleTestData);
+    return allResults[symbol.toUpperCase()] || null;
+  } catch (error) {
+    console.error('Error fetching daily candle test:', error);
+    return null;
+  } finally {
+    await client.quit();
+  }
+}
+
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
   try {
@@ -654,38 +673,41 @@ export async function POST(request: Request) {
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
+    const dailyCandleTest = await getDailyCandleTestForSymbol(displayName);
     // Final debug before response
     console.log('🔍 ANALYSIS DEBUG - Final check:', {
-      symbol: displayName,
-      ltp: ltp,
-      priceType: priceType,
-      changePercent: changePercent,
-      volumeMetrics: volumeMetrics,
-      hasSupport: supportLevels.length > 0,
-      hasResistance: resistanceLevels.length > 0,
-      finalSupports: supportLevels,
-      finalResistances: resistanceLevels
-    });
+  symbol: displayName,
+  ltp: ltp,
+  priceType: priceType,
+  changePercent: changePercent,
+  volumeMetrics: volumeMetrics,
+  hasSupport: supportLevels.length > 0,
+  hasResistance: resistanceLevels.length > 0,
+  hasDailyCandleTest: !!dailyCandleTest, // ← ADD THIS LINE
+  finalSupports: supportLevels,
+  finalResistances: resistanceLevels
+});
 
-    const responseData = {
-        symbol: displayName.toUpperCase(),
-        ltp: ltp,
-        priceType: priceType, // NEW: Tell frontend what type of price this is
-        lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
-        changePercent: parseFloat(changePercent.toFixed(2)),
-        avg20DayVolume: volumeMetrics.avg20DayVolume,
-        todayVolumePercentage: volumeMetrics.todayVolumePercentage,
-        estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
-        expiryDate: formattedExpiry,
-        sentiment,
-        pcr: parseFloat(pcr.toFixed(2)),
-        volumePcr: parseFloat(volumePcr.toFixed(2)),
-        maxPain,
-        support: finalSupport, 
-        resistance: finalResistance,
-        supports: supportLevels,
-        resistances: resistanceLevels,
-    };
+const responseData = {
+    symbol: displayName.toUpperCase(),
+    ltp: ltp,
+    priceType: priceType, // NEW: Tell frontend what type of price this is
+    lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
+    changePercent: parseFloat(changePercent.toFixed(2)),
+    avg20DayVolume: volumeMetrics.avg20DayVolume,
+    todayVolumePercentage: volumeMetrics.todayVolumePercentage,
+    estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
+    expiryDate: formattedExpiry,
+    sentiment,
+    pcr: parseFloat(pcr.toFixed(2)),
+    volumePcr: parseFloat(volumePcr.toFixed(2)),
+    maxPain,
+    support: finalSupport, 
+    resistance: finalResistance,
+    supports: supportLevels,
+    resistances: resistanceLevels,
+    dailyCandleTest, 
+};
     
     return NextResponse.json(responseData);
 
