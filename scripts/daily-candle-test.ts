@@ -194,7 +194,7 @@ export async function calculateDailyCandleTest() {
     const results: any = {};
     
     // Batch processing
-    const batchSize = 30;
+    const batchSize = 15;
     const totalBatches = Math.ceil(symbols.length / batchSize);
     
     console.log(`🔄 Processing in ${totalBatches} batches of ${batchSize} symbols each`);
