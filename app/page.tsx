@@ -621,7 +621,7 @@ export default function Home() {
                 </p>
                 <div className="flex items-center justify-center mt-2">
                     <span className="text-white font-bold text-lg">
-                    {marketStatus === 'PRE_MARKET' ? 'Previous Close: ' : 'CMP: '}{results.ltp}
+                    {results.priceType}: {results.ltp}
                     {typeof results.changePercent === 'number' && (
                         <span className={results.changePercent >= 0 ? 'text-green-400' : 'text-red-500'}>
                         {` (${results.changePercent > 0 ? '+' : ''}${results.changePercent.toFixed(2)}%)`}

@@ -542,12 +542,28 @@ export async function POST(request: Request) {
     
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
     const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
-    const ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
-    const currentVolume = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.volume;
+    
+    // FIX: Handle LTP=0 after market hours by falling back to historical data
+    let ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
+    let priceType = 'CMP'; // Default to live price
+    
+    const historicalData = await getHistoricalData(displayName);
+    
+    // If LTP is 0 (API stopped providing data), use yesterday's close from historical data
+    if (ltp === 0 && historicalData.length > 0) {
+        const latestHistorical = historicalData.sort((a, b) => 
+            new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+        if (latestHistorical.lastPrice) {
+            ltp = latestHistorical.lastPrice;
+            priceType = 'Previous Close';
+            console.log('📊 Using historical data as LTP:', ltp);
+        }
+    }
 
     if (ltp === 0) return NextResponse.json({ error: `Could not fetch live price for '${tradingSymbol}'.` }, { status: 404 });
     
-    const historicalData = await getHistoricalData(displayName);
+    const currentVolume = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.volume;
+
     console.log('🔍 ANALYSIS DEBUG - Historical data for', displayName, ':', {
       length: historicalData.length,
       sample: historicalData.slice(0, 3),
@@ -642,6 +658,7 @@ export async function POST(request: Request) {
     console.log('🔍 ANALYSIS DEBUG - Final check:', {
       symbol: displayName,
       ltp: ltp,
+      priceType: priceType,
       changePercent: changePercent,
       volumeMetrics: volumeMetrics,
       hasSupport: supportLevels.length > 0,
@@ -653,6 +670,7 @@ export async function POST(request: Request) {
     const responseData = {
         symbol: displayName.toUpperCase(),
         ltp: ltp,
+        priceType: priceType, // NEW: Tell frontend what type of price this is
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
         changePercent: parseFloat(changePercent.toFixed(2)),
         avg20DayVolume: volumeMetrics.avg20DayVolume,
