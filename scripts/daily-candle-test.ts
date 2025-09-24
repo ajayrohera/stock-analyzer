@@ -10,7 +10,7 @@ async function getRedisClient() {
   return client;
 }
 
-async function getAllSymbols(): Promise<string[]> {
+async function getAllSymbolsWithMapping(): Promise<Map<string, string>> {
   const auth = new google.auth.GoogleAuth({
     credentials: {
       type: 'service_account',
@@ -29,7 +29,16 @@ async function getAllSymbols(): Promise<string[]> {
     range: 'stocks!A2:B'
   });
   
-  return response.data.values?.map(row => row[0]) || [];
+  const symbolMap = new Map<string, string>();
+  
+  response.data.values?.forEach(row => {
+    if (row[0] && row[1]) {
+      symbolMap.set(row[0], row[1]);
+    }
+  });
+  
+  console.log(`📊 Loaded ${symbolMap.size} symbol mappings`);
+  return symbolMap;
 }
 
 interface Candle {
@@ -176,13 +185,16 @@ export async function calculateDailyCandleTest() {
     }
     kite.setAccessToken(JSON.parse(tokenData).accessToken);
     
-    const symbols = await getAllSymbols();
+    // === FIX: Load symbol mapping ONCE ===
+    console.log('📊 Loading symbol mappings from Google Sheets...');
+    const symbolMap = await getAllSymbolsWithMapping();
+    const symbols = Array.from(symbolMap.keys());
     console.log(`📊 Analyzing ${symbols.length} symbols`);
     
     const results: any = {};
     
-    // === BATCH PROCESSING IMPLEMENTATION ===
-    const batchSize = 30; // Process 30 symbols per batch
+    // Batch processing
+    const batchSize = 30;
     const totalBatches = Math.ceil(symbols.length / batchSize);
     
     console.log(`🔄 Processing in ${totalBatches} batches of ${batchSize} symbols each`);
@@ -193,37 +205,18 @@ export async function calculateDailyCandleTest() {
       const batchSymbols = symbols.slice(start, end);
       
       console.log(`\n📦 Processing batch ${batch + 1}/${totalBatches}: ${batchSymbols.length} symbols`);
-      console.log(`📋 Symbols: ${batchSymbols.join(', ')}`);
       
       const batchResults: any = {};
       
       for (const symbol of batchSymbols) {
         try {
-          const auth = new google.auth.GoogleAuth({
-            credentials: {
-              type: 'service_account',
-              project_id: process.env.GOOGLE_PROJECT_ID,
-              private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
-              private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-              client_email: process.env.GOOGLE_CLIENT_EMAIL,
-              client_id: process.env.GOOGLE_CLIENT_ID,
-            },
-            scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly'
-          });
-          
-          const sheets = google.sheets({ version: 'v4', auth });
-          const sheetResponse = await sheets.spreadsheets.values.get({
-            spreadsheetId: process.env.GOOGLE_SHEET_ID!,
-            range: 'stocks!A2:B'
-          });
-          
-          const row = sheetResponse.data.values?.find(r => r[0] === symbol);
-          if (!row || !row[1]) {
+          // === FIX: Use cached mapping instead of API call ===
+          const tradingSymbol = symbolMap.get(symbol);
+          if (!tradingSymbol) {
             console.log(`⚠️ No mapping found for symbol: ${symbol}`);
             continue;
           }
           
-          const tradingSymbol = row[1];
           const exchange = (symbol === 'NIFTY' || symbol === 'BANKNIFTY') ? 'NFO' : 'NSE';
           const instrumentToken = `${exchange}:${tradingSymbol}`;
           
@@ -238,11 +231,12 @@ export async function calculateDailyCandleTest() {
             console.log(`⚠️ Could not analyze ${symbol}`);
           }
           
-          // Reduced delay to speed up processing
-          await new Promise(resolve => setTimeout(resolve, 300));
+          // Reduced delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 500));
           
         } catch (error) {
           console.error(`❌ Error processing ${symbol}:`, error);
+          // Continue with next symbol even if one fails
         }
       }
       
@@ -253,16 +247,14 @@ export async function calculateDailyCandleTest() {
       await redis.set('daily_candle_test', JSON.stringify(results));
       console.log(`💾 Saved batch ${batch + 1} progress. Total processed: ${Object.keys(results).length} symbols`);
       
-      // Delay between batches (except after the last batch)
+      // Longer delay between batches to avoid quota issues
       if (batch < totalBatches - 1) {
-        console.log(`⏳ Waiting 2 seconds before next batch...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log(`⏳ Waiting 5 seconds before next batch...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
-    // === END BATCH PROCESSING ===
     
     console.log(`\n✅ Daily 3-candle test completed. Processed ${Object.keys(results).length} symbols`);
-    console.log(`📊 Results saved to Redis`);
     
     return results;
     
