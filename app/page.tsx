@@ -23,6 +23,7 @@ type AnalysisResult = {
   expiryDate: string; 
   ltp: number;
   lastRefreshed: string;
+  priceType: string;
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
@@ -44,7 +45,13 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
     const typedData = data as AnalysisResult;
     const supportsIsValid = Array.isArray(typedData.supports) && (typedData.supports.length === 0 || (typeof typedData.supports[0] === 'object' && typedData.supports[0] !== null && 'price' in typedData.supports[0]));
     const resistancesIsValid = Array.isArray(typedData.resistances) && (typedData.resistances.length === 0 || (typeof typedData.resistances[0] === 'object' && typedData.resistances[0] !== null && 'price' in typedData.resistances[0]));
-    return (!!typedData && typeof typedData.symbol === 'string' && typeof typedData.pcr === 'number' && typeof typedData.ltp === 'number' && supportsIsValid && resistancesIsValid);
+    return (!!typedData && 
+            typeof typedData.symbol === 'string' && 
+            typeof typedData.pcr === 'number' && 
+            typeof typedData.ltp === 'number' && 
+            typeof typedData.priceType === 'string' && // Add this check
+            supportsIsValid && 
+            resistancesIsValid);
   } catch (error) { 
     console.error('Validation error:', error); 
     return false; 

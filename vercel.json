@@ -14,6 +14,10 @@
     {
       "path": "/api/cron/update-volume",
       "schedule": "0 11 * * 1-5"
+    },
+        {
+      "path": "/api/cron/daily-candle-test", 
+      "schedule": "31 4 * * 1-5"
     }
   ],
   "routes": [
