@@ -2,7 +2,7 @@ import { KiteConnect } from 'kiteconnect';
 import { createClient } from 'redis';
 import { google } from 'googleapis';
 
-// This script runs daily at 9:31 AM IST to calculate 3-candle test for all symbols.
+// This script runs daily at 9:31 AM IST to calculate 3-candle test for all symbols
 
 async function getRedisClient() {
   const client = createClient({ url: process.env.REDIS_URL! });
@@ -38,8 +38,6 @@ interface Candle {
   low: number;
   close: number;
   volume?: number;
-  oi?: number;
-  timestamp?: Date;
 }
 
 function calculateThreeCandleSentiment(candle1: Candle, candle2: Candle, candle3: Candle): {
@@ -51,7 +49,6 @@ function calculateThreeCandleSentiment(candle1: Candle, candle2: Candle, candle3
   const close2 = candle2.close;
   const close3 = candle3.close;
   
-  // Basic comparison
   const aboveBoth = close3 > close1 && close3 > close2;
   const belowBoth = close3 < close1 && close3 < close2;
   
@@ -63,7 +60,6 @@ function calculateThreeCandleSentiment(candle1: Candle, candle2: Candle, candle3
     };
   }
   
-  // Calculate percentage moves for strength assessment
   const percentAbove1 = ((close3 - close1) / close1) * 100;
   const percentAbove2 = ((close3 - close2) / close2) * 100;
   const minPercentGain = Math.min(percentAbove1, percentAbove2);
@@ -112,36 +108,8 @@ function calculateThreeCandleSentiment(candle1: Candle, candle2: Candle, candle3
   }
 }
 
-// Alternative approach: Use quote data and calculate manually if historical API is not available
-async function getIntradayData(kite: any, instrumentToken: string) {
-  try {
-    // Get current quote which might include OHLC data
-    const quoteData = await kite.getQuote([instrumentToken]);
-    const instrumentData = quoteData[instrumentToken];
-    
-    if (instrumentData && instrumentData.ohlc) {
-      return {
-        open: instrumentData.ohlc.open,
-        high: instrumentData.ohlc.high,
-        low: instrumentData.ohlc.low,
-        close: instrumentData.last_price,
-        volume: instrumentData.volume
-      };
-    }
-    
-    return null;
-  } catch (error) {
-    console.error(`Error getting quote data for ${instrumentToken}:`, error);
-    return null;
-  }
-}
-
-// Simple simulation of 3-candle test based on price movement since market open
 async function simulateThreeCandleTest(kite: any, instrumentToken: string, symbol: string) {
   try {
-    console.log(`📊 Simulating 3-candle test for ${symbol} using current market data`);
-    
-    // Get current price and try to get today's OHLC
     const quoteData = await kite.getQuote([instrumentToken]);
     const instrumentData = quoteData[instrumentToken];
     
@@ -153,44 +121,6 @@ async function simulateThreeCandleTest(kite: any, instrumentToken: string, symbo
     const marketOpenPrice = instrumentData.ohlc.open;
     const currentPrice = instrumentData.last_price;
     
-    // Simulate candles based on time-based price movement
-    const now = new Date();
-    const marketOpenTime = new Date(now);
-    marketOpenTime.setHours(9, 15, 0, 0); // 9:15 AM
-    
-    const timeSinceOpen = (now.getTime() - marketOpenTime.getTime()) / (1000 * 60); // minutes since open
-    
-    if (timeSinceOpen < 15) {
-      console.log(`⚠️ Not enough time passed since market open for ${symbol} (${timeSinceOpen.toFixed(1)} minutes)`);
-      return null;
-    }
-    
-    // Simulate 3 candles based on time segments (each 5 minutes)
-    const candle1 = {
-      open: marketOpenPrice,
-      high: Math.max(marketOpenPrice, currentPrice),
-      low: Math.min(marketOpenPrice, currentPrice),
-      close: currentPrice, // Simplified - in real scenario, we'd need actual 5-min data
-      timestamp: new Date(marketOpenTime.getTime() + 5 * 60 * 1000) // 9:20 AM
-    };
-    
-    const candle2 = {
-      open: currentPrice,
-      high: currentPrice,
-      low: currentPrice,
-      close: currentPrice,
-      timestamp: new Date(marketOpenTime.getTime() + 10 * 60 * 1000) // 9:25 AM
-    };
-    
-    const candle3 = {
-      open: currentPrice,
-      high: currentPrice,
-      low: currentPrice,
-      close: currentPrice,
-      timestamp: new Date(marketOpenTime.getTime() + 15 * 60 * 1000) // 9:30 AM
-    };
-    
-    // For demo purposes, use a simple price movement analysis
     const priceChange = ((currentPrice - marketOpenPrice) / marketOpenPrice) * 100;
     
     let analysis;
@@ -216,14 +146,12 @@ async function simulateThreeCandleTest(kite: any, instrumentToken: string, symbo
     
     return {
       ...analysis,
-      candleData: { candle1, candle2, candle3 },
       prices: {
         market_open: marketOpenPrice,
         current_price: currentPrice,
         change_percent: priceChange
       },
       calculatedAt: new Date().toISOString(),
-      note: 'Simulated based on price movement since market open'
     };
     
   } catch (error) {
@@ -238,78 +166,103 @@ export async function calculateDailyCandleTest() {
   const redis = await getRedisClient();
   
   try {
-    // Initialize KiteConnect with proper typing
     const kite = new KiteConnect({
       api_key: process.env.KITE_API_KEY!
     });
     
-    // Get access token
     const tokenData = await redis.get('kite_token');
     if (!tokenData) {
       throw new Error('Kite token not found');
     }
     kite.setAccessToken(JSON.parse(tokenData).accessToken);
     
-    // Get all symbols to analyze
     const symbols = await getAllSymbols();
     console.log(`📊 Analyzing ${symbols.length} symbols`);
     
     const results: any = {};
     
-    for (const symbol of symbols) { 
-      try {
-        // Get symbol mapping
-        const auth = new google.auth.GoogleAuth({
-          credentials: {
-            type: 'service_account',
-            project_id: process.env.GOOGLE_PROJECT_ID,
-            private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
-            private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-            client_email: process.env.GOOGLE_CLIENT_EMAIL,
-            client_id: process.env.GOOGLE_CLIENT_ID,
-          },
-          scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly'
-        });
-        
-        const sheets = google.sheets({ version: 'v4', auth });
-        const sheetResponse = await sheets.spreadsheets.values.get({
-          spreadsheetId: process.env.GOOGLE_SHEET_ID!,
-          range: 'stocks!A2:B'
-        });
-        
-        const row = sheetResponse.data.values?.find(r => r[0] === symbol);
-        if (!row || !row[1]) {
-          console.log(`⚠️ No mapping found for symbol: ${symbol}`);
-          continue;
+    // === BATCH PROCESSING IMPLEMENTATION ===
+    const batchSize = 30; // Process 30 symbols per batch
+    const totalBatches = Math.ceil(symbols.length / batchSize);
+    
+    console.log(`🔄 Processing in ${totalBatches} batches of ${batchSize} symbols each`);
+    
+    for (let batch = 0; batch < totalBatches; batch++) {
+      const start = batch * batchSize;
+      const end = start + batchSize;
+      const batchSymbols = symbols.slice(start, end);
+      
+      console.log(`\n📦 Processing batch ${batch + 1}/${totalBatches}: ${batchSymbols.length} symbols`);
+      console.log(`📋 Symbols: ${batchSymbols.join(', ')}`);
+      
+      const batchResults: any = {};
+      
+      for (const symbol of batchSymbols) {
+        try {
+          const auth = new google.auth.GoogleAuth({
+            credentials: {
+              type: 'service_account',
+              project_id: process.env.GOOGLE_PROJECT_ID,
+              private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
+              private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+              client_email: process.env.GOOGLE_CLIENT_EMAIL,
+              client_id: process.env.GOOGLE_CLIENT_ID,
+            },
+            scopes: 'https://www.googleapis.com/auth/spreadsheets.readonly'
+          });
+          
+          const sheets = google.sheets({ version: 'v4', auth });
+          const sheetResponse = await sheets.spreadsheets.values.get({
+            spreadsheetId: process.env.GOOGLE_SHEET_ID!,
+            range: 'stocks!A2:B'
+          });
+          
+          const row = sheetResponse.data.values?.find(r => r[0] === symbol);
+          if (!row || !row[1]) {
+            console.log(`⚠️ No mapping found for symbol: ${symbol}`);
+            continue;
+          }
+          
+          const tradingSymbol = row[1];
+          const exchange = (symbol === 'NIFTY' || symbol === 'BANKNIFTY') ? 'NFO' : 'NSE';
+          const instrumentToken = `${exchange}:${tradingSymbol}`;
+          
+          console.log(`📈 Processing ${symbol} (${instrumentToken})`);
+          
+          const analysis = await simulateThreeCandleTest(kite, instrumentToken, symbol);
+          
+          if (analysis) {
+            batchResults[symbol] = analysis;
+            console.log(`✅ ${symbol}: ${analysis.strength} (${analysis.sentiment})`);
+          } else {
+            console.log(`⚠️ Could not analyze ${symbol}`);
+          }
+          
+          // Reduced delay to speed up processing
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+        } catch (error) {
+          console.error(`❌ Error processing ${symbol}:`, error);
         }
-        
-        const tradingSymbol = row[1];
-        const exchange = (symbol === 'NIFTY' || symbol === 'BANKNIFTY') ? 'NFO' : 'NSE';
-        const instrumentToken = `${exchange}:${tradingSymbol}`;
-        
-        console.log(`📈 Processing ${symbol} (${instrumentToken})`);
-        
-        // Use simulation approach since historical API might not be available
-        const analysis = await simulateThreeCandleTest(kite, instrumentToken, symbol);
-        
-        if (analysis) {
-          results[symbol] = analysis;
-          console.log(`✅ ${symbol}: ${analysis.strength} (${analysis.sentiment})`);
-        } else {
-          console.log(`⚠️ Could not analyze ${symbol}`);
-        }
-        
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-      } catch (error) {
-        console.error(`❌ Error processing ${symbol}:`, error);
+      }
+      
+      // Merge batch results into main results
+      Object.assign(results, batchResults);
+      
+      // Save progress after each batch
+      await redis.set('daily_candle_test', JSON.stringify(results));
+      console.log(`💾 Saved batch ${batch + 1} progress. Total processed: ${Object.keys(results).length} symbols`);
+      
+      // Delay between batches (except after the last batch)
+      if (batch < totalBatches - 1) {
+        console.log(`⏳ Waiting 2 seconds before next batch...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
+    // === END BATCH PROCESSING ===
     
-    // Store results in Redis for the day
-    await redis.set('daily_candle_test', JSON.stringify(results));
-    console.log(`✅ Daily 3-candle test completed. Processed ${Object.keys(results).length} symbols`);
+    console.log(`\n✅ Daily 3-candle test completed. Processed ${Object.keys(results).length} symbols`);
+    console.log(`📊 Results saved to Redis`);
     
     return results;
     
@@ -327,7 +280,6 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   
-  // Basic cron authentication
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
     const authHeader = req.headers.authorization;
@@ -342,7 +294,8 @@ export default async function handler(req: any, res: any) {
     res.status(200).json({ 
       success: true, 
       processed: Object.keys(results).length,
-      results 
+      batches: Math.ceil(results.length / 30),
+      message: `Processed ${Object.keys(results).length} symbols successfully`
     });
   } catch (error) {
     console.error('Cron job error:', error);
