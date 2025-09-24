@@ -2,7 +2,7 @@ import { KiteConnect } from 'kiteconnect';
 import { createClient } from 'redis';
 import { google } from 'googleapis';
 
-// This script runs daily at 9:31 AM IST to calculate 3-candle test for all symbols
+// This script runs daily at 9:31 AM IST to calculate 3-candle test for all symbols.
 
 async function getRedisClient() {
   const client = createClient({ url: process.env.REDIS_URL! });
