@@ -673,7 +673,7 @@ export async function POST(request: Request) {
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
-    const dailyCandleTest = await getDailyCandleTestForSymbol(displayName);
+    
     // Final debug before response
     console.log('🔍 ANALYSIS DEBUG - Final check:', {
   symbol: displayName,
@@ -683,7 +683,7 @@ export async function POST(request: Request) {
   volumeMetrics: volumeMetrics,
   hasSupport: supportLevels.length > 0,
   hasResistance: resistanceLevels.length > 0,
-  hasDailyCandleTest: !!dailyCandleTest, // ← ADD THIS LINE
+  
   finalSupports: supportLevels,
   finalResistances: resistanceLevels
 });
@@ -706,7 +706,7 @@ const responseData = {
     resistance: finalResistance,
     supports: supportLevels,
     resistances: resistanceLevels,
-    dailyCandleTest, 
+    
 };
     
     return NextResponse.json(responseData);
