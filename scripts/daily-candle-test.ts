@@ -256,7 +256,7 @@ export async function calculateDailyCandleTest() {
     
     const results: any = {};
     
-    for (const symbol of symbols.slice(0, 5)) { // Limit to 5 symbols for testing
+    for (const symbol of symbols) { 
       try {
         // Get symbol mapping
         const auth = new google.auth.GoogleAuth({
