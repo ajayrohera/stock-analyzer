@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown, Calendar, Target, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown, Calendar, Target, AlertTriangle, CandlestickChart } from 'lucide-react';
 
 // --- HELPER TYPES ---
 type SupportResistanceLevel = {
@@ -12,6 +12,20 @@ type SupportResistanceLevel = {
   type: 'support' | 'resistance';
   tooltip?: string;
 };
+
+type DailyCandleTest = {
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  strength: 'very_bullish' | 'bullish' | 'neutral' | 'bearish' | 'very_bearish';
+  description: string;
+  calculatedAt: string;
+  prices?: {
+    market_open: number;
+    current_price: number;
+    change_percent: number;
+  };
+  note?: string;
+};
+
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -30,14 +44,15 @@ type AnalysisResult = {
   changePercent?: number;
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
+  dailyCandleTest?: DailyCandleTest;
 };
+
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
 type AppError = { message: string; type: string; timestamp: Date; };
 type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 
 // --- CONSTANTS AND HELPERS ---
 const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
-// === RESTORED CONSTANT ===
 const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
 
 const isAnalysisResult = (data: unknown): data is AnalysisResult => {
@@ -49,7 +64,7 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
             typeof typedData.symbol === 'string' && 
             typeof typedData.pcr === 'number' && 
             typeof typedData.ltp === 'number' && 
-            typeof typedData.priceType === 'string' && // Add this check
+            typeof typedData.priceType === 'string' &&
             supportsIsValid && 
             resistancesIsValid);
   } catch (error) { 
@@ -58,7 +73,6 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   }
 };
 
-// === RESTORED FUNCTION ===
 const getNextWorkingDay = (currentDate: Date): string => {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const nextDay = new Date(currentDate);
@@ -82,6 +96,24 @@ const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sen
     if (pcrValue > 1.3) return { sentiment: 'Highly Bearish', color: 'text-red-500' };
     if (pcrValue > 1.1) return { sentiment: 'Slightly Bearish', color: 'text-red-400' };
     return { sentiment: 'Neutral', color: 'text-gray-400' };
+  }
+};
+
+const getCandleTestStrengthColor = (strength: string): string => {
+  switch (strength) {
+    case 'very_bullish': return 'text-green-400';
+    case 'bullish': return 'text-green-300';
+    case 'very_bearish': return 'text-red-500';
+    case 'bearish': return 'text-red-400';
+    default: return 'text-gray-400';
+  }
+};
+
+const getCandleTestIcon = (sentiment: string) => {
+  switch (sentiment) {
+    case 'bullish': return <ArrowUp size={20} className="text-green-400" />;
+    case 'bearish': return <ArrowDown size={20} className="text-red-500" />;
+    default: return <TrendingUp size={20} className="text-gray-400" />;
   }
 };
 
@@ -125,7 +157,6 @@ const DataCard = React.memo(({ icon: Icon, title, value, color = 'text-white', t
   </div>
 ));
 DataCard.displayName = 'DataCard';
-
 
 const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportResistanceLevel[], type: 'Support' | 'Resistance' }) => {
   const isSupport = type === 'Support';
@@ -179,7 +210,6 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
 });
 SupportResistanceList.displayName = 'SupportResistanceList';
 
-
 const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => { 
   const isBullish = sentiment.includes('Bullish'); 
   const isBearish = sentiment.includes('Bearish'); 
@@ -211,7 +241,65 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
 });
 SentimentCard.displayName = 'SentimentCard';
 
-// === RESTORED COMPONENT === This was the cause of the build error.
+const DailyCandleTestCard = React.memo(({ candleTest, marketStatus }: { candleTest?: DailyCandleTest; marketStatus: MarketStatus }) => {
+  if (!candleTest) {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
+        <div className="flex items-center justify-center text-sm text-gray-400">
+          <CandlestickChart size={14} className="mr-1.5" />
+          <span>Daily 3-Candle Test</span>
+          <div className="relative group ml-1">
+            <Info size={14} className="cursor-pointer" />
+            <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+              Analyzes the first three 5-minute candles after market open (9:15-9:30 AM).
+              <br />A bullish signal if 3rd candle closes above both previous candles.
+              <br />Data available after 9:31 AM on trading days.
+            </div>
+          </div>
+        </div>
+        <p className="text-gray-500 text-sm mt-2">Data not available yet</p>
+        <p className="text-gray-600 text-xs">Check back after 9:31 AM</p>
+      </div>
+    );
+  }
+
+  const strengthColor = getCandleTestStrengthColor(candleTest.strength);
+  const sentimentIcon = getCandleTestIcon(candleTest.sentiment);
+
+  return (
+    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
+      <div className="flex items-center justify-center text-sm text-gray-400">
+        <CandlestickChart size={14} className="mr-1.5" />
+        <span>Daily 3-Candle Test</span>
+        <div className="relative group ml-1">
+          <Info size={14} className="cursor-pointer" />
+          <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+            {candleTest.description}
+            <br /><br />
+            Calculated at: {new Date(candleTest.calculatedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}
+            {candleTest.note && <><br />Note: {candleTest.note}</>}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center justify-center space-x-2 mt-2">
+        {sentimentIcon}
+        <span className={`text-2xl font-bold ${strengthColor}`}>
+          {candleTest.strength.replace('_', ' ').toUpperCase()}
+        </span>
+      </div>
+      <p className={`text-sm mt-1 ${strengthColor}`}>
+        {candleTest.sentiment.toUpperCase()}
+      </p>
+      {candleTest.prices && (
+        <p className="text-xs text-gray-400 mt-1">
+          Change: {candleTest.prices.change_percent > 0 ? '+' : ''}{candleTest.prices.change_percent.toFixed(2)}%
+        </p>
+      )}
+    </div>
+  );
+});
+DailyCandleTestCard.displayName = 'DailyCandleTestCard';
+
 const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
   <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
     <div className="inline-block p-4 bg-gray-900/50 rounded-full mb-4 text-brand-cyan">
@@ -222,7 +310,6 @@ const FeatureCard = React.memo(({ icon, title, description }: { icon: React.Reac
   </div> 
 ));
 FeatureCard.displayName = 'FeatureCard';
-
 
 const VolumeCard = React.memo(({ 
   avg20DayVolume, 
@@ -250,13 +337,11 @@ const VolumeCard = React.memo(({
     return 'text-red-400';
   };
 
-  // Check if both today's metrics are available
   const areTodayMetricsAvailable = todayVolumePercentage !== null && 
                                   todayVolumePercentage !== undefined &&
                                   estimatedTodayVolume !== null && 
                                   estimatedTodayVolume !== undefined;
 
-  // Check for unusual volume (more than 1000% or less than -1000%)
   const isUnusualVolume = todayVolumePercentage !== null && 
                          todayVolumePercentage !== undefined &&
                          (todayVolumePercentage > 1000 || todayVolumePercentage < -1000);
@@ -286,7 +371,6 @@ const VolumeCard = React.memo(({
         </p>
       )}
       
-      {/* Show both metrics together or show helpful message */}
       {marketStatus === 'OPEN' && areTodayMetricsAvailable ? (
         <>
           <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
@@ -353,7 +437,6 @@ const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: {
   </div>
 ));
 PCRStatCard.displayName = 'PCRStatCard';
-
 
 // === MAIN COMPONENT ===
 export default function Home() {
@@ -674,13 +757,16 @@ export default function Home() {
                   symbol={results.symbol}
                 />
 
-                {/* Row 3 */}
+                {/* Row 3 - Updated to include Daily Candle Test */}
                 <DataCard 
                   title="Max Pain" 
                   value={results.maxPain} 
                   tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."
                 />
-                <div className="bg-gray-900/50 p-4 rounded-lg"></div>
+                <DailyCandleTestCard 
+                  candleTest={results.dailyCandleTest}
+                  marketStatus={marketStatus}
+                />
                 <div className="bg-gray-900/50 p-4 rounded-lg"></div>
               </div>
             </div>
@@ -692,7 +778,7 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <FeatureCard icon={<BarChart />} title="OI Analysis" description="Visualize support and resistance levels based on real-time Open Interest data." />
             <FeatureCard icon={<TrendingUp />} title="PCR Sentiment" description="Gauge overall market sentiment with the up-to-the-minute Put-Call Ratio." />
-            <FeatureCard icon={<ShieldCheck />} title="Technical Indicators" description="Check crucial indicators like Volume, RSI, and Moving Averages for confirmation." />
+            <FeatureCard icon={<CandlestickChart />} title="3-Candle Test" description="Daily market opening sentiment analysis based on first three 5-minute candles." />
           </div>
         </section>
 
