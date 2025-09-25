@@ -104,8 +104,9 @@ export function generateADAnalysis(
     const multiplier = calculateMoneyFlowMultiplier(todayData.high, todayData.low, todayData.close);
     todayMoneyFlow = calculateMoneyFlowVolume(multiplier, todayData.volume);
     
-    // Determine signal and strength (handle division by zero)
+    // IMPROVED: Better signal and strength calculation
     if (Math.abs(twentyDayAverage) > 0.001) {
+      // Case 1: We have historical average - use ratio-based strength
       const strengthRatio = Math.abs(todayMoneyFlow) / Math.abs(twentyDayAverage);
       
       if (todayMoneyFlow > 0) {
@@ -113,12 +114,36 @@ export function generateADAnalysis(
         if (strengthRatio > 2) todayStrength = 'VERY_STRONG';
         else if (strengthRatio > 1) todayStrength = 'STRONG';
         else if (strengthRatio > 0.5) todayStrength = 'MODERATE';
+        else todayStrength = 'WEAK';
       } else if (todayMoneyFlow < 0) {
         todaySignal = 'DISTRIBUTION';
         if (strengthRatio > 2) todayStrength = 'VERY_STRONG';
         else if (strengthRatio > 1) todayStrength = 'STRONG';
         else if (strengthRatio > 0.5) todayStrength = 'MODERATE';
+        else todayStrength = 'WEAK';
+      } else {
+        todaySignal = 'NEUTRAL';
+        todayStrength = 'WEAK';
       }
+    } else if (Math.abs(todayMoneyFlow) > 0) {
+      // Case 2: No historical average, but we have today's money flow
+      // Use absolute value to determine strength
+      const absoluteMoneyFlow = Math.abs(todayMoneyFlow);
+      
+      if (todayMoneyFlow > 0) {
+        todaySignal = 'ACCUMULATION';
+      } else {
+        todaySignal = 'DISTRIBUTION';
+      }
+      
+      // Determine strength based on absolute money flow magnitude
+      if (absoluteMoneyFlow > 1000000) todayStrength = 'STRONG'; // Over 1M
+      else if (absoluteMoneyFlow > 100000) todayStrength = 'MODERATE'; // Over 100K
+      else todayStrength = 'WEAK'; // Less than 100K
+    } else {
+      // Case 3: No money flow today
+      todaySignal = 'NEUTRAL';
+      todayStrength = 'WEAK';
     }
   }
   
@@ -198,13 +223,15 @@ function generateInterpretation(
   if (signal === 'ACCUMULATION') {
     if (strength === 'VERY_STRONG') return 'Very strong institutional buying detected with high conviction';
     if (strength === 'STRONG') return 'Strong accumulation pattern suggesting smart money entry';
-    return 'Moderate buying interest, watch for trend confirmation';
+    if (strength === 'MODERATE') return 'Moderate buying interest, watch for trend confirmation';
+    return 'Weak accumulation signal detected';
   }
   
   if (signal === 'DISTRIBUTION') {
     if (strength === 'VERY_STRONG') return 'Heavy distribution indicating strong selling pressure';
     if (strength === 'STRONG') return 'Significant selling activity, consider caution';
-    return 'Moderate selling pressure detected';
+    if (strength === 'MODERATE') return 'Moderate selling pressure detected';
+    return 'Weak distribution signal detected';
   }
   
   return 'Neutral money flow, waiting for clearer direction';
