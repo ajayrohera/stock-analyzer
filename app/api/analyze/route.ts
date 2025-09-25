@@ -845,7 +845,6 @@ export async function POST(request: Request) {
             
             // Complete formatted lines for direct display
             formattedLines: [
-                `⚪ Today's Signal: ${adAnalysis.todaySignal} (${adAnalysis.todayStrength})`,
                 `💰 Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} average`,
                 `📊 20-Day Trend: ${adAnalysis.trend}`,
                 `🎯 Confidence: ${adAnalysis.confidence}`,
