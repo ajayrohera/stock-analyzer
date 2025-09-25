@@ -13,17 +13,39 @@ type SupportResistanceLevel = {
   tooltip?: string;
 };
 
-type DailyCandleTest = {
-  sentiment: 'bullish' | 'bearish' | 'neutral';
-  strength: 'very_bullish' | 'bullish' | 'neutral' | 'bearish' | 'very_bearish';
-  description: string;
-  calculatedAt: string;
-  prices?: {
-    market_open: number;
-    current_price: number;
-    change_percent: number;
+type ADAnalysis = {
+  todaySignal: 'ACCUMULATION' | 'DISTRIBUTION' | 'NEUTRAL';
+  todayStrength: 'VERY_STRONG' | 'STRONG' | 'MODERATE' | 'WEAK';
+  todayMoneyFlow: number;
+  twentyDayAverage: number;
+  trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  breakdown: {
+    currentADLine: number;
+    previousADLine: number;
+    change: number;
+    changePercent: number;
   };
-  note?: string;
+  volumeAnalysis: {
+    todayVolume: number;
+    volumeVsAverage: number;
+    volumeConfirmation: 'YES' | 'NO';
+  };
+  interpretation: string;
+  display?: {
+    signal: string;
+    moneyFlow: string;
+    trend: string;
+    confidence: string;
+    interpretation: string;
+  };
+  formattedLines?: string[];
+  styling?: {
+    signalColor: string;
+    strengthColor: string;
+    trendIcon: string;
+    confidenceIcon: string;
+  };
 };
 
 type AnalysisResult = {
@@ -44,7 +66,7 @@ type AnalysisResult = {
   changePercent?: number;
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
-  dailyCandleTest?: DailyCandleTest;
+  adAnalysis?: ADAnalysis;
 };
 
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
@@ -99,21 +121,29 @@ const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sen
   }
 };
 
-const getCandleTestStrengthColor = (strength: string): string => {
+const getStrengthColor = (strength: string): string => {
   switch (strength) {
-    case 'very_bullish': return 'text-green-400';
-    case 'bullish': return 'text-green-300';
-    case 'very_bearish': return 'text-red-500';
-    case 'bearish': return 'text-red-400';
+    case 'VERY_STRONG': return 'text-green-400';
+    case 'STRONG': return 'text-green-300';
+    case 'MODERATE': return 'text-yellow-400';
+    case 'WEAK': return 'text-gray-400';
     default: return 'text-gray-400';
   }
 };
 
-const getCandleTestIcon = (sentiment: string) => {
-  switch (sentiment) {
-    case 'bullish': return <ArrowUp size={20} className="text-green-400" />;
-    case 'bearish': return <ArrowDown size={20} className="text-red-500" />;
+const getSignalIcon = (signal: string) => {
+  switch (signal) {
+    case 'ACCUMULATION': return <ArrowUp size={20} className="text-green-400" />;
+    case 'DISTRIBUTION': return <ArrowDown size={20} className="text-red-500" />;
     default: return <TrendingUp size={20} className="text-gray-400" />;
+  }
+};
+
+const getTrendIcon = (trend: string) => {
+  switch (trend) {
+    case 'BULLISH': return '📈';
+    case 'BEARISH': return '📉';
+    default: return '➡️';
   }
 };
 
@@ -241,64 +271,90 @@ const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => {
 });
 SentimentCard.displayName = 'SentimentCard';
 
-const DailyCandleTestCard = React.memo(({ candleTest, marketStatus }: { candleTest?: DailyCandleTest; marketStatus: MarketStatus }) => {
-  if (!candleTest) {
+const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysis?: ADAnalysis; marketStatus: MarketStatus }) => {
+  if (!adAnalysis) {
     return (
       <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
         <div className="flex items-center justify-center text-sm text-gray-400">
-          <CandlestickChart size={14} className="mr-1.5" />
-          <span>Daily 3-Candle Test</span>
+          <TrendingUp size={14} className="mr-1.5" />
+          <span>A/D Line Analysis</span>
           <div className="relative group ml-1">
             <Info size={14} className="cursor-pointer" />
             <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-              Analyzes the first three 5-minute candles after market open (9:15-9:30 AM).
-              <br />A bullish signal if 3rd candle closes above both previous candles.
-              <br />Data available after 9:31 AM on trading days.
+              Accumulation/Distribution Line tracks money flow by comparing closing price to high/low range.
+              <br />Shows institutional buying/selling pressure.
+              <br />Data available during market hours.
             </div>
           </div>
         </div>
         <p className="text-gray-500 text-sm mt-2">Data not available yet</p>
-        <p className="text-gray-600 text-xs">Check back after 9:31 AM</p>
+        <p className="text-gray-600 text-xs">Check during market hours</p>
       </div>
     );
   }
 
-  const strengthColor = getCandleTestStrengthColor(candleTest.strength);
-  const sentimentIcon = getCandleTestIcon(candleTest.sentiment);
+  const signalIcon = getSignalIcon(adAnalysis.todaySignal);
+  const strengthColor = getStrengthColor(adAnalysis.todayStrength);
+  const trendIcon = getTrendIcon(adAnalysis.trend);
+
+  // Use formatted lines if available, otherwise create them
+  const displayLines = adAnalysis.formattedLines || [
+    `⚪ Today's Signal: ${adAnalysis.todaySignal} (${adAnalysis.todayStrength})`,
+    `💰 Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} average`,
+    `📊 20-Day Trend: ${adAnalysis.trend}`,
+    `🎯 Confidence: ${adAnalysis.confidence}`,
+    ``,
+    `💡 ${adAnalysis.interpretation}`
+  ];
 
   return (
     <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
       <div className="flex items-center justify-center text-sm text-gray-400">
-        <CandlestickChart size={14} className="mr-1.5" />
-        <span>Daily 3-Candle Test</span>
+        <TrendingUp size={14} className="mr-1.5" />
+        <span>A/D Line Analysis</span>
         <div className="relative group ml-1">
           <Info size={14} className="cursor-pointer" />
           <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-            {candleTest.description}
+            Accumulation/Distribution Line tracks money flow by comparing closing price to high/low range.
+            <br />Shows institutional buying/selling pressure.
             <br /><br />
-            Calculated at: {new Date(candleTest.calculatedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}
-            {candleTest.note && <><br />Note: {candleTest.note}</>}
+            Signal: {adAnalysis.todaySignal} ({adAnalysis.todayStrength})
+            <br />Money Flow: {adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}{formatMoneyFlow(adAnalysis.todayMoneyFlow)}
+            <br />Trend: {adAnalysis.trend} ({adAnalysis.confidence} confidence)
           </div>
         </div>
       </div>
+      
       <div className="flex items-center justify-center space-x-2 mt-2">
-        {sentimentIcon}
-        <span className={`text-2xl font-bold ${strengthColor}`}>
-          {candleTest.strength.replace('_', ' ').toUpperCase()}
+        {signalIcon}
+        <span className={`text-xl font-bold ${strengthColor}`}>
+          {adAnalysis.todaySignal}
         </span>
       </div>
-      <p className={`text-sm mt-1 ${strengthColor}`}>
-        {candleTest.sentiment.toUpperCase()}
-      </p>
-      {candleTest.prices && (
-        <p className="text-xs text-gray-400 mt-1">
-          Change: {candleTest.prices.change_percent > 0 ? '+' : ''}{candleTest.prices.change_percent.toFixed(2)}%
-        </p>
-      )}
+      
+      <div className="text-xs space-y-1 mt-2 text-left">
+        {displayLines.slice(0, 4).map((line, index) => (
+          <div key={index} className="flex items-start">
+            <span className="flex-shrink-0 mr-1">{line.split(' ')[0]}</span>
+            <span>{line.substring(line.indexOf(' ') + 1)}</span>
+          </div>
+        ))}
+      </div>
+      
+      <div className="text-xs mt-2 text-gray-400 text-left">
+        {adAnalysis.interpretation}
+      </div>
     </div>
   );
 });
-DailyCandleTestCard.displayName = 'DailyCandleTestCard';
+ADLineAnalysisCard.displayName = 'ADLineAnalysisCard';
+
+// Helper function to format money flow
+const formatMoneyFlow = (flow: number): string => {
+  if (Math.abs(flow) >= 1000000) return `${(flow / 1000000).toFixed(1)}M`;
+  if (Math.abs(flow) >= 1000) return `${(flow / 1000).toFixed(1)}K`;
+  return flow.toFixed(0);
+};
 
 const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
   <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
@@ -757,14 +813,14 @@ export default function Home() {
                   symbol={results.symbol}
                 />
 
-                {/* Row 3 - Updated to include Daily Candle Test */}
+                {/* Row 3 - Updated to include A/D Line Analysis instead of 3-Candle Test */}
                 <DataCard 
                   title="Max Pain" 
                   value={results.maxPain} 
                   tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."
                 />
-                <DailyCandleTestCard 
-                  candleTest={results.dailyCandleTest}
+                <ADLineAnalysisCard 
+                  adAnalysis={results.adAnalysis}
                   marketStatus={marketStatus}
                 />
                 <div className="bg-gray-900/50 p-4 rounded-lg"></div>
@@ -778,7 +834,7 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <FeatureCard icon={<BarChart />} title="OI Analysis" description="Visualize support and resistance levels based on real-time Open Interest data." />
             <FeatureCard icon={<TrendingUp />} title="PCR Sentiment" description="Gauge overall market sentiment with the up-to-the-minute Put-Call Ratio." />
-            <FeatureCard icon={<CandlestickChart />} title="3-Candle Test" description="Daily market opening sentiment analysis based on first three 5-minute candles." />
+            <FeatureCard icon={<TrendingUp />} title="A/D Line Analysis" description="Track institutional money flow with Accumulation/Distribution line analysis." />
           </div>
         </section>
 

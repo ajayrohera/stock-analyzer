@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { KiteConnect } from 'kiteconnect';
 import { createClient } from 'redis';
+import { generateADAnalysis, ADAnalysis } from '@/utils/ad-analysis';
 
 // --- HELPER TYPES ---
 interface QuoteData {
@@ -28,6 +29,9 @@ interface HistoricalData {
   totalVolume: number;
   lastPrice?: number;
   timestamp: number;
+  high?: number; 
+  low?: number; 
+  close?: number; 
 }
 interface SupportResistanceLevel {
   price: number;
@@ -484,25 +488,6 @@ const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
     return 'CLOSED';
 };
 
-async function getDailyCandleTestForSymbol(symbol: string) {
-  const client = createClient({ url: process.env.REDIS_URL! });
-  
-  try {
-    await client.connect();
-    const dailyCandleTestData = await client.get('daily_candle_test');
-    
-    if (!dailyCandleTestData) return null;
-    
-    const allResults = JSON.parse(dailyCandleTestData);
-    return allResults[symbol.toUpperCase()] || null;
-  } catch (error) {
-    console.error('Error fetching daily candle test:', error);
-    return null;
-  } finally {
-    await client.quit();
-  }
-}
-
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
   try {
@@ -582,6 +567,7 @@ export async function POST(request: Request) {
     if (ltp === 0) return NextResponse.json({ error: `Could not fetch live price for '${tradingSymbol}'.` }, { status: 404 });
     
     const currentVolume = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.volume;
+    const todayOHLC = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.ohlc;
 
     console.log('🔍 ANALYSIS DEBUG - Historical data for', displayName, ':', {
       length: historicalData.length,
@@ -598,6 +584,104 @@ export async function POST(request: Request) {
       hasAvg: volumeMetrics.avg20DayVolume > 0,
       hasTodayPercent: volumeMetrics.todayVolumePercentage > 0
     });
+
+    // --- A/D ANALYSIS INTEGRATION ---
+    console.log('📊 A/D ANALYSIS - Starting calculation...');
+    
+    let adAnalysis = null;
+    try {
+      // Prepare today's data for A/D analysis with robust validation
+      let todayData = undefined;
+      
+      if (todayOHLC && todayOHLC.high > 0 && todayOHLC.low > 0 && ltp > 0) {
+        // Use OHLC data from Kite Connect, but ensure values are valid
+        todayData = {
+          high: Math.max(todayOHLC.high, ltp), // Ensure high is at least LTP
+          low: Math.min(todayOHLC.low, ltp),   // Ensure low is at most LTP
+          close: ltp, // Use current LTP as today's close (most accurate)
+          volume: currentVolume || 0
+        };
+        
+        console.log('📊 A/D ANALYSIS - Using live OHLC data:', todayData);
+      } else if (historicalData.length > 0) {
+        // Fallback: use latest historical data as proxy for today
+        const latestHistorical = historicalData[historicalData.length - 1];
+        if (latestHistorical.lastPrice && latestHistorical.lastPrice > 0) {
+          todayData = {
+            high: latestHistorical.lastPrice,
+            low: latestHistorical.lastPrice, 
+            close: latestHistorical.lastPrice,
+            volume: currentVolume || latestHistorical.totalVolume || 0
+          };
+          console.log('📊 A/D ANALYSIS - Using historical data as proxy:', todayData);
+        }
+      }
+
+      console.log('📊 A/D ANALYSIS - Data prepared:', {
+        hasTodayData: !!todayData,
+        todayData,
+        historicalDataLength: historicalData.length,
+        hasValidOHLC: todayOHLC ? (todayOHLC.high > 0 && todayOHLC.low > 0) : false
+      });
+
+      // Only proceed with A/D analysis if we have sufficient historical data
+      if (historicalData.length >= 5) {
+        adAnalysis = generateADAnalysis(displayName.toUpperCase(), historicalData, todayData);
+        
+        console.log('📊 A/D ANALYSIS - Result:', {
+          signal: adAnalysis.todaySignal,
+          strength: adAnalysis.todayStrength,
+          moneyFlow: adAnalysis.todayMoneyFlow,
+          trend: adAnalysis.trend,
+          confidence: adAnalysis.confidence
+        });
+      } else {
+        console.log('📊 A/D ANALYSIS - Skipped: Insufficient historical data (need at least 5 days)');
+        adAnalysis = {
+          todaySignal: 'NEUTRAL',
+          todayStrength: 'WEAK',
+          todayMoneyFlow: 0,
+          twentyDayAverage: 0,
+          trend: 'SIDEWAYS',
+          confidence: 'LOW',
+          breakdown: {
+            currentADLine: 0,
+            previousADLine: 0,
+            change: 0,
+            changePercent: 0
+          },
+          volumeAnalysis: {
+            todayVolume: 0,
+            volumeVsAverage: 0,
+            volumeConfirmation: 'NO'
+          },
+          interpretation: 'Insufficient historical data for A/D analysis (minimum 5 days required)'
+        };
+      }
+    } catch (error) {
+      console.error('❌ A/D ANALYSIS - Error:', error);
+      // Provide fallback analysis object
+      adAnalysis = {
+        todaySignal: 'NEUTRAL',
+        todayStrength: 'WEAK', 
+        todayMoneyFlow: 0,
+        twentyDayAverage: 0,
+        trend: 'SIDEWAYS',
+        confidence: 'LOW',
+        breakdown: {
+          currentADLine: 0,
+          previousADLine: 0,
+          change: 0,
+          changePercent: 0
+        },
+        volumeAnalysis: {
+          todayVolume: 0,
+          volumeVsAverage: 0,
+          volumeConfirmation: 'NO'
+        },
+        interpretation: 'A/D analysis failed: ' + (error instanceof Error ? error.message : 'Unknown error')
+      };
+    }
 
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
@@ -673,41 +757,117 @@ export async function POST(request: Request) {
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
-    
+    // Format the money flow for better display
+    const formatMoneyFlow = (flow: number) => {
+      if (Math.abs(flow) >= 1000000) return `${(flow / 1000000).toFixed(1)}M`;
+      if (Math.abs(flow) >= 1000) return `${(flow / 1000).toFixed(1)}K`;
+      return flow.toFixed(0);
+    };
+
+    // Get strength color for frontend styling
+    const getStrengthColor = (strength: string) => {
+      switch (strength) {
+        case 'VERY_STRONG': return '#10b981'; // green
+        case 'STRONG': return '#3b82f6'; // blue  
+        case 'MODERATE': return '#f59e0b'; // amber
+        case 'WEAK': return '#6b7280'; // gray
+        default: return '#6b7280';
+      }
+    };
+
+    // Get signal color for frontend styling
+    const getSignalColor = (signal: string) => {
+      switch (signal) {
+        case 'ACCUMULATION': return '#10b981'; // green
+        case 'DISTRIBUTION': return '#ef4444'; // red
+        case 'NEUTRAL': return '#6b7280'; // gray
+        default: return '#6b7280';
+      }
+    };
+
     // Final debug before response
     console.log('🔍 ANALYSIS DEBUG - Final check:', {
-  symbol: displayName,
-  ltp: ltp,
-  priceType: priceType,
-  changePercent: changePercent,
-  volumeMetrics: volumeMetrics,
-  hasSupport: supportLevels.length > 0,
-  hasResistance: resistanceLevels.length > 0,
-  
-  finalSupports: supportLevels,
-  finalResistances: resistanceLevels
-});
+      symbol: displayName,
+      ltp: ltp,
+      priceType: priceType,
+      changePercent: changePercent,
+      volumeMetrics: volumeMetrics,
+      hasSupport: supportLevels.length > 0,
+      hasResistance: resistanceLevels.length > 0,
+      finalSupports: supportLevels,
+      finalResistances: resistanceLevels,
+      hasADAnalysis: !!adAnalysis
+    });
 
-const responseData = {
-    symbol: displayName.toUpperCase(),
-    ltp: ltp,
-    priceType: priceType, // NEW: Tell frontend what type of price this is
-    lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
-    changePercent: parseFloat(changePercent.toFixed(2)),
-    avg20DayVolume: volumeMetrics.avg20DayVolume,
-    todayVolumePercentage: volumeMetrics.todayVolumePercentage,
-    estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
-    expiryDate: formattedExpiry,
-    sentiment,
-    pcr: parseFloat(pcr.toFixed(2)),
-    volumePcr: parseFloat(volumePcr.toFixed(2)),
-    maxPain,
-    support: finalSupport, 
-    resistance: finalResistance,
-    supports: supportLevels,
-    resistances: resistanceLevels,
-    
-};
+    const responseData = {
+        symbol: displayName.toUpperCase(),
+        ltp: ltp,
+        priceType: priceType,
+        lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
+        changePercent: parseFloat(changePercent.toFixed(2)),
+        avg20DayVolume: volumeMetrics.avg20DayVolume,
+        todayVolumePercentage: volumeMetrics.todayVolumePercentage,
+        estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
+        expiryDate: formattedExpiry,
+        sentiment,
+        pcr: parseFloat(pcr.toFixed(2)),
+        volumePcr: parseFloat(volumePcr.toFixed(2)),
+        maxPain,
+        support: finalSupport, 
+        resistance: finalResistance,
+        supports: supportLevels,
+        resistances: resistanceLevels,
+        
+        // Enhanced A/D Analysis Structure
+        adAnalysis: {
+            // Core signals with styling info
+            todaySignal: adAnalysis.todaySignal,
+            todayStrength: adAnalysis.todayStrength,
+            trend: adAnalysis.trend,
+            confidence: adAnalysis.confidence,
+            
+            // Styling information for frontend
+            styling: {
+                signalColor: getSignalColor(adAnalysis.todaySignal),
+                strengthColor: getStrengthColor(adAnalysis.todayStrength),
+                trendIcon: adAnalysis.trend === 'BULLISH' ? '📈' : adAnalysis.trend === 'BEARISH' ? '📉' : '➡️',
+                confidenceIcon: adAnalysis.confidence === 'HIGH' ? '🎯' : adAnalysis.confidence === 'MEDIUM' ? '🎯' : '🎯'
+            },
+            
+            // Pre-formatted display strings (exactly matching your requested format)
+            display: {
+                signal: `${adAnalysis.todaySignal} (${adAnalysis.todayStrength})`,
+                moneyFlow: `${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} average`,
+                trend: `${adAnalysis.trend}`,
+                confidence: `${adAnalysis.confidence}`,
+                interpretation: `${adAnalysis.interpretation}`
+            },
+            
+            // Complete formatted lines for direct display
+            formattedLines: [
+                `⚪ Today's Signal: ${adAnalysis.todaySignal} (${adAnalysis.todayStrength})`,
+                `💰 Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} average`,
+                `📊 20-Day Trend: ${adAnalysis.trend}`,
+                `🎯 Confidence: ${adAnalysis.confidence}`,
+                ``,
+                `💡 ${adAnalysis.interpretation}`
+            ],
+            
+            // Raw data for custom processing
+            raw: {
+                todayMoneyFlow: adAnalysis.todayMoneyFlow,
+                twentyDayAverage: adAnalysis.twentyDayAverage,
+                todayVolume: adAnalysis.volumeAnalysis.todayVolume,
+                volumeVsAverage: adAnalysis.volumeAnalysis.volumeVsAverage,
+                volumeConfirmation: adAnalysis.volumeAnalysis.volumeConfirmation
+            },
+            
+            // Detailed breakdown for advanced display
+            breakdown: adAnalysis.breakdown,
+            volumeAnalysis: adAnalysis.volumeAnalysis,
+            interpretation: adAnalysis.interpretation
+        }
+    };
     
     return NextResponse.json(responseData);
 
