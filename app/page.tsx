@@ -322,7 +322,6 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
 
   // Use formatted lines if available, otherwise create them with safety checks
   const displayLines = adAnalysis.formattedLines || [
-    `⚪ Today's Signal: ${adAnalysis.todaySignal || 'NEUTRAL'} (${adAnalysis.todayStrength || 'WEAK'})`,
     `💰 Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} average`,
     `📊 20-Day Trend: ${trend}`,
     `🎯 Confidence: ${confidence}`,
