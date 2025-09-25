@@ -99,8 +99,8 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
   return generatePsychologicalLevels(currentPrice);
 }
 
-function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[]): number {
-  console.log(`📈 Calculating change percent for price: ${currentPrice}, historical entries: ${historicalData.length}`);
+function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string): number {
+  console.log(`📈 Calculating change percent for price: ${currentPrice}, priceType: ${priceType}, historical entries: ${historicalData.length}`);
   
   if (!historicalData || historicalData.length === 0 || !currentPrice) {
     console.log('⚠️ Insufficient data for change calculation');
@@ -114,19 +114,27 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   
   console.log(`📊 Date debug: Today(IST)=${todayDateString}, Historical dates=`, historicalData.map(d => d.date));
   
-  const previousDayEntry = historicalData
-    .filter(entry => entry.date !== todayDateString)
-    .sort((a, b) => b.timestamp - a.timestamp)[0];
+  // FIXED: Always compare against previous trading day, regardless of market hours
+  const sortedHistorical = historicalData
+    .filter(entry => entry.date !== todayDateString) // Exclude today if it exists
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Sort by date descending
   
-  if (!previousDayEntry || !previousDayEntry.lastPrice) {
-    console.log('⚠️ No previous day data found');
+  if (sortedHistorical.length < 2) {
+    console.log('⚠️ Insufficient historical data for change calculation (need at least 2 trading days)');
     return 0;
   }
   
-  const previousClose = previousDayEntry.lastPrice;
-  const changePercent = ((currentPrice - previousClose) / previousClose) * 100;
+  const latestDay = sortedHistorical[0];    // Most recent trading day (yesterday)
+  const previousDay = sortedHistorical[1];  // Day before yesterday
   
-  console.log(`📊 Change calculation: ${currentPrice} vs ${previousClose} (${previousDayEntry.date}) = ${changePercent.toFixed(2)}%`);
+  if (!latestDay.lastPrice || !previousDay.lastPrice) {
+    console.log('⚠️ Missing price data in historical records');
+    return 0;
+  }
+  
+  const changePercent = ((latestDay.lastPrice - previousDay.lastPrice) / previousDay.lastPrice) * 100;
+  
+  console.log(`📊 Change calculation: ${latestDay.date} (${latestDay.lastPrice}) vs ${previousDay.date} (${previousDay.lastPrice}) = ${changePercent.toFixed(2)}%`);
   
   return changePercent;
 }
@@ -576,7 +584,7 @@ export async function POST(request: Request) {
       hasVolume: historicalData.filter(entry => entry.totalVolume > 0).length
     });
     
-    const changePercent = calculateChangePercent(ltp, historicalData);
+    const changePercent = calculateChangePercent(ltp, historicalData, priceType);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
