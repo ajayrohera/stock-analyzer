@@ -348,10 +348,10 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
         </div>
       </div>
       
-      <div className="flex items-center justify-center space-x-2 mt-2">
+      <div className="flex items-center justify-center mt-2">
         {signalIcon}
-        <span className={`text-xl font-bold ${strengthColor}`}>
-          {adAnalysis.todaySignal || 'NEUTRAL'}
+        <span className={`text-lg font-bold ml-2 ${strengthColor}`}>
+          Today's Signal: {adAnalysis.todaySignal || 'NEUTRAL'} ({adAnalysis.todayStrength || 'WEAK'})
         </span>
       </div>
       
