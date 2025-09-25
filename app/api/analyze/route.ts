@@ -625,7 +625,7 @@ export async function POST(request: Request) {
       });
 
       // Only proceed with A/D analysis if we have sufficient historical data
-      if (historicalData.length >= 5) {
+      if (historicalData.length >= 1) {
         adAnalysis = generateADAnalysis(displayName.toUpperCase(), historicalData, todayData);
         
         console.log('📊 A/D ANALYSIS - Result:', {
