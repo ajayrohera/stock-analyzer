@@ -77,18 +77,34 @@ type LoadingState = 'IDLE' | 'FETCHING_SYMBOLS' | 'ANALYZING' | 'REFRESHING';
 const marketHolidays2025 = new Set(['2025-01-26', '2025-02-26', '2025-03-14', '2025-03-31', '2025-04-10', '2025-04-14', '2025-04-18', '2025-05-01', '2025-06-07', '2025-08-15', '2025-08-27', '2025-10-02', '2025-10-21', '2025-10-22', '2025-11-05', '2025-12-25']);
 const marketHolidaysWithNames: { [key: string]: string } = { '2025-01-26': 'Republic Day', '2025-02-26': 'Maha Shivratri', '2025-03-14': 'Holi', '2025-03-31': 'Id-Ul-Fitr (Ramzan Id)', '2025-04-10': 'Shri Mahavir Jayanti', '2025-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2025-04-18': 'Good Friday', '2025-05-01': 'Maharashtra Day', '2025-06-07': 'Bakri Id', '2025-08-15': 'Independence Day', '2025-08-27': 'Shri Ganesh Chaturthi', '2025-10-02': 'Mahatma Gandhi Jayanti', '2025-10-21': 'Diwali Laxmi Pujan', '2025-10-22': 'Balipratipada', '2025-11-05': 'Gurunanak Jayanti', '2025-12-25': 'Christmas' };
 
+// Helper function to format money flow - DEFINED FIRST
+const formatMoneyFlow = (flow: number): string => {
+  if (flow === undefined || flow === null || isNaN(flow)) return '0';
+  if (Math.abs(flow) >= 1000000) return `${(flow / 1000000).toFixed(1)}M`;
+  if (Math.abs(flow) >= 1000) return `${(flow / 1000).toFixed(1)}K`;
+  return flow.toFixed(0);
+};
+
 const isAnalysisResult = (data: unknown): data is AnalysisResult => {
   try {
     const typedData = data as AnalysisResult;
     const supportsIsValid = Array.isArray(typedData.supports) && (typedData.supports.length === 0 || (typeof typedData.supports[0] === 'object' && typedData.supports[0] !== null && 'price' in typedData.supports[0]));
     const resistancesIsValid = Array.isArray(typedData.resistances) && (typedData.resistances.length === 0 || (typeof typedData.resistances[0] === 'object' && typedData.resistances[0] !== null && 'price' in typedData.resistances[0]));
+    
+    // Check if adAnalysis exists but don't require it to be valid
+    const adAnalysisIsValid = !typedData.adAnalysis || (
+      typeof typedData.adAnalysis === 'object' &&
+      typedData.adAnalysis !== null
+    );
+    
     return (!!typedData && 
             typeof typedData.symbol === 'string' && 
             typeof typedData.pcr === 'number' && 
             typeof typedData.ltp === 'number' && 
             typeof typedData.priceType === 'string' &&
             supportsIsValid && 
-            resistancesIsValid);
+            resistancesIsValid &&
+            adAnalysisIsValid);
   } catch (error) { 
     console.error('Validation error:', error); 
     return false; 
@@ -293,18 +309,25 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
     );
   }
 
-  const signalIcon = getSignalIcon(adAnalysis.todaySignal);
-  const strengthColor = getStrengthColor(adAnalysis.todayStrength);
-  const trendIcon = getTrendIcon(adAnalysis.trend);
+  // Add safety checks for all values
+  const signalIcon = getSignalIcon(adAnalysis.todaySignal || 'NEUTRAL');
+  const strengthColor = getStrengthColor(adAnalysis.todayStrength || 'WEAK');
+  const trendIcon = getTrendIcon(adAnalysis.trend || 'SIDEWAYS');
+  
+  const todayMoneyFlow = adAnalysis.todayMoneyFlow || 0;
+  const twentyDayAverage = adAnalysis.twentyDayAverage || 0;
+  const trend = adAnalysis.trend || 'SIDEWAYS';
+  const confidence = adAnalysis.confidence || 'LOW';
+  const interpretation = adAnalysis.interpretation || 'Analysis data not available';
 
-  // Use formatted lines if available, otherwise create them
+  // Use formatted lines if available, otherwise create them with safety checks
   const displayLines = adAnalysis.formattedLines || [
-    `⚪ Today's Signal: ${adAnalysis.todaySignal} (${adAnalysis.todayStrength})`,
-    `💰 Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} average`,
-    `📊 20-Day Trend: ${adAnalysis.trend}`,
-    `🎯 Confidence: ${adAnalysis.confidence}`,
+    `⚪ Today's Signal: ${adAnalysis.todaySignal || 'NEUTRAL'} (${adAnalysis.todayStrength || 'WEAK'})`,
+    `💰 Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} average`,
+    `📊 20-Day Trend: ${trend}`,
+    `🎯 Confidence: ${confidence}`,
     ``,
-    `💡 ${adAnalysis.interpretation}`
+    `💡 ${interpretation}`
   ];
 
   return (
@@ -318,9 +341,9 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
             Accumulation/Distribution Line tracks money flow by comparing closing price to high/low range.
             <br />Shows institutional buying/selling pressure.
             <br /><br />
-            Signal: {adAnalysis.todaySignal} ({adAnalysis.todayStrength})
-            <br />Money Flow: {adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}{formatMoneyFlow(adAnalysis.todayMoneyFlow)}
-            <br />Trend: {adAnalysis.trend} ({adAnalysis.confidence} confidence)
+            Signal: {adAnalysis.todaySignal || 'NEUTRAL'} ({adAnalysis.todayStrength || 'WEAK'})
+            <br />Money Flow: {todayMoneyFlow >= 0 ? '+' : ''}{formatMoneyFlow(todayMoneyFlow)}
+            <br />Trend: {trend} ({confidence} confidence)
           </div>
         </div>
       </div>
@@ -328,7 +351,7 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
       <div className="flex items-center justify-center space-x-2 mt-2">
         {signalIcon}
         <span className={`text-xl font-bold ${strengthColor}`}>
-          {adAnalysis.todaySignal}
+          {adAnalysis.todaySignal || 'NEUTRAL'}
         </span>
       </div>
       
@@ -342,19 +365,12 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
       </div>
       
       <div className="text-xs mt-2 text-gray-400 text-left">
-        {adAnalysis.interpretation}
+        {interpretation}
       </div>
     </div>
   );
 });
 ADLineAnalysisCard.displayName = 'ADLineAnalysisCard';
-
-// Helper function to format money flow
-const formatMoneyFlow = (flow: number): string => {
-  if (Math.abs(flow) >= 1000000) return `${(flow / 1000000).toFixed(1)}M`;
-  if (Math.abs(flow) >= 1000) return `${(flow / 1000).toFixed(1)}K`;
-  return flow.toFixed(0);
-};
 
 const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
   <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
@@ -381,12 +397,14 @@ const VolumeCard = React.memo(({
   symbol?: string;
 }) => {
   const formatVolume = (volume: number) => {
+    if (volume === undefined || volume === null || isNaN(volume)) return '0';
     if (volume >= 1000000) return `${(volume / 1000000).toFixed(1)}M`;
     if (volume >= 1000) return `${(volume / 1000).toFixed(1)}K`;
     return volume.toString();
   };
 
   const getPercentageColor = (percentage: number) => {
+    if (percentage === undefined || percentage === null || isNaN(percentage)) return 'text-gray-400';
     if (percentage > 100) return 'text-green-400';
     if (percentage > 75) return 'text-yellow-400';
     if (percentage > 50) return 'text-orange-400';
@@ -430,7 +448,7 @@ const VolumeCard = React.memo(({
       {marketStatus === 'OPEN' && areTodayMetricsAvailable ? (
         <>
           <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
-            {todayVolumePercentage.toFixed(1)}% of Avg
+            {todayVolumePercentage?.toFixed(1) || '0'}% of Avg
           </p>
           
           {isUnusualVolume && (
@@ -441,7 +459,7 @@ const VolumeCard = React.memo(({
           )}
           
           <p className="text-md text-gray-300 mt-2">
-            Est. Today: {formatVolume(estimatedTodayVolume)}
+            Est. Today: {formatVolume(estimatedTodayVolume || 0)}
           </p>
         </>
       ) : marketStatus === 'OPEN' ? (
