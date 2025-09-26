@@ -747,6 +747,11 @@ export async function POST(request: Request) {
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
     let highestCallOI = 0, highestPutOI = 0;
 
+    // FIXED: Calculate PCR data but preserve it when market is closed
+    let pcr = 0;
+    let volumePcr = 0;
+    
+    // Always calculate current PCR data
     for (const strike of strikePrices) {
         const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
         const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
@@ -764,19 +769,29 @@ export async function POST(request: Request) {
         if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
     }
 
-    let pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
-    let volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+    pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
+    volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
 
-    // Use the enhanced market hours detection for sentiment data
+    // FIXED: Use the enhanced market hours detection for sentiment data
+    // If market is closed, try to get previous day's PCR data
     if (!marketOpen) {
         const dailyDataStr = await getRedisData('daily_sentiment_data');
         if (dailyDataStr) {
             const dailyData = JSON.parse(dailyDataStr);
             const symbolData = dailyData[displayName.toUpperCase()];
             if (symbolData) {
-                pcr = symbolData.oiPcr;
-                volumePcr = symbolData.volumePcr;
+                // Only use stored data if current PCR is 0 (no live data available)
+                if (pcr === 0) pcr = symbolData.oiPcr;
+                if (volumePcr === 0) volumePcr = symbolData.volumePcr;
+                console.log('📊 Using stored PCR data (market closed):', { oiPcr: pcr, volumePcr });
             }
+        }
+        
+        // If we still don't have PCR data, try to calculate from options chain
+        if (pcr === 0 && totalCallOI > 0) {
+            pcr = totalPutOI / totalCallOI;
+            volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+            console.log('📊 Calculated PCR from options chain (market closed):', { pcr, volumePcr });
         }
     }
 
@@ -852,7 +867,9 @@ export async function POST(request: Request) {
       finalSupports: supportLevels,
       finalResistances: resistanceLevels,
       hasADAnalysis: !!adAnalysis,
-      marketOpen: marketOpen
+      marketOpen: marketOpen,
+      pcr: pcr,
+      volumePcr: volumePcr
     });
 
     const responseData = {
