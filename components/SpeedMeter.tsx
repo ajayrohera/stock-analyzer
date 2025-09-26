@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Zap, TrendingUp, TrendingDown, Gauge } from 'lucide-react';
 
 interface SpeedMeterProps {
-  analysisData: any; // Your existing analysis result
+  analysisData: any;
   isLoading?: boolean;
 }
 
@@ -15,32 +15,39 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
   // Convert analysis to meter score when data changes
   useEffect(() => {
     if (analysisData && !isLoading) {
+      console.log('🔍 SpeedMeter DEBUG - Analysis data received:', {
+        symbol: analysisData.symbol,
+        pcr: analysisData.pcr,
+        volumePcr: analysisData.volumePcr,
+        changePercent: analysisData.changePercent,
+        supports: analysisData.supports?.length,
+        resistances: analysisData.resistances?.length,
+        sentiment: analysisData.sentiment
+      });
+      
       const meterResult = convertToSpeedScore(analysisData);
+      console.log('🔍 SpeedMeter DEBUG - Calculated score:', meterResult);
       
       if (!hasAnimated) {
         animateMeter(meterResult.score);
         setHasAnimated(true);
       } else {
-        // If already animated, just set the score directly
         setCurrentScore(meterResult.score);
       }
     } else if (!analysisData) {
-      // Reset when no data
       setCurrentScore(0);
       setHasAnimated(false);
     }
   }, [analysisData, isLoading, hasAnimated]);
 
   const animateMeter = async (targetScore: number) => {
-    const duration = 1500; // 1.5 second animation
+    const duration = 1500;
     const steps = 50;
     const stepDuration = duration / steps;
     
-    // Reset to 0 first
     setCurrentScore(0);
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    // Animate to target score
     for (let i = 0; i <= steps; i++) {
       const progress = i / steps;
       const easeProgress = 1 - Math.pow(1 - progress, 3);
@@ -54,9 +61,13 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     if (!analysisData) return { score: 0, sentiment: 'NEUTRAL', confidence: 0 };
     
     let score = 0;
+    console.log('🔍 Starting score calculation for:', analysisData.symbol);
     
     // PCR scoring (-3 to +3)
     const pcr = analysisData.pcr || 1;
+    console.log('🔍 PCR:', pcr, 'Score contribution:', 
+      pcr > 1.3 ? '+3' : pcr > 1.1 ? '+2' : pcr > 0.9 ? '0' : pcr > 0.7 ? '-2' : '-3');
+    
     if (pcr > 1.3) score += 3;
     else if (pcr > 1.1) score += 2;
     else if (pcr > 0.9) score += 0;
@@ -65,6 +76,9 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
 
     // Volume PCR scoring (-2 to +2)
     const volumePcr = analysisData.volumePcr || 1;
+    console.log('🔍 Volume PCR:', volumePcr, 'Score contribution:',
+      volumePcr < 0.7 ? '+2' : volumePcr < 0.9 ? '+1' : volumePcr > 1.3 ? '-2' : volumePcr > 1.1 ? '-1' : '0');
+    
     if (volumePcr < 0.7) score += 2;
     else if (volumePcr < 0.9) score += 1;
     else if (volumePcr > 1.3) score -= 2;
@@ -72,6 +86,9 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
 
     // Price change scoring (-2 to +2)
     const changePercent = analysisData.changePercent || 0;
+    console.log('🔍 Change %:', changePercent, 'Score contribution:',
+      changePercent > 2 ? '+2' : changePercent > 0.5 ? '+1' : changePercent < -2 ? '-2' : changePercent < -0.5 ? '-1' : '0');
+    
     if (changePercent > 2) score += 2;
     else if (changePercent > 0.5) score += 1;
     else if (changePercent < -2) score -= 2;
@@ -87,6 +104,10 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
       sum + (r.strength === 'strong' ? 2 : r.strength === 'medium' ? 1 : 0.5), 0);
     const optionsBias = supportStrength - resistanceStrength;
     
+    console.log('🔍 Options Bias:', optionsBias, 'Supports:', supports.length, 'Resistances:', resistances.length);
+    console.log('🔍 Options Bias Score contribution:',
+      optionsBias > 2 ? '+3' : optionsBias > 1 ? '+2' : optionsBias < -2 ? '-3' : optionsBias < -1 ? '-2' : '0');
+    
     if (optionsBias > 2) score += 3;
     else if (optionsBias > 1) score += 2;
     else if (optionsBias < -2) score -= 3;
@@ -95,25 +116,30 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     // Clamp between -10 and 10
     score = Math.max(-10, Math.min(10, score));
 
-    // Determine sentiment
+    // FIXED: Better sentiment classification thresholds
     let sentiment = 'NEUTRAL';
     if (score >= 6) sentiment = 'STRONGLY_BULLISH';
-    else if (score >= 2) sentiment = 'BULLISH';
+    else if (score >= 3) sentiment = 'BULLISH';
+    else if (score >= 1) sentiment = 'SLIGHTLY_BULLISH';
     else if (score <= -6) sentiment = 'STRONGLY_BEARISH';
-    else if (score <= -2) sentiment = 'BEARISH';
+    else if (score <= -3) sentiment = 'BEARISH';
+    else if (score <= -1) sentiment = 'SLIGHTLY_BEARISH';
 
-    // Calculate confidence
     const hasGoodData = analysisData.supports?.length > 0 && analysisData.resistances?.length > 0;
     const confidence = hasGoodData ? 85 : 65;
 
+    console.log('🔍 Final score:', score, 'Sentiment:', sentiment, 'Confidence:', confidence);
+    
     return { score, sentiment, confidence };
   };
 
   const getScoreColor = (score: number) => {
     if (score >= 6) return 'text-green-400';
-    if (score >= 2) return 'text-green-300';
+    if (score >= 3) return 'text-green-300';
+    if (score >= 1) return 'text-green-200';
     if (score <= -6) return 'text-red-500';
-    if (score <= -2) return 'text-red-400';
+    if (score <= -3) return 'text-red-400';
+    if (score <= -1) return 'text-red-300';
     return 'text-yellow-400';
   };
 
@@ -121,13 +147,14 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     switch (sentiment) {
       case 'STRONGLY_BULLISH': return <TrendingUp className="text-green-400" size={18} />;
       case 'BULLISH': return <TrendingUp className="text-green-300" size={18} />;
+      case 'SLIGHTLY_BULLISH': return <TrendingUp className="text-green-200" size={18} />;
       case 'STRONGLY_BEARISH': return <TrendingDown className="text-red-500" size={18} />;
       case 'BEARISH': return <TrendingDown className="text-red-400" size={18} />;
+      case 'SLIGHTLY_BEARISH': return <TrendingDown className="text-red-300" size={18} />;
       default: return <Gauge className="text-yellow-400" size={18} />;
     }
   };
 
-  // Calculate needle position (0% to 100% where 50% is center/neutral)
   const getNeedlePosition = (score: number) => {
     return 50 + (score / 10) * 50;
   };
@@ -164,9 +191,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
         </p>
       </div>
 
-      {/* Meter Container */}
       <div className="relative max-w-2xl mx-auto">
-        {/* Meter Scale */}
         <div className="flex justify-between text-gray-400 text-xs mb-2 px-2">
           <span>-10</span>
           <span>Bearish</span>
@@ -175,9 +200,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
           <span>+10</span>
         </div>
         
-        {/* Meter Track */}
         <div className="h-6 bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 rounded-full overflow-hidden relative mb-8">
-          {/* Animated Needle */}
           <div 
             className="absolute top-0 bottom-0 w-1 bg-white z-10 transition-all duration-200 ease-out shadow-lg"
             style={{ 
@@ -188,7 +211,6 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
           </div>
         </div>
 
-        {/* Current Score Display */}
         <div className="text-center mt-4">
           <div className={`text-4xl font-bold ${getScoreColor(currentScore)} mb-3`}>
             {currentScore > 0 ? '+' : ''}{currentScore.toFixed(1)}
