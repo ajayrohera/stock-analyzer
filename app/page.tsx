@@ -349,10 +349,14 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
       
       <div className="flex items-center justify-center mt-2">
         {signalIcon}
-        <span className={`text-lg font-bold ml-2 ${strengthColor}`}>
+        <span 
+          className="text-lg font-bold ml-2" 
+          style={{ color: adAnalysis.styling?.signalColor || '#6b7280' }}
+        >
           Today's Signal: {adAnalysis.todaySignal || 'NEUTRAL'} ({adAnalysis.todayStrength || 'WEAK'})
         </span>
       </div>
+
       
       <div className="text-xs space-y-1 mt-2 text-left">
         {displayLines.slice(0, 4).map((line, index) => (
