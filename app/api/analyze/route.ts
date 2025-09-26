@@ -57,6 +57,25 @@ async function getRedisData(key: string) {
 }
 
 // --- HELPER FUNCTIONS ---
+
+// Enhanced market hours detection - CORRECTED
+const isMarketOpen = (): boolean => {
+    const now = new Date();
+    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const day = istTime.getDay();
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+    
+    // Market hours: 9:15 AM to 3:30 PM IST, Monday to Friday
+    if (day === 0 || day === 6) return false; // Weekend
+    
+    const timeInMinutes = hours * 60 + minutes;
+    const marketOpen = 9 * 60 + 15;  // 9:15 AM
+    const marketClose = 15 * 60 + 30; // 3:30 PM
+    
+    return timeInMinutes >= marketOpen && timeInMinutes <= marketClose;
+};
+
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await getRedisData('volume_history');
@@ -99,6 +118,7 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
   return generatePsychologicalLevels(currentPrice);
 }
 
+// CORRECTED: Fixed percentage calculation - now compares today vs yesterday
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string): number {
   console.log(`📈 Calculating change percent for price: ${currentPrice}, priceType: ${priceType}, historical entries: ${historicalData.length}`);
   
@@ -114,27 +134,28 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   
   console.log(`📊 Date debug: Today(IST)=${todayDateString}, Historical dates=`, historicalData.map(d => d.date));
   
-  // FIXED: Always compare against previous trading day, regardless of market hours
+  // CORRECTED LOGIC: Find yesterday's close price
   const sortedHistorical = historicalData
-    .filter(entry => entry.date !== todayDateString) // Exclude today if it exists
+    .filter(entry => entry.date !== todayDateString) // Exclude today
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Sort by date descending
   
-  if (sortedHistorical.length < 2) {
-    console.log('⚠️ Insufficient historical data for change calculation (need at least 2 trading days)');
+  if (sortedHistorical.length === 0) {
+    console.log('⚠️ No historical data available for comparison');
     return 0;
   }
   
-  const latestDay = sortedHistorical[0];    // Most recent trading day (yesterday)
-  const previousDay = sortedHistorical[1];  // Day before yesterday
+  const yesterdayData = sortedHistorical[0]; // Most recent historical data (yesterday)
   
-  if (!latestDay.lastPrice || !previousDay.lastPrice) {
-    console.log('⚠️ Missing price data in historical records');
+  // PROPER NULL CHECKING
+  if (!yesterdayData || !yesterdayData.lastPrice) {
+    console.log('⚠️ Missing yesterday price data');
     return 0;
   }
   
-  const changePercent = ((latestDay.lastPrice - previousDay.lastPrice) / previousDay.lastPrice) * 100;
+  // CORRECTED: Calculate change: (Today - Yesterday) / Yesterday
+  const changePercent = ((currentPrice - yesterdayData.lastPrice) / yesterdayData.lastPrice) * 100;
   
-  console.log(`📊 Change calculation: ${latestDay.date} (${latestDay.lastPrice}) vs ${previousDay.date} (${previousDay.lastPrice}) = ${changePercent.toFixed(2)}%`);
+  console.log(`📊 CORRECTED Change calculation: Today(${currentPrice}) vs ${yesterdayData.date} (${yesterdayData.lastPrice}) = ${changePercent.toFixed(2)}%`);
   
   return changePercent;
 }
@@ -480,22 +501,6 @@ function calculateSmartSentiment(
   return "Neutral";
 }
 
-const getMarketStatus = (): 'OPEN' | 'CLOSED' => {
-    const now = new Date();
-    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const day = istTime.getDay();
-    const hours = istTime.getHours();
-    const minutes = istTime.getMinutes();
-    if (day > 0 && day < 6) {
-        if (hours > 9 || (hours === 9 && minutes >= 15)) {
-            if (hours < 15 || (hours === 15 && minutes <= 30)) {
-                return 'OPEN';
-            }
-        }
-    }
-    return 'CLOSED';
-};
-
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
   try {
@@ -555,20 +560,61 @@ export async function POST(request: Request) {
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
     const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
     
-    // FIX: Handle LTP=0 after market hours by falling back to historical data
+    // ENHANCED: Better market hours and price type detection
     let ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
     let priceType = 'CMP'; // Default to live price
     
     const historicalData = await getHistoricalData(displayName);
     
-    // If LTP is 0 (API stopped providing data), use yesterday's close from historical data
+    // Use IST timezone for today's date calculation
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); // UTC+5:30
+    const todayDateString = istTime.toISOString().split('T')[0];
+    
+    const marketOpen = isMarketOpen();
+    
+    // ENHANCED: Proper market hours handling with proper null checking
+    if (!marketOpen) {
+        // Market is closed - use yesterday's close
+        if (historicalData.length > 0) {
+            const sortedHistorical = historicalData
+                .filter(entry => entry.date !== todayDateString)
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            
+            // PROPER NULL CHECKING
+            if (sortedHistorical.length > 0 && sortedHistorical[0] && sortedHistorical[0].lastPrice) {
+                ltp = sortedHistorical[0].lastPrice;
+                priceType = 'Previous Close';
+                console.log('📊 Using Previous Close (market closed):', ltp);
+            }
+        }
+    } else {
+        // Market is open, but check if we have valid live data
+        const todayOHLC = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.ohlc;
+        
+        // If LTP is suspiciously equal to yesterday's close exactly, it might be stale data
+        if (historicalData.length > 0 && ltp > 0) {
+            const yesterdayData = historicalData
+                .filter(entry => entry.date !== todayDateString)
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+            
+            // PROPER NULL CHECKING
+            if (yesterdayData && yesterdayData.lastPrice && Math.abs(ltp - yesterdayData.lastPrice) < 0.01) {
+                console.log('📊 Suspicious data detected - LTP matches yesterday close exactly, but market is open');
+                // Keep current LTP but we'll use the correct change calculation
+            }
+        }
+    }
+    
+    // Fallback for zero LTP with proper null checking
     if (ltp === 0 && historicalData.length > 0) {
-        const latestHistorical = historicalData.sort((a, b) => 
-            new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-        if (latestHistorical.lastPrice) {
-            ltp = latestHistorical.lastPrice;
+        const sortedHistorical = historicalData.sort((a, b) => 
+            new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+        if (sortedHistorical.length > 0 && sortedHistorical[0] && sortedHistorical[0].lastPrice) {
+            ltp = sortedHistorical[0].lastPrice;
             priceType = 'Previous Close';
-            console.log('📊 Using historical data as LTP:', ltp);
+            console.log('📊 Using historical data as LTP (zero fallback):', ltp);
         }
     }
 
@@ -584,6 +630,7 @@ export async function POST(request: Request) {
       hasVolume: historicalData.filter(entry => entry.totalVolume > 0).length
     });
     
+    // NOW THIS WILL CALCULATE CORRECT PERCENTAGE: (Today - Yesterday) / Yesterday
     const changePercent = calculateChangePercent(ltp, historicalData, priceType);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
     
@@ -614,7 +661,7 @@ export async function POST(request: Request) {
       } else if (historicalData.length > 0) {
         // Fallback: use latest historical data as proxy for today
         const latestHistorical = historicalData[historicalData.length - 1];
-        if (latestHistorical.lastPrice && latestHistorical.lastPrice > 0) {
+        if (latestHistorical && latestHistorical.lastPrice && latestHistorical.lastPrice > 0) {
           todayData = {
             high: latestHistorical.lastPrice,
             low: latestHistorical.lastPrice, 
@@ -720,8 +767,8 @@ export async function POST(request: Request) {
     let pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
     let volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
 
-    const marketStatus = getMarketStatus();
-    if (marketStatus === 'CLOSED') {
+    // Use the enhanced market hours detection for sentiment data
+    if (!marketOpen) {
         const dailyDataStr = await getRedisData('daily_sentiment_data');
         if (dailyDataStr) {
             const dailyData = JSON.parse(dailyDataStr);
@@ -756,7 +803,7 @@ export async function POST(request: Request) {
     for (const expiryStrike of strikePrices) {
         let totalLoss = 0;
         for (const strike of strikePrices) {
-            const option = optionsByStrike[strike];
+            const option = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
             if (option.ce_oi > 0 && expiryStrike > strike) totalLoss += (expiryStrike - strike) * option.ce_oi;
             if (option.pe_oi > 0 && expiryStrike < strike) totalLoss += (strike - expiryStrike) * option.pe_oi;
         }
@@ -804,7 +851,8 @@ export async function POST(request: Request) {
       hasResistance: resistanceLevels.length > 0,
       finalSupports: supportLevels,
       finalResistances: resistanceLevels,
-      hasADAnalysis: !!adAnalysis
+      hasADAnalysis: !!adAnalysis,
+      marketOpen: marketOpen
     });
 
     const responseData = {
