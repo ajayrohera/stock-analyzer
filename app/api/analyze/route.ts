@@ -872,6 +872,13 @@ export async function POST(request: Request) {
       volumePcr: volumePcr
     });
 
+      console.log('🎨 FINAL A/D ANALYSIS DEBUG:');
+      console.log('🎨 todaySignal:', adAnalysis.todaySignal, 'Type:', typeof adAnalysis.todaySignal);
+      console.log('🎨 todayStrength:', adAnalysis.todayStrength, 'Type:', typeof adAnalysis.todayStrength);
+      console.log('🎨 Signal Color Result:', getSignalColor(adAnalysis.todaySignal));
+      console.log('🎨 Strength Color Result:', getStrengthColor(adAnalysis.todayStrength));
+      console.log('🎨 TESTING DISTRIBUTION CASE - getSignalColor("DISTRIBUTION"):', getSignalColor("DISTRIBUTION"));
+
     const responseData = {
         symbol: displayName.toUpperCase(),
         ltp: ltp,
