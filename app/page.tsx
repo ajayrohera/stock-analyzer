@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown, Calendar, Target, AlertTriangle, CandlestickChart } from 'lucide-react';
-import SpeedMeter from '@/components/SpeedMeter'; // ADD THIS IMPORT
+import SpeedMeter from '../components/SpeedMeter'; // ADD THIS IMPORT
 
 // --- HELPER TYPES ---
 type SupportResistanceLevel = {

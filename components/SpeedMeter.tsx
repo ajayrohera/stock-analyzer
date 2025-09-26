@@ -8,22 +8,14 @@ interface SpeedMeterProps {
   isLoading?: boolean;
 }
 
-interface MeterResult {
-  score: number;
-  sentiment: string;
-  confidence: number;
-}
-
 export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMeterProps) {
   const [currentScore, setCurrentScore] = useState(0);
-  const [result, setResult] = useState<MeterResult | null>(null);
   const [hasAnimated, setHasAnimated] = useState(false);
 
   // Convert analysis to meter score when data changes
   useEffect(() => {
     if (analysisData && !isLoading) {
       const meterResult = convertToSpeedScore(analysisData);
-      setResult(meterResult);
       
       if (!hasAnimated) {
         animateMeter(meterResult.score);
@@ -32,6 +24,10 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
         // If already animated, just set the score directly
         setCurrentScore(meterResult.score);
       }
+    } else if (!analysisData) {
+      // Reset when no data
+      setCurrentScore(0);
+      setHasAnimated(false);
     }
   }, [analysisData, isLoading, hasAnimated]);
 
@@ -54,7 +50,9 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     }
   };
 
-  const convertToSpeedScore = (analysisData: any): MeterResult => {
+  const convertToSpeedScore = (analysisData: any) => {
+    if (!analysisData) return { score: 0, sentiment: 'NEUTRAL', confidence: 0 };
+    
     let score = 0;
     
     // PCR scoring (-3 to +3)
@@ -129,13 +127,16 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     }
   };
 
+  // Calculate needle position (0% to 100% where 50% is center/neutral)
   const getNeedlePosition = (score: number) => {
     return 50 + (score / 10) * 50;
   };
 
+  const result = analysisData ? convertToSpeedScore(analysisData) : null;
+
   if (isLoading) {
     return (
-      <div className="bg-gray-900/50 p-6 rounded-lg text-center">
+      <div className="bg-gray-900/50 p-6 rounded-lg text-center border border-gray-700">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-cyan mx-auto mb-4"></div>
         <p className="text-gray-400">Calculating sentiment...</p>
       </div>
@@ -144,7 +145,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
 
   if (!analysisData) {
     return (
-      <div className="bg-gray-900/50 p-6 rounded-lg text-center">
+      <div className="bg-gray-900/50 p-6 rounded-lg text-center border border-gray-700">
         <Zap className="mx-auto mb-3 text-gray-500" size={24} />
         <p className="text-gray-400">Analyze a symbol to see sentiment score</p>
       </div>
@@ -188,7 +189,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
         </div>
 
         {/* Current Score Display */}
-        <div className="text-center">
+        <div className="text-center mt-4">
           <div className={`text-4xl font-bold ${getScoreColor(currentScore)} mb-3`}>
             {currentScore > 0 ? '+' : ''}{currentScore.toFixed(1)}
           </div>
