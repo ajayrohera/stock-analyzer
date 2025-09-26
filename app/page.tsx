@@ -348,7 +348,7 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
       </div>
       
       <div className="flex items-center justify-center mt-2">
-        {signalIcon}
+        
         <span 
           className="text-lg font-bold ml-2" 
           style={{ color: adAnalysis.styling?.signalColor || '#6b7280' }}
