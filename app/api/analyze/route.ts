@@ -58,24 +58,6 @@ async function getRedisData(key: string) {
 
 // --- HELPER FUNCTIONS ---
 
-// Enhanced market hours detection - CORRECTED
-const isMarketOpen = (): boolean => {
-    const now = new Date();
-    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const day = istTime.getDay();
-    const hours = istTime.getHours();
-    const minutes = istTime.getMinutes();
-    
-    // Market hours: 9:15 AM to 3:30 PM IST, Monday to Friday
-    if (day === 0 || day === 6) return false; // Weekend
-    
-    const timeInMinutes = hours * 60 + minutes;
-    const marketOpen = 9 * 60 + 15;  // 9:15 AM
-    const marketClose = 15 * 60 + 30; // 3:30 PM
-    
-    return timeInMinutes >= marketOpen && timeInMinutes <= marketClose;
-};
-
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await getRedisData('volume_history');
@@ -118,9 +100,15 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
   return generatePsychologicalLevels(currentPrice);
 }
 
-// CORRECTED: Fixed percentage calculation - now compares today vs yesterday
-function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string): number {
-  console.log(`📈 Calculating change percent for price: ${currentPrice}, priceType: ${priceType}, historical entries: ${historicalData.length}`);
+// UPDATED: Added isPreMarket parameter
+function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string, isPreMarket: boolean = false): number {
+  console.log(`📈 Calculating change percent for price: ${currentPrice}, priceType: ${priceType}, preMarket: ${isPreMarket}, historical entries: ${historicalData.length}`);
+  
+  // SPECIAL CASE: Pre-market window (9:00-9:15 AM) - always return 0%
+  if (isPreMarket) {
+    console.log('📊 Pre-market window - returning 0% change');
+    return 0;
+  }
   
   if (!historicalData || historicalData.length === 0 || !currentPrice) {
     console.log('⚠️ Insufficient data for change calculation');
@@ -560,60 +548,44 @@ export async function POST(request: Request) {
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
     const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
     
-    // ENHANCED: Better market hours and price type detection
+    // SIMPLIFIED: Time-based logic
     let ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
-    let priceType = 'CMP'; // Default to live price
+    let priceType = 'CMP'; // Always show CMP
     
     const historicalData = await getHistoricalData(displayName);
     
-    // Use IST timezone for today's date calculation
+    // Get current IST time
     const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); // UTC+5:30
-    const todayDateString = istTime.toISOString().split('T')[0];
+    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+    const timeInMinutes = hours * 60 + minutes;
     
-    const marketOpen = isMarketOpen();
+    // Define time periods
+    const preMarketStart = 9 * 60 + 0;    // 9:00 AM
+    const marketOpen = 9 * 60 + 15;       // 9:15 AM
+    const marketClose = 15 * 60 + 30;     // 3:30 PM
     
-    // ENHANCED: Proper market hours handling with proper null checking
-    if (!marketOpen) {
-        // Market is closed - use yesterday's close
-        if (historicalData.length > 0) {
-            const sortedHistorical = historicalData
-                .filter(entry => entry.date !== todayDateString)
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-            
-            // PROPER NULL CHECKING
-            if (sortedHistorical.length > 0 && sortedHistorical[0] && sortedHistorical[0].lastPrice) {
-                ltp = sortedHistorical[0].lastPrice;
-                priceType = 'Previous Close';
-                console.log('📊 Using Previous Close (market closed):', ltp);
-            }
-        }
-    } else {
-        // Market is open, but check if we have valid live data
-        const todayOHLC = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.ohlc;
-        
-        // If LTP is suspiciously equal to yesterday's close exactly, it might be stale data
-        if (historicalData.length > 0 && ltp > 0) {
-            const yesterdayData = historicalData
-                .filter(entry => entry.date !== todayDateString)
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-            
-            // PROPER NULL CHECKING
-            if (yesterdayData && yesterdayData.lastPrice && Math.abs(ltp - yesterdayData.lastPrice) < 0.01) {
-                console.log('📊 Suspicious data detected - LTP matches yesterday close exactly, but market is open');
-                // Keep current LTP but we'll use the correct change calculation
-            }
-        }
-    }
+    // Determine if we're in the special pre-market window (9:00-9:15 AM)
+    const isPreMarketWindow = (timeInMinutes >= preMarketStart && timeInMinutes < marketOpen);
     
-    // Fallback for zero LTP with proper null checking
-    if (ltp === 0 && historicalData.length > 0) {
+    console.log('🕒 Time check:', { 
+        hours, 
+        minutes, 
+        timeInMinutes, 
+        isPreMarketWindow,
+        preMarketStart,
+        marketOpen,
+        marketClose
+    });
+    
+    // Handle zero LTP fallback (except during pre-market)
+    if (ltp === 0 && historicalData.length > 0 && !isPreMarketWindow) {
         const sortedHistorical = historicalData.sort((a, b) => 
             new Date(b.date).getTime() - new Date(a.date).getTime());
         
         if (sortedHistorical.length > 0 && sortedHistorical[0] && sortedHistorical[0].lastPrice) {
             ltp = sortedHistorical[0].lastPrice;
-            priceType = 'Previous Close';
             console.log('📊 Using historical data as LTP (zero fallback):', ltp);
         }
     }
@@ -630,8 +602,8 @@ export async function POST(request: Request) {
       hasVolume: historicalData.filter(entry => entry.totalVolume > 0).length
     });
     
-    // NOW THIS WILL CALCULATE CORRECT PERCENTAGE: (Today - Yesterday) / Yesterday
-    const changePercent = calculateChangePercent(ltp, historicalData, priceType);
+    // UPDATED: Pass isPreMarketWindow to calculateChangePercent
+    const changePercent = calculateChangePercent(ltp, historicalData, priceType, isPreMarketWindow);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
@@ -747,11 +719,10 @@ export async function POST(request: Request) {
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
     let highestCallOI = 0, highestPutOI = 0;
 
-    // FIXED: Calculate PCR data but preserve it when market is closed
+    // Calculate PCR data
     let pcr = 0;
     let volumePcr = 0;
     
-    // Always calculate current PCR data
     for (const strike of strikePrices) {
         const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
         const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
@@ -772,26 +743,17 @@ export async function POST(request: Request) {
     pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
     volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
 
-    // FIXED: Use the enhanced market hours detection for sentiment data
-    // If market is closed, try to get previous day's PCR data
-    if (!marketOpen) {
+    // Use stored PCR data only if current PCR is 0 and we're not in pre-market
+    if (pcr === 0 && !isPreMarketWindow) {
         const dailyDataStr = await getRedisData('daily_sentiment_data');
         if (dailyDataStr) {
             const dailyData = JSON.parse(dailyDataStr);
             const symbolData = dailyData[displayName.toUpperCase()];
             if (symbolData) {
-                // Only use stored data if current PCR is 0 (no live data available)
-                if (pcr === 0) pcr = symbolData.oiPcr;
-                if (volumePcr === 0) volumePcr = symbolData.volumePcr;
-                console.log('📊 Using stored PCR data (market closed):', { oiPcr: pcr, volumePcr });
+                pcr = symbolData.oiPcr;
+                volumePcr = symbolData.volumePcr;
+                console.log('📊 Using stored PCR data:', { oiPcr: pcr, volumePcr });
             }
-        }
-        
-        // If we still don't have PCR data, try to calculate from options chain
-        if (pcr === 0 && totalCallOI > 0) {
-            pcr = totalPutOI / totalCallOI;
-            volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
-            console.log('📊 Calculated PCR from options chain (market closed):', { pcr, volumePcr });
         }
     }
 
@@ -867,17 +829,17 @@ export async function POST(request: Request) {
       finalSupports: supportLevels,
       finalResistances: resistanceLevels,
       hasADAnalysis: !!adAnalysis,
-      marketOpen: marketOpen,
+      isPreMarketWindow: isPreMarketWindow,
       pcr: pcr,
       volumePcr: volumePcr
     });
 
-      console.log('🎨 FINAL A/D ANALYSIS DEBUG:');
-      console.log('🎨 todaySignal:', adAnalysis.todaySignal, 'Type:', typeof adAnalysis.todaySignal);
-      console.log('🎨 todayStrength:', adAnalysis.todayStrength, 'Type:', typeof adAnalysis.todayStrength);
-      console.log('🎨 Signal Color Result:', getSignalColor(adAnalysis.todaySignal));
-      console.log('🎨 Strength Color Result:', getStrengthColor(adAnalysis.todayStrength));
-      console.log('🎨 TESTING DISTRIBUTION CASE - getSignalColor("DISTRIBUTION"):', getSignalColor("DISTRIBUTION"));
+    console.log('🎨 FINAL A/D ANALYSIS DEBUG:');
+    console.log('🎨 todaySignal:', adAnalysis.todaySignal, 'Type:', typeof adAnalysis.todaySignal);
+    console.log('🎨 todayStrength:', adAnalysis.todayStrength, 'Type:', typeof adAnalysis.todayStrength);
+    console.log('🎨 Signal Color Result:', getSignalColor(adAnalysis.todaySignal));
+    console.log('🎨 Strength Color Result:', getStrengthColor(adAnalysis.todayStrength));
+    console.log('🎨 TESTING DISTRIBUTION CASE - getSignalColor("DISTRIBUTION"):', getSignalColor("DISTRIBUTION"));
 
     const responseData = {
         symbol: displayName.toUpperCase(),
