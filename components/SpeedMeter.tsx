@@ -94,17 +94,32 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     else if (changePercent < -2) score -= 2;
     else if (changePercent < -0.5) score -= 1;
 
-    // Support/Resistance scoring (-3 to +3)
+    // FIXED: Support/Resistance scoring (-3 to +3)
     const supports = analysisData.supports || [];
     const resistances = analysisData.resistances || [];
     
-    const supportStrength = supports.reduce((sum: number, s: any) => 
-      sum + (s.strength === 'strong' ? 2 : s.strength === 'medium' ? 1 : 0.5), 0);
-    const resistanceStrength = resistances.reduce((sum: number, r: any) => 
-      sum + (r.strength === 'strong' ? 2 : r.strength === 'medium' ? 1 : 0.5), 0);
+    console.log('🔍 Supports details:', supports);
+    console.log('🔍 Resistances details:', resistances);
+    
+    // Calculate strength based on actual support/resistance objects
+    const supportStrength = supports.reduce((sum: number, s: any) => {
+      const strengthValue = s.strength === 'strong' ? 2 : s.strength === 'medium' ? 1 : 0.5;
+      console.log(`🔍 Support ${s.price}: ${s.strength} = ${strengthValue} points`);
+      return sum + strengthValue;
+    }, 0);
+    
+    const resistanceStrength = resistances.reduce((sum: number, r: any) => {
+      const strengthValue = r.strength === 'strong' ? 2 : r.strength === 'medium' ? 1 : 0.5;
+      console.log(`🔍 Resistance ${r.price}: ${r.strength} = ${strengthValue} points`);
+      return sum + strengthValue;
+    }, 0);
+    
     const optionsBias = supportStrength - resistanceStrength;
     
-    console.log('🔍 Options Bias:', optionsBias, 'Supports:', supports.length, 'Resistances:', resistances.length);
+    console.log('🔍 Options Bias Calculation:');
+    console.log('🔍 Total Support Strength:', supportStrength);
+    console.log('🔍 Total Resistance Strength:', resistanceStrength);
+    console.log('🔍 Options Bias:', optionsBias);
     console.log('🔍 Options Bias Score contribution:',
       optionsBias > 2 ? '+3' : optionsBias > 1 ? '+2' : optionsBias < -2 ? '-3' : optionsBias < -1 ? '-2' : '0');
     
