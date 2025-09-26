@@ -836,7 +836,7 @@ export async function POST(request: Request) {
 
     // Get strength color for frontend styling
     const getStrengthColor = (strength: string) => {
-      switch (strength) {
+      switch (strength.toUpperCase()) {
         case 'VERY_STRONG': return '#10b981'; // green
         case 'STRONG': return '#3b82f6'; // blue  
         case 'MODERATE': return '#f59e0b'; // amber
@@ -847,7 +847,7 @@ export async function POST(request: Request) {
 
     // Get signal color for frontend styling
     const getSignalColor = (signal: string) => {
-      switch (signal) {
+      switch (signal.toUpperCase()) {
         case 'ACCUMULATION': return '#10b981'; // green
         case 'DISTRIBUTION': return '#ef4444'; // red
         case 'NEUTRAL': return '#6b7280'; // gray
@@ -903,7 +903,8 @@ export async function POST(request: Request) {
             styling: {
                 signalColor: getSignalColor(adAnalysis.todaySignal),
                 strengthColor: getStrengthColor(adAnalysis.todayStrength),
-                trendIcon: adAnalysis.trend === 'BULLISH' ? '📈' : adAnalysis.trend === 'BEARISH' ? '📉' : '➡️',
+                trendIcon: adAnalysis.trend.toUpperCase() === 'BULLISH' ? '📈' : 
+                          adAnalysis.trend.toUpperCase() === 'BEARISH' ? '📉' : '➡️',
                 confidenceIcon: adAnalysis.confidence === 'HIGH' ? '🎯' : adAnalysis.confidence === 'MEDIUM' ? '🎯' : '🎯'
             },
             
