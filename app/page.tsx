@@ -4,6 +4,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown, Calendar, Target, AlertTriangle, CandlestickChart } from 'lucide-react';
+import SpeedMeter from '@/components/SpeedMeter'; // ADD THIS IMPORT
 
 // --- HELPER TYPES ---
 type SupportResistanceLevel = {
@@ -893,7 +894,15 @@ export default function Home() {
           {apiError && (<div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-center"><div className="flex items-center justify-center text-red-300"><XCircle size={16} className="mr-2" /><span className="text-sm">{apiError}</span></div></div>)}
         </section>
 
-        <section id="results" className="mt-12 w-full max-w-6xl mx-auto min-h-[100px]">
+        {/* ADD SPEED METER SECTION HERE */}
+        <section className="w-full max-w-4xl mx-auto mt-6">
+          <SpeedMeter 
+            analysisData={results} 
+            isLoading={isLoading && !results} 
+          />
+        </section>
+
+        <section id="results" className="mt-6 w-full max-w-6xl mx-auto min-h-[100px]">
           {isLoading && !results && (
             <div className="flex flex-col items-center justify-center p-8">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div>
