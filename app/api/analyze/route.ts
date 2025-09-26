@@ -58,6 +58,106 @@ async function getRedisData(key: string) {
 
 // --- HELPER FUNCTIONS ---
 
+// ADDED: RSI Calculation Function
+function calculateRSI(historicalData: HistoricalData[], period: number = 14): { value: number | null; signal: string; strength: string; interpretation: string } {
+  console.log(`📊 RSI Calculation starting with ${historicalData.length} days of data, period: ${period}`);
+  
+  if (historicalData.length < period + 1) {
+    console.log(`❌ Insufficient data for RSI. Need ${period + 1} days, have ${historicalData.length}`);
+    return {
+      value: null,
+      signal: 'INSUFFICIENT_DATA',
+      strength: 'LOW',
+      interpretation: `Need at least ${period + 1} days of data for RSI calculation`
+    };
+  }
+
+  try {
+    // Sort by date ascending for proper calculation
+    const sortedData = [...historicalData].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    let gains: number[] = [];
+    let losses: number[] = [];
+
+    // Calculate price changes
+    for (let i = 1; i < sortedData.length; i++) {
+      const currentPrice = sortedData[i].lastPrice || 0;
+      const previousPrice = sortedData[i - 1].lastPrice || 0;
+      
+      if (currentPrice > 0 && previousPrice > 0) {
+        const change = currentPrice - previousPrice;
+        gains.push(change > 0 ? change : 0);
+        losses.push(change < 0 ? Math.abs(change) : 0);
+      }
+    }
+
+    // Calculate initial averages
+    let avgGain = gains.slice(0, period).reduce((sum, gain) => sum + gain, 0) / period;
+    let avgLoss = losses.slice(0, period).reduce((sum, loss) => sum + loss, 0) / period;
+
+    // Wilder's smoothing method for remaining periods
+    for (let i = period; i < gains.length; i++) {
+      avgGain = (avgGain * (period - 1) + gains[i]) / period;
+      avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+    }
+
+    // Avoid division by zero
+    if (avgLoss === 0) {
+      const rsiValue = avgGain > 0 ? 100 : 50;
+      return {
+        value: rsiValue,
+        signal: rsiValue >= 70 ? 'OVERBOUGHT' : rsiValue <= 30 ? 'OVERSOLD' : 'NEUTRAL',
+        strength: 'MEDIUM',
+        interpretation: avgGain > 0 ? 'Consistent gains with no losses' : 'No price movement detected'
+      };
+    }
+
+    const rs = avgGain / avgLoss;
+    const rsiValue = 100 - (100 / (1 + rs));
+    const roundedRSI = Math.round(rsiValue * 100) / 100;
+
+    // Determine signal and strength
+    let signal = 'NEUTRAL';
+    let strength = 'NEUTRAL';
+    let interpretation = '';
+
+    if (roundedRSI >= 70) {
+      signal = 'OVERBOUGHT';
+      strength = roundedRSI >= 80 ? 'STRONG' : roundedRSI >= 75 ? 'MODERATE' : 'WEAK';
+      interpretation = `RSI indicates overbought conditions. Potential pullback expected.`;
+    } else if (roundedRSI <= 30) {
+      signal = 'OVERSOLD';
+      strength = roundedRSI <= 20 ? 'STRONG' : roundedRSI <= 25 ? 'MODERATE' : 'WEAK';
+      interpretation = `RSI indicates oversold conditions. Potential buying opportunity.`;
+    } else if (roundedRSI > 50) {
+      signal = 'BULLISH';
+      strength = 'NEUTRAL';
+      interpretation = `RSI in bullish territory but not overbought.`;
+    } else {
+      signal = 'BEARISH';
+      strength = 'NEUTRAL';
+      interpretation = `RSI in bearish territory but not oversold.`;
+    }
+
+    console.log(`📊 RSI Calculation result: ${roundedRSI}, Signal: ${signal}, Strength: ${strength}`);
+    
+    return {
+      value: roundedRSI,
+      signal,
+      strength,
+      interpretation
+    };
+  } catch (error) {
+    console.error('❌ RSI Calculation error:', error);
+    return {
+      value: null,
+      signal: 'ERROR',
+      strength: 'LOW',
+      interpretation: 'Error calculating RSI'
+    };
+  }
+}
+
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
     const historyData = await getRedisData('volume_history');
@@ -710,6 +810,11 @@ export async function POST(request: Request) {
       };
     }
 
+    // --- RSI ANALYSIS INTEGRATION ---
+    console.log('📊 RSI ANALYSIS - Starting calculation...');
+    const rsiAnalysis = calculateRSI(historicalData, 14);
+    console.log('📊 RSI ANALYSIS - Result:', rsiAnalysis);
+
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
 
@@ -817,6 +922,26 @@ export async function POST(request: Request) {
       }
     };
 
+    // ADDED: RSI color function
+    const getRSIColor = (rsiValue: number | null) => {
+      if (rsiValue === null) return '#6b7280'; // gray for no data
+      if (rsiValue >= 70) return '#ef4444';    // red for overbought
+      if (rsiValue <= 30) return '#10b981';    // green for oversold
+      if (rsiValue > 50) return '#3b82f6';     // blue for bullish
+      return '#f59e0b';                        // amber for bearish
+    };
+
+    const getRSISignalColor = (signal: string) => {
+      switch (signal.toUpperCase()) {
+        case 'OVERBOUGHT': return '#ef4444'; // red
+        case 'OVERSOLD': return '#10b981';   // green
+        case 'BULLISH': return '#3b82f6';    // blue
+        case 'BEARISH': return '#f59e0b';    // amber
+        case 'NEUTRAL': return '#6b7280';    // gray
+        default: return '#6b7280';
+      }
+    };
+
     // Final debug before response
     console.log('🔍 ANALYSIS DEBUG - Final check:', {
       symbol: displayName,
@@ -829,6 +954,7 @@ export async function POST(request: Request) {
       finalSupports: supportLevels,
       finalResistances: resistanceLevels,
       hasADAnalysis: !!adAnalysis,
+      hasRSIAnalysis: !!rsiAnalysis.value,
       isPreMarketWindow: isPreMarketWindow,
       pcr: pcr,
       volumePcr: volumePcr
@@ -839,7 +965,12 @@ export async function POST(request: Request) {
     console.log('🎨 todayStrength:', adAnalysis.todayStrength, 'Type:', typeof adAnalysis.todayStrength);
     console.log('🎨 Signal Color Result:', getSignalColor(adAnalysis.todaySignal));
     console.log('🎨 Strength Color Result:', getStrengthColor(adAnalysis.todayStrength));
-    console.log('🎨 TESTING DISTRIBUTION CASE - getSignalColor("DISTRIBUTION"):', getSignalColor("DISTRIBUTION"));
+
+    console.log('📊 FINAL RSI ANALYSIS DEBUG:');
+    console.log('📊 RSI Value:', rsiAnalysis.value);
+    console.log('📊 RSI Signal:', rsiAnalysis.signal);
+    console.log('📊 RSI Strength:', rsiAnalysis.strength);
+    console.log('📊 RSI Color:', getRSIColor(rsiAnalysis.value));
 
     const responseData = {
         symbol: displayName.toUpperCase(),
@@ -908,6 +1039,35 @@ export async function POST(request: Request) {
             breakdown: adAnalysis.breakdown,
             volumeAnalysis: adAnalysis.volumeAnalysis,
             interpretation: adAnalysis.interpretation
+        },
+
+        // NEW: RSI Analysis Structure
+        rsiAnalysis: {
+            value: rsiAnalysis.value,
+            signal: rsiAnalysis.signal,
+            strength: rsiAnalysis.strength,
+            interpretation: rsiAnalysis.interpretation,
+            period: 14,
+            levels: {
+                overbought: 70,
+                oversold: 30,
+                neutral: 50
+            },
+            styling: {
+                valueColor: getRSIColor(rsiAnalysis.value),
+                signalColor: getRSISignalColor(rsiAnalysis.signal),
+                strengthColor: getStrengthColor(rsiAnalysis.strength),
+                trendIcon: rsiAnalysis.signal === 'BULLISH' ? '📈' : 
+                          rsiAnalysis.signal === 'BEARISH' ? '📉' : '➡️'
+            },
+            display: {
+                value: rsiAnalysis.value !== null ? `RSI(14): ${rsiAnalysis.value}` : 'RSI: Insufficient Data',
+                signal: `${rsiAnalysis.signal} ${rsiAnalysis.strength !== 'NEUTRAL' ? `(${rsiAnalysis.strength})` : ''}`.trim(),
+                interpretation: rsiAnalysis.interpretation,
+                zone: rsiAnalysis.value !== null ? 
+                      (rsiAnalysis.value >= 70 ? 'OVERBOUGHT' : rsiAnalysis.value <= 30 ? 'OVERSOLD' : 'NEUTRAL') : 
+                      'NO_DATA'
+            }
         }
     };
     

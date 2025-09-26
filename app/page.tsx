@@ -48,6 +48,31 @@ type ADAnalysis = {
   };
 };
 
+type RSIAnalysis = {
+  value: number | null;
+  signal: string;
+  strength: string;
+  interpretation: string;
+  period: number;
+  levels: {
+    overbought: number;
+    oversold: number;
+    neutral: number;
+  };
+  styling: {
+    valueColor: string;
+    signalColor: string;
+    strengthColor: string;
+    trendIcon: string;
+  };
+  display: {
+    value: string;
+    signal: string;
+    interpretation: string;
+    zone: string;
+  };
+};
+
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -67,6 +92,7 @@ type AnalysisResult = {
   supports: SupportResistanceLevel[];
   resistances: SupportResistanceLevel[];
   adAnalysis?: ADAnalysis;
+  rsiAnalysis?: RSIAnalysis;
 };
 
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
@@ -96,6 +122,12 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
       typeof typedData.adAnalysis === 'object' &&
       typedData.adAnalysis !== null
     );
+
+    // Check if rsiAnalysis exists but don't require it to be valid
+    const rsiAnalysisIsValid = !typedData.rsiAnalysis || (
+      typeof typedData.rsiAnalysis === 'object' &&
+      typedData.rsiAnalysis !== null
+    );
     
     return (!!typedData && 
             typeof typedData.symbol === 'string' && 
@@ -104,7 +136,8 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
             typeof typedData.priceType === 'string' &&
             supportsIsValid && 
             resistancesIsValid &&
-            adAnalysisIsValid);
+            adAnalysisIsValid &&
+            rsiAnalysisIsValid);
   } catch (error) { 
     console.error('Validation error:', error); 
     return false; 
@@ -374,6 +407,95 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
   );
 });
 ADLineAnalysisCard.displayName = 'ADLineAnalysisCard';
+
+const RSIAnalysisCard = React.memo(({ rsiAnalysis }: { rsiAnalysis?: RSIAnalysis }) => {
+  if (!rsiAnalysis || rsiAnalysis.value === null) {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
+        <div className="flex items-center justify-center text-sm text-gray-400">
+          <span>RSI Analysis</span>
+          <div className="relative group ml-1">
+            <Info size={14} className="cursor-pointer" />
+            <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+              Relative Strength Index (14-period) measures momentum and overbought/oversold conditions.
+              <br />Values above 70 indicate overbought, below 30 indicate oversold.
+              <br />Requires sufficient historical data for calculation.
+            </div>
+          </div>
+        </div>
+        <p className="text-gray-500 text-sm mt-2">Insufficient data for RSI calculation</p>
+      </div>
+    );
+  }
+
+  const getRSIBarWidth = (value: number) => {
+    if (value <= 30) return (value / 30) * 33;
+    if (value <= 70) return 33 + ((value - 30) / 40) * 34;
+    return 67 + ((value - 70) / 30) * 33;
+  };
+
+  return (
+    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
+      <div className="flex items-center justify-center text-sm text-gray-400">
+        <span>RSI Analysis (14-period)</span>
+        <div className="relative group ml-1">
+          <Info size={14} className="cursor-pointer" />
+          <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+            Relative Strength Index (14-period) measures momentum and overbought/oversold conditions.
+            <br />Values above 70 indicate overbought, below 30 indicate oversold.
+            <br />Current: {rsiAnalysis.value} - {rsiAnalysis.display.zone}
+          </div>
+        </div>
+      </div>
+      
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-lg font-bold" style={{ color: rsiAnalysis.styling.valueColor }}>
+          {rsiAnalysis.value}
+        </span>
+        <span 
+          className="text-sm font-semibold px-2 py-1 rounded"
+          style={{ 
+            color: rsiAnalysis.styling.signalColor,
+            backgroundColor: `${rsiAnalysis.styling.signalColor}20`
+          }}
+        >
+          {rsiAnalysis.display.signal}
+        </span>
+      </div>
+
+      {/* RSI Visual Bar */}
+      <div className="rsi-bar-container bg-gray-100 rounded-full h-3 relative mt-2">
+        <div className="rsi-bar-levels flex justify-between absolute w-full top-0 text-xs px-1 py-0.5">
+          <span className="text-gray-600">0</span>
+          <span className="text-gray-600">30</span>
+          <span className="text-gray-600">50</span>
+          <span className="text-gray-600">70</span>
+          <span className="text-gray-600">100</span>
+        </div>
+        <div 
+          className="rsi-bar-progress h-3 rounded-full bg-gradient-to-r from-green-500 via-yellow-500 to-red-500 absolute"
+          style={{ width: `${getRSIBarWidth(rsiAnalysis.value)}%` }}
+        ></div>
+        <div 
+          className="rsi-bar-marker w-2 h-4 bg-black rounded-full absolute -top-0.5 -ml-1"
+          style={{ left: `${getRSIBarWidth(rsiAnalysis.value)}%` }}
+        ></div>
+      </div>
+
+      {/* Zones */}
+      <div className="rsi-zones flex justify-between text-xs font-medium mt-1">
+        <span className="text-green-600">Oversold</span>
+        <span className="text-yellow-600">Neutral</span>
+        <span className="text-red-600">Overbought</span>
+      </div>
+
+      <div className="text-xs mt-2 text-gray-400 text-left">
+        {rsiAnalysis.interpretation}
+      </div>
+    </div>
+  );
+});
+RSIAnalysisCard.displayName = 'RSIAnalysisCard';
 
 const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
   <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
@@ -834,7 +956,7 @@ export default function Home() {
                   symbol={results.symbol}
                 />
 
-                {/* Row 3 - Updated to include A/D Line Analysis instead of 3-Candle Test */}
+                {/* Row 3 - Updated to include RSI Analysis */}
                 <DataCard 
                   title="Max Pain" 
                   value={results.maxPain} 
@@ -844,7 +966,9 @@ export default function Home() {
                   adAnalysis={results.adAnalysis}
                   marketStatus={marketStatus}
                 />
-                <div className="bg-gray-900/50 p-4 rounded-lg"></div>
+                <RSIAnalysisCard 
+                  rsiAnalysis={results.rsiAnalysis}
+                />
               </div>
             </div>
           )}
@@ -855,7 +979,7 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <FeatureCard icon={<BarChart />} title="OI Analysis" description="Visualize support and resistance levels based on real-time Open Interest data." />
             <FeatureCard icon={<TrendingUp />} title="PCR Sentiment" description="Gauge overall market sentiment with the up-to-the-minute Put-Call Ratio." />
-            <FeatureCard icon={<TrendingUp />} title="A/D Line Analysis" description="Track institutional money flow with Accumulation/Distribution line analysis." />
+            <FeatureCard icon={<TrendingUp />} title="RSI Analysis" description="Track momentum and overbought/oversold conditions with Relative Strength Index." />
           </div>
         </section>
 
