@@ -222,25 +222,25 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   
   console.log(`📊 Date debug: Today(IST)=${todayDateString}, Historical dates=`, historicalData.map(d => d.date));
   
-  // CORRECTED LOGIC: Find yesterday's close price
+  // FIXED: Find the most recent historical data that's NOT today
+  // Sort all historical data by date descending and find the first one that's not today
   const sortedHistorical = historicalData
-    .filter(entry => entry.date !== todayDateString) // Exclude today
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Sort by date descending
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   
-  if (sortedHistorical.length === 0) {
-    console.log('⚠️ No historical data available for comparison');
+  // Find the first entry that's not today (yesterday or earlier)
+  const yesterdayData = sortedHistorical.find(entry => entry.date !== todayDateString);
+  
+  if (!yesterdayData) {
+    console.log('⚠️ No historical data available for comparison (only today data available)');
     return 0;
   }
   
-  const yesterdayData = sortedHistorical[0]; // Most recent historical data (yesterday)
-  
-  // PROPER NULL CHECKING
-  if (!yesterdayData || !yesterdayData.lastPrice) {
+  if (!yesterdayData.lastPrice) {
     console.log('⚠️ Missing yesterday price data');
     return 0;
   }
   
-  // CORRECTED: Calculate change: (Today - Yesterday) / Yesterday
+  // Calculate change: (Today - Yesterday) / Yesterday
   const changePercent = ((currentPrice - yesterdayData.lastPrice) / yesterdayData.lastPrice) * 100;
   
   console.log(`📊 CORRECTED Change calculation: Today(${currentPrice}) vs ${yesterdayData.date} (${yesterdayData.lastPrice}) = ${changePercent.toFixed(2)}%`);
