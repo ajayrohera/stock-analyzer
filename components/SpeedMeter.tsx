@@ -12,7 +12,6 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
   const [currentScore, setCurrentScore] = useState(0);
   const [hasAnimated, setHasAnimated] = useState(false);
   const [isPulsing, setIsPulsing] = useState(false);
-  const [showBreakdown, setShowBreakdown] = useState(false);
 
   // DIRECTLY USE THE SCORE FROM SMART SENTIMENT - NO CALCULATION
   const getScoreFromBackend = (analysisData: any) => {
@@ -106,6 +105,12 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     return 50 + (score / 10) * 50;
   };
 
+  const getBreakdownDotColor = (line: string) => {
+    if (line.includes('+')) return 'bg-green-500';
+    if (line.includes('-')) return 'bg-red-500';
+    return 'bg-gray-500';
+  };
+
   const backendData = analysisData ? getScoreFromBackend(analysisData) : null;
 
   if (isLoading) {
@@ -134,17 +139,8 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
         <div className="flex items-center justify-center gap-2 mb-2">
           <Zap className="text-yellow-400" size={20} />
           <h3 className="text-lg font-bold text-white">Smart Sentiment Score</h3>
-          <button 
-            onClick={() => setShowBreakdown(!showBreakdown)}
-            className="text-gray-400 hover:text-gray-300 transition-colors"
-            title="Show breakdown"
-          >
-            <Info size={16} />
-          </button>
         </div>
-        <p className="text-gray-400 text-sm">
-          Direct display of backend smart sentiment analysis
-        </p>
+        {/* REMOVED: The line "Direct display of backend smart sentiment analysis" */}
       </div>
 
       <div className="relative max-w-2xl mx-auto">
@@ -184,53 +180,57 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
           )}
         </div>
 
-        {/* Show actual backend data */}
-        {showBreakdown && backendData && (
-          <div className="mt-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-            <h4 className="text-sm font-semibold text-gray-300 mb-3">Backend Data (Direct from Smart Sentiment)</h4>
+        {/* SCORING BREAKDOWN - ALWAYS VISIBLE AT BOTTOM */}
+        {analysisData.sentimentBreakdown && analysisData.sentimentBreakdown.length > 0 && (
+          <div className="mt-6 p-4 bg-gray-800/30 rounded-lg border border-gray-600">
+            <h4 className="text-sm font-semibold text-gray-300 mb-3 text-center">Scoring Breakdown</h4>
             <div className="space-y-2 text-xs text-gray-400">
-              <div className="flex justify-between">
-                <span>Smart Sentiment:</span>
-                <span className="capitalize">{backendData.sentiment.toLowerCase()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Smart Score:</span>
-                <span className={getScoreColor(backendData.score)}>
-                  {backendData.score > 0 ? '+' : ''}{backendData.score}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>PCR:</span>
-                <span>{analysisData.pcr?.toFixed(2) || 'N/A'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Volume PCR:</span>
-                <span>{analysisData.volumePcr?.toFixed(2) || 'N/A'}</span>
-              </div>
-              
-              {/* Show the actual breakdown from backend */}
-              {analysisData.sentimentBreakdown && analysisData.sentimentBreakdown.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-gray-700">
-                  <div className="font-semibold mb-2 text-center">Scoring Breakdown</div>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {analysisData.sentimentBreakdown.map((line: string, index: number) => (
-                      <div 
-                        key={index} 
-                        className={`text-2xs py-1 px-2 rounded ${
-                          line.includes('---') ? 'border-t border-gray-600 my-1' : 
-                          line.includes('Total:') ? 'font-bold bg-gray-700/50' : 
-                          'bg-gray-800/30'
-                        }`}
-                      >
-                        {line}
-                      </div>
-                    ))}
+              {analysisData.sentimentBreakdown.map((line: string, index: number) => (
+                <div 
+                  key={index} 
+                  className={`flex items-center justify-between py-1 px-2 rounded ${
+                    line.includes('---') ? 'border-t border-gray-600 my-1' : 
+                    line.includes('Total:') ? 'font-bold bg-gray-700/50' : 
+                    'hover:bg-gray-700/30'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <div className={`w-2 h-2 rounded-full mr-2 ${getBreakdownDotColor(line)}`}></div>
+                    <span>{line}</span>
                   </div>
                 </div>
-              )}
+              ))}
             </div>
           </div>
         )}
+
+        {/* Data Quality Indicators */}
+        <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-1">
+            <div className={`w-2 h-2 rounded-full ${
+              analysisData.supports?.length > 0 ? 'bg-green-400' : 'bg-gray-500'
+            }`} />
+            <span>Supports: {analysisData.supports?.length || 0}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className={`w-2 h-2 rounded-full ${
+              analysisData.resistances?.length > 0 ? 'bg-green-400' : 'bg-gray-500'
+            }`} />
+            <span>Resistances: {analysisData.resistances?.length || 0}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className={`w-2 h-2 rounded-full ${
+              analysisData.pcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
+            }`} />
+            <span>PCR: {analysisData.pcr !== undefined ? '✓' : '✗'}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className={`w-2 h-2 rounded-full ${
+              analysisData.volumePcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
+            }`} />
+            <span>Vol. PCR: {analysisData.volumePcr !== undefined ? '✓' : '✗'}</span>
+          </div>
+        </div>
       </div>
     </div>
   );
