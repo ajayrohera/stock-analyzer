@@ -204,12 +204,14 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string, isPreMarket: boolean = false): number {
   console.log(`📈 Calculating change percent for price: ${currentPrice}, priceType: ${priceType}, preMarket: ${isPreMarket}, historical entries: ${historicalData.length}`);
   
-  // SPECIAL CASE: Pre-market window (9:00-9:15 AM) - always return 0%
+  // SPECIAL CASE: ONLY during pre-market window (9:00-9:15 AM) - return 0%
+  // On weekends or when market is closed, show the last change percentage
   if (isPreMarket) {
     console.log('📊 Pre-market window - returning 0% change');
     return 0;
   }
   
+  // For weekends and after hours, calculate normal change vs last trading day
   if (!historicalData || historicalData.length === 0 || !currentPrice) {
     console.log('⚠️ Insufficient data for change calculation');
     return 0;
@@ -222,8 +224,7 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   
   console.log(`📊 Date debug: Today(IST)=${todayDateString}, Historical dates=`, historicalData.map(d => d.date));
   
-  // FIXED: Find the most recent historical data that's NOT today
-  // Sort all historical data by date descending and find the first one that's not today
+  // Find the most recent historical data that's NOT today
   const sortedHistorical = historicalData
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   
@@ -243,7 +244,7 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   // Calculate change: (Today - Yesterday) / Yesterday
   const changePercent = ((currentPrice - yesterdayData.lastPrice) / yesterdayData.lastPrice) * 100;
   
-  console.log(`📊 CORRECTED Change calculation: Today(${currentPrice}) vs ${yesterdayData.date} (${yesterdayData.lastPrice}) = ${changePercent.toFixed(2)}%`);
+  console.log(`📊 Change calculation: Today(${currentPrice}) vs ${yesterdayData.date} (${yesterdayData.lastPrice}) = ${changePercent.toFixed(2)}%`);
   
   return changePercent;
 }
