@@ -201,17 +201,9 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
 }
 
 // UPDATED: Added isPreMarket parameter
-function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string, isPreMarket: boolean = false): number {
-  console.log(`📈 Calculating change percent for price: ${currentPrice}, priceType: ${priceType}, preMarket: ${isPreMarket}, historical entries: ${historicalData.length}`);
+function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string): number {
+  console.log(`📈 Calculating change percent for price: ${currentPrice}, historical entries: ${historicalData.length}`);
   
-  // SPECIAL CASE: ONLY during pre-market window (9:00-9:15 AM) - return 0%
-  // On weekends or when market is closed, show the last change percentage
-  if (isPreMarket) {
-    console.log('📊 Pre-market window - returning 0% change');
-    return 0;
-  }
-  
-  // For weekends and after hours, calculate normal change vs last trading day
   if (!historicalData || historicalData.length === 0 || !currentPrice) {
     console.log('⚠️ Insufficient data for change calculation');
     return 0;
@@ -245,6 +237,21 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   const changePercent = ((currentPrice - yesterdayData.lastPrice) / yesterdayData.lastPrice) * 100;
   
   console.log(`📊 Change calculation: Today(${currentPrice}) vs ${yesterdayData.date} (${yesterdayData.lastPrice}) = ${changePercent.toFixed(2)}%`);
+  
+  // NEVER SHOW 0% - if change is 0, find the last non-zero change in history
+  if (changePercent === 0 && historicalData.length > 1) {
+    console.log('🔄 Zero change detected, searching for last non-zero change...');
+    
+    // Find the most recent day with non-zero change
+    for (let i = 1; i < sortedHistorical.length; i++) {
+      const previousDay = sortedHistorical[i];
+      if (previousDay.lastPrice && previousDay.lastPrice !== yesterdayData.lastPrice) {
+        const nonZeroChange = ((yesterdayData.lastPrice - previousDay.lastPrice) / previousDay.lastPrice) * 100;
+        console.log(`📊 Using last non-zero change: ${yesterdayData.date} vs ${previousDay.date} = ${nonZeroChange.toFixed(2)}%`);
+        return nonZeroChange;
+      }
+    }
+  }
   
   return changePercent;
 }
@@ -707,7 +714,7 @@ export async function POST(request: Request) {
     });
     
     // UPDATED: Pass isPreMarketWindow to calculateChangePercent
-    const changePercent = calculateChangePercent(ltp, historicalData, priceType, isPreMarketWindow);
+    const changePercent = calculateChangePercent(ltp, historicalData, priceType);
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
