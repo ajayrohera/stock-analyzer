@@ -17,7 +17,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     if (analysisData && !isLoading) {
       console.log('🔍 SpeedMeter DEBUG - Using existing sentiment:', analysisData.sentiment);
       
-      const meterResult = convertSentimentToScore(analysisData.sentiment);
+      const meterResult = convertSentimentToScore(analysisData);
       console.log('🔍 SpeedMeter DEBUG - Converted score:', meterResult);
       
       if (!hasAnimated) {
@@ -49,10 +49,11 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     }
   };
 
-  const convertSentimentToScore = (sentiment: string) => {
+  const convertSentimentToScore = (analysisData: any) => {
+    const sentiment = analysisData.sentiment || 'NEUTRAL';
     console.log('🔍 Converting sentiment to score:', sentiment);
     
-    // Map existing sentiment to scores
+    // Map existing sentiment to scores (aligned with backend logic)
     let score = 0;
     let displaySentiment = 'NEUTRAL';
     
@@ -94,9 +95,20 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
         displaySentiment = 'NEUTRAL';
     }
 
-    console.log('🔍 Final conversion:', { sentiment, score, displaySentiment });
+    // Calculate real confidence based on data quality
+    const hasGoodData = analysisData.supports?.length > 0 && 
+                       analysisData.resistances?.length > 0 && 
+                       analysisData.pcr !== undefined;
+    const confidence = hasGoodData ? 85 : 65;
+
+    console.log('🔍 Confidence calculation:', {
+      supports: analysisData.supports?.length,
+      resistances: analysisData.resistances?.length, 
+      hasPCR: analysisData.pcr !== undefined,
+      confidence
+    });
     
-    return { score, sentiment: displaySentiment, confidence: 85 };
+    return { score, sentiment: displaySentiment, confidence };
   };
 
   const getScoreColor = (score: number) => {
@@ -125,7 +137,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     return 50 + (score / 10) * 50;
   };
 
-  const result = analysisData ? convertSentimentToScore(analysisData.sentiment) : null;
+  const result = analysisData ? convertSentimentToScore(analysisData) : null;
 
   if (isLoading) {
     return (
@@ -186,7 +198,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
               {getSentimentIcon(result.sentiment)}
               <span className="capitalize">{result.sentiment.toLowerCase().replace('_', ' ')}</span>
               <span>•</span>
-              <span>85% confidence</span>
+              <span>{result.confidence}% confidence</span>
             </div>
           )}
         </div>
