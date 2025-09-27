@@ -576,17 +576,15 @@ function calculateSmartSentiment(
     }
   }
   
-  if (finalScore >= 5) return "Strongly Bullish";
-  if (finalScore >= 3) return "Bullish";
-  if (finalScore >= 1) return "Slightly Bullish";
-  if (finalScore === 0) return "Neutral";
-  if (finalScore <= -1 && finalScore > -2) return "Slightly Bearish";
-  if (finalScore <= -3 && finalScore > -4) return "Bearish";
-  if (finalScore <= -5) return "Strongly Bearish";
-  if (finalScore === -2) return "Slightly Bearish";
-  if (finalScore === -4) return "Bearish";
+if (finalScore >= 5) return "Strongly Bullish";
+if (finalScore >= 3) return "Bullish";
+if (finalScore >= 1) return "Slightly Bullish";
+if (finalScore === 0) return "Neutral";
+if (finalScore <= -1 && finalScore >= -2) return "Slightly Bearish"; // Fixed range
+if (finalScore < -2 && finalScore >= -4) return "Bearish"; // Fixed range  
+if (finalScore < -4) return "Strongly Bearish"; // Fixed range
 
-  return "Neutral";
+return "Neutral";
 }
 
 // --- MAIN API FUNCTION ---
