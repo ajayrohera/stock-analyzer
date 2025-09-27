@@ -654,7 +654,7 @@ function calculateSmartSentiment(
   else if (pcr < 0.7) pcrScore = -2;
   else if (pcr < 0.9) pcrScore = -1;
 
-  breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • PCR ${pcr.toFixed(2)}`);
+  breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • OI PCR ${pcr.toFixed(2)}`);
 
   // 2. Conviction Score
   let convictionScore = 0;
