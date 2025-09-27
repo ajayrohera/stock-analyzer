@@ -634,16 +634,19 @@ function getFinalLevels(
   };
 }
 
-// FIXED: Sentiment scoring ranges
+// UPDATED: Smart sentiment with scoring breakdown for tooltip
 function calculateSmartSentiment(
   pcr: number,
   volumePcr: number,
   highestPutOI: number,
   highestCallOI: number,
   todayVolumePercentage: number
-): string {
+): { sentiment: string; score: number; breakdown: string[] } {
   console.log('🧠 SENTIMENT CALCULATION:', { pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage });
   
+  const breakdown: string[] = [];
+  
+  // 1. PCR Score
   let pcrScore = 0;
   if (pcr > 1.3) pcrScore = 2;
   else if (pcr > 1.1) pcrScore = 1;
@@ -651,12 +654,18 @@ function calculateSmartSentiment(
   else if (pcr < 0.7) pcrScore = -2;
   else if (pcr < 0.9) pcrScore = -1;
 
+  breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • PCR ${pcr.toFixed(2)}`);
+
+  // 2. Conviction Score
   let convictionScore = 0;
   if (highestPutOI > highestCallOI * 2) convictionScore = 2;
   else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
   else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
   else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
-  
+
+  breakdown.push(`${convictionScore >= 0 ? '+' : ''}${convictionScore} • OI Strength`);
+
+  // 3. Volume Modifier
   let volumeModifier = 0;
   if (volumePcr < 0.7) volumeModifier = 2;
   else if (volumePcr < 0.9) volumeModifier = 1;
@@ -664,23 +673,35 @@ function calculateSmartSentiment(
   else if (volumePcr > 1.3) volumeModifier = -2;
   else if (volumePcr > 1.1) volumeModifier = -1;
 
-  const preliminaryScore = pcrScore + convictionScore + volumeModifier;
-  let finalScore = preliminaryScore;
+  breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}`);
 
+  // Calculate preliminary score
+  const preliminaryScore = pcrScore + convictionScore + volumeModifier;
+
+  // 4. Volume Activity Adjustment
+  let volumeAdjustment = 0;
   const isSignificantVolume = todayVolumePercentage > 150;
   const isLowVolume = todayVolumePercentage < 70;
 
   if (isSignificantVolume) {
-    if (preliminaryScore > 0) finalScore++;
-    if (preliminaryScore < 0) finalScore--;
-  } else if (isLowVolume) {
-    if (Math.abs(preliminaryScore) >= 2) {
-        if (preliminaryScore > 0) finalScore--;
-        if (preliminaryScore < 0) finalScore++;
-    }
+    if (preliminaryScore > 0) volumeAdjustment = 1;
+    else if (preliminaryScore < 0) volumeAdjustment = -1;
+  } else if (isLowVolume && Math.abs(preliminaryScore) >= 2) {
+    if (preliminaryScore > 0) volumeAdjustment = -1;
+    else if (preliminaryScore < 0) volumeAdjustment = 1;
   }
-  
-  // FIXED RANGES - no gaps
+
+  if (volumeAdjustment !== 0) {
+    breakdown.push(`${volumeAdjustment >= 0 ? '+' : ''}${volumeAdjustment} • Volume Impact`);
+  }
+
+  const finalScore = preliminaryScore + volumeAdjustment;
+
+  // Add separator and total
+  breakdown.push('---');
+  breakdown.push(`Total: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
+
+  // Determine sentiment
   let sentiment: string;
   if (finalScore >= 5) sentiment = "Strongly Bullish";
   else if (finalScore >= 3) sentiment = "Bullish";
@@ -691,7 +712,12 @@ function calculateSmartSentiment(
   else sentiment = "Strongly Bearish";
 
   console.log(`🧠 FINAL SENTIMENT: ${sentiment} (Score: ${finalScore})`);
-  return sentiment;
+  
+  return {
+    sentiment,
+    score: finalScore,
+    breakdown
+  };
 }
 
 // --- MAIN API FUNCTION ---
@@ -1132,8 +1158,8 @@ export async function POST(request: Request) {
     const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : 0;
     const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : 0;
     
-    // FIXED: Sentiment calculation with corrected ranges
-    const sentiment = calculateSmartSentiment(
+    // UPDATED: Sentiment calculation with breakdown
+    const sentimentResult = calculateSmartSentiment(
         pcr,
         volumePcr,
         highestPutOI,
@@ -1205,7 +1231,8 @@ export async function POST(request: Request) {
       ltp: ltp,
       changePercent: changePercent,
       volumePcr: volumePcr,
-      sentiment: sentiment,
+      sentiment: sentimentResult.sentiment,
+      score: sentimentResult.score,
       pcr: pcr,
       dataSource: hasLiveData ? 'LIVE' : 'HISTORICAL',
       marketStatus: isMarketOpen ? 'OPEN' : 'CLOSED'
@@ -1221,7 +1248,9 @@ export async function POST(request: Request) {
         todayVolumePercentage: volumeMetrics.todayVolumePercentage,
         estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
         expiryDate: formattedExpiry,
-        sentiment,
+        sentiment: sentimentResult.sentiment,
+        sentimentScore: sentimentResult.score,
+        sentimentBreakdown: sentimentResult.breakdown,
         pcr: parseFloat(pcr.toFixed(2)),
         volumePcr: parseFloat(volumePcr.toFixed(2)),
         maxPain,

@@ -82,6 +82,8 @@ type AnalysisResult = {
   resistance: number;
   support: number;
   sentiment: string;
+  sentimentScore?: number;
+  sentimentBreakdown?: string[];
   expiryDate: string; 
   ltp: number;
   lastRefreshed: string;
@@ -290,33 +292,76 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
 });
 SupportResistanceList.displayName = 'SupportResistanceList';
 
-const SentimentCard = React.memo(({ sentiment }: { sentiment: string }) => { 
+// UPDATED: Smart Sentiment Card with scoring breakdown
+const SentimentCard = React.memo(({ sentiment, score, breakdown }: { sentiment: string; score?: number; breakdown?: string[] }) => { 
   const isBullish = sentiment.includes('Bullish'); 
   const isBearish = sentiment.includes('Bearish'); 
   let color = 'text-white'; 
   if (isBullish) color = 'text-green-400'; 
   if (isBearish) color = 'text-red-500'; 
+  
+  // Format the score with sign
+  const formattedScore = score !== undefined ? (score >= 0 ? `+${score}` : `${score}`) : '';
+  
   return ( 
-  <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
-    <div className="flex items-center justify-center text-sm text-gray-400">
-      <TrendingUp size={14} className="mr-1.5" />
-      <span>SMART Sentiment</span>
-      <div className="relative group ml-1">
-        <Info size={14} className="cursor-pointer" />
-        <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-          A sophisticated sentiment score derived from three factors:
-          <br />1. Overall Open Interest PCR (prevailing mood).
-          <br />2. OI Conviction (highest support vs. resistance walls).
-          <br />3. Volume PCR (today&apos;s intraday action).
+    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
+      <div className="flex items-center justify-center text-sm text-gray-400">
+        <TrendingUp size={14} className="mr-1.5" />
+        <span>SMART Sentiment</span>
+        <div className="relative group ml-1">
+          <Info size={14} className="cursor-pointer" />
+          <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+            A sophisticated sentiment score derived from three factors:
+            <br />1. Overall Open Interest PCR (prevailing mood).
+            <br />2. OI Conviction (highest support vs. resistance walls).
+            <br />3. Volume PCR (today&apos;s intraday action).
+          </div>
         </div>
       </div>
-    </div>
-    <div className={`flex items-center justify-center text-2xl font-bold ${color}`}>
-      {isBullish && <CheckCircle2 size={24} className="mr-2" />}
-      {isBearish && <XCircle size={24} className="mr-2" />}
-      <span>{sentiment}</span>
-    </div>
-  </div> 
+      
+      {/* Main sentiment display with score on next line */}
+      <div className={`flex flex-col items-center justify-center text-2xl font-bold ${color}`}>
+        <div className="flex items-center">
+          {isBullish && <CheckCircle2 size={24} className="mr-2" />}
+          {isBearish && <XCircle size={24} className="mr-2" />}
+          <span>{sentiment}</span>
+        </div>
+        {score !== undefined && (
+          <div className="text-lg mt-1">
+            {formattedScore}
+          </div>
+        )}
+      </div>
+
+      {/* Scoring breakdown tooltip */}
+      {breakdown && breakdown.length > 0 && (
+        <div className="relative group mt-2">
+          <div className="text-xs text-gray-400 underline cursor-pointer hover:text-gray-300">
+            View scoring breakdown
+          </div>
+          <div className="absolute bottom-full mb-2 left-0 w-80 p-3 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10 shadow-xl border border-gray-700">
+            <div className="font-semibold mb-2 text-center">Sentiment Scoring Breakdown</div>
+            <div className="space-y-1 max-h-60 overflow-y-auto">
+              {breakdown.map((line, index) => (
+                <div 
+                  key={index} 
+                  className={`py-1 px-2 rounded ${
+                    line.includes('---') ? 'border-t border-gray-700 my-1' : 
+                    line.includes('Total:') ? 'font-bold bg-gray-800' : 
+                    'hover:bg-gray-800/50'
+                  }`}
+                >
+                  {line}
+                </div>
+              ))}
+            </div>
+            <div className="text-center mt-2 text-gray-400 text-2xs">
+              Hover over sentiment card to view breakdown
+            </div>
+          </div>
+        </div>
+      )}
+    </div> 
   ); 
 });
 SentimentCard.displayName = 'SentimentCard';
@@ -942,7 +987,12 @@ export default function Home() {
                 {/* Row 1 */}
                 <SupportResistanceList type="Support" levels={results.supports} />
                 <SupportResistanceList type="Resistance" levels={results.resistances} />
-                <SentimentCard sentiment={results.sentiment} />
+                {/* UPDATED: Enhanced Sentiment Card with scoring breakdown */}
+                <SentimentCard 
+                  sentiment={results.sentiment} 
+                  score={results.sentimentScore}
+                  breakdown={results.sentimentBreakdown}
+                />
 
                 {/* Row 2 */}
                 <PCRStatCard 
