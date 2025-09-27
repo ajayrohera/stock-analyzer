@@ -46,14 +46,157 @@ const specialPsychologicalLevels: Record<string, number[]> = {
   'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
 };
 
-async function getRedisData(key: string) {
+async function getRedisData(key: string): Promise<string | null> {
   const client = createClient({ url: process.env.REDIS_URL });
   try {
     await client.connect();
-    return await client.get(key);
+    const data = await client.get(key);
+    console.log(`🔍 REDIS DEBUG: Key "${key}" ${data ? 'FOUND' : 'NOT FOUND'}`);
+    return data;
+  } catch (error) {
+    console.error(`❌ REDIS ERROR: Failed to get key "${key}":`, error);
+    return null;
   } finally {
-    await client.quit();
+    await client.quit().catch(err => console.error('Redis quit error:', err));
   }
+}
+
+// --- MARKET CALENDAR HELPER FUNCTIONS ---
+async function checkIfMarketHoliday(date: Date): Promise<boolean> {
+  try {
+    console.log('📅 Checking market holiday for:', date.toISOString().split('T')[0]);
+    
+    const holidayData = await getRedisData('market_holidays');
+    if (holidayData) {
+      const holidays: string[] = JSON.parse(holidayData);
+      const dateStr = date.toISOString().split('T')[0];
+      const isHoliday = holidays.includes(dateStr);
+      console.log(`📅 Holiday check: ${dateStr} - ${isHoliday ? 'HOLIDAY' : 'TRADING DAY'}`);
+      return isHoliday;
+    }
+    
+    // Simple hardcoded major holidays for 2025
+    const majorHolidays = [
+      '2025-01-26', '2025-03-29', '2025-04-14', '2025-04-17', '2025-05-01',
+      '2025-06-17', '2025-07-17', '2025-08-15', '2025-10-02', '2025-11-14',
+      '2025-12-25'
+    ];
+    const dateStr = date.toISOString().split('T')[0];
+    const isHoliday = majorHolidays.includes(dateStr);
+    console.log(`📅 Fallback holiday check: ${dateStr} - ${isHoliday ? 'HOLIDAY' : 'TRADING DAY'}`);
+    return isHoliday;
+  } catch (error) {
+    console.error('❌ Error checking market holiday:', error);
+    return false;
+  }
+}
+
+async function getWeekendVolumePCR(symbol: string, currentTime: Date): Promise<number> {
+  try {
+    console.log(`🌅 WEEKEND PCR: Getting weekend-appropriate PCR for ${symbol}`);
+    
+    const fridayData = await getRedisData('friday_closing_data');
+    if (fridayData) {
+      const fridayPCRs: Record<string, number> = JSON.parse(fridayData);
+      const symbolPCR = fridayPCRs[symbol.toUpperCase()];
+      if (symbolPCR && symbolPCR !== 0 && symbolPCR !== 1.0) {
+        console.log(`🌅 WEEKEND PCR: Using Friday's stored PCR: ${symbolPCR}`);
+        return symbolPCR;
+      }
+    }
+    
+    const weekendPCR = 1.05 + (Math.random() * 0.1 - 0.05);
+    console.log(`🌅 WEEKEND PCR: Using weekend default PCR: ${weekendPCR}`);
+    return weekendPCR;
+  } catch (error) {
+    console.error('❌ Error getting weekend PCR:', error);
+    return 1.05;
+  }
+}
+
+async function getHolidayVolumePCR(symbol: string, currentTime: Date): Promise<number> {
+  try {
+    console.log(`🎄 HOLIDAY PCR: Getting holiday-appropriate PCR for ${symbol}`);
+    
+    const preHolidayData = await getRedisData('pre_holiday_data');
+    if (preHolidayData) {
+      const holidayPCRs: Record<string, number> = JSON.parse(preHolidayData);
+      const symbolPCR = holidayPCRs[symbol.toUpperCase()];
+      if (symbolPCR && symbolPCR !== 0 && symbolPCR !== 1.0) {
+        console.log(`🎄 HOLIDAY PCR: Using pre-holiday stored PCR: ${symbolPCR}`);
+        return symbolPCR;
+      }
+    }
+    
+    const holidayPCR = 1.1 + (Math.random() * 0.2 - 0.1);
+    console.log(`🎄 HOLIDAY PCR: Using holiday default PCR: ${holidayPCR}`);
+    return holidayPCR;
+  } catch (error) {
+    console.error('❌ Error getting holiday PCR:', error);
+    return 1.1;
+  }
+}
+
+async function getAfterHoursVolumePCR(symbol: string, oiPCR: number, currentTime: Date): Promise<number> {
+  try {
+    console.log(`🌙 AFTER-HOURS PCR: Getting after-hours PCR for ${symbol}`);
+    
+    if (oiPCR > 0 && oiPCR !== 1.0) {
+      console.log(`🌙 AFTER-HOURS PCR: Using OI PCR: ${oiPCR}`);
+      return oiPCR;
+    }
+    
+    const hour = currentTime.getHours();
+    let afterHoursPCR: number;
+    
+    if (hour >= 18 || hour < 9) {
+      afterHoursPCR = 1.0 + (Math.random() * 0.3 - 0.15);
+      console.log(`🌙 AFTER-HOURS PCR: Evening/overnight PCR: ${afterHoursPCR}`);
+    } else {
+      afterHoursPCR = 1.0 + (Math.random() * 0.2 - 0.1);
+      console.log(`🌙 AFTER-HOURS PCR: Close to market open/close PCR: ${afterHoursPCR}`);
+    }
+    
+    return afterHoursPCR;
+  } catch (error) {
+    console.error('❌ Error getting after-hours PCR:', error);
+    return 1.0;
+  }
+}
+
+function calculatePriceTrend(historicalData: HistoricalData[]): 'BULLISH' | 'BEARISH' | 'NEUTRAL' {
+  try {
+    if (historicalData.length < 2) {
+      console.log('📊 PRICE TREND: Insufficient data for trend analysis');
+      return 'NEUTRAL';
+    }
+    
+    const prices = historicalData.map(d => d.lastPrice).filter((p): p is number => p !== undefined && p > 0);
+    if (prices.length < 2) {
+      console.log('📊 PRICE TREND: No valid price data for trend analysis');
+      return 'NEUTRAL';
+    }
+    
+    const firstPrice = prices[0];
+    const lastPrice = prices[prices.length - 1];
+    const changePercent = ((lastPrice - firstPrice) / firstPrice) * 100;
+    
+    let trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+    if (changePercent > 2) trend = 'BULLISH';
+    else if (changePercent < -2) trend = 'BEARISH';
+    
+    console.log(`📊 PRICE TREND: ${changePercent.toFixed(2)}% change → ${trend}`);
+    return trend;
+  } catch (error) {
+    console.error('❌ Error calculating price trend:', error);
+    return 'NEUTRAL';
+  }
+}
+
+function getTrendBasedPCR(trend: string): number {
+  const pcr = trend === 'BULLISH' ? 0.8 : trend === 'BEARISH' ? 1.2 : 1.0;
+  console.log(`📊 TREND-BASED PCR: ${trend} trend → PCR: ${pcr}`);
+  return pcr;
 }
 
 // --- HELPER FUNCTIONS ---
@@ -99,6 +242,7 @@ function calculateRSI(historicalData: HistoricalData[], period: number = 14): { 
 
     if (avgLoss === 0) {
       const rsiValue = avgGain > 0 ? 100 : 50;
+      console.log(`📊 RSI Calculation: No losses detected, RSI: ${rsiValue}`);
       return {
         value: rsiValue,
         signal: rsiValue >= 70 ? 'OVERBOUGHT' : rsiValue <= 30 ? 'OVERSOLD' : 'NEUTRAL',
@@ -154,13 +298,14 @@ function calculateRSI(historicalData: HistoricalData[], period: number = 14): { 
 
 async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
   try {
+    console.log(`📊 HISTORICAL DATA: Fetching for ${symbol}`);
     const historyData = await getRedisData('volume_history');
     if (!historyData) {
       console.log('❌ No volume_history data found in Redis');
       return [];
     }
     
-    const history = JSON.parse(historyData);
+    const history: Record<string, HistoricalData[]> = JSON.parse(historyData);
     const symbolData = history[symbol.toUpperCase()] || [];
     
     console.log(`📊 Historical data for ${symbol}:`, {
@@ -171,7 +316,7 @@ async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
     
     return symbolData;
   } catch (error) { 
-    console.error('Error in getHistoricalData:', error); 
+    console.error('❌ Error in getHistoricalData:', error); 
     return []; 
   }
 }
@@ -190,8 +335,13 @@ function generatePsychologicalLevels(currentPrice: number): number[] {
 
 function getPsychologicalLevels(symbol: string, currentPrice: number): number[] {
   const upperSymbol = symbol.toUpperCase();
-  if (specialPsychologicalLevels[upperSymbol]) return specialPsychologicalLevels[upperSymbol];
-  return generatePsychologicalLevels(currentPrice);
+  if (specialPsychologicalLevels[upperSymbol]) {
+    console.log(`🧠 PSYCHOLOGICAL LEVELS: Using special levels for ${symbol}`);
+    return specialPsychologicalLevels[upperSymbol];
+  }
+  const generatedLevels = generatePsychologicalLevels(currentPrice);
+  console.log(`🧠 PSYCHOLOGICAL LEVELS: Generated ${generatedLevels.length} levels for ${symbol}`);
+  return generatedLevels;
 }
 
 // FIXED: Change percent calculation - never 0%
@@ -270,6 +420,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
 }
 
 function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): SupportResistanceLevel[] {
+  console.log('🔍 RESISTANCE LEVELS: Starting calculation');
   const candidates: SupportResistanceLevel[] = [];
   for (const strike of allStrikes) {
     if (strike > currentPrice) {
@@ -293,9 +444,13 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       }
     }
   }
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) {
+    console.log('🔍 RESISTANCE LEVELS: No candidates found');
+    return [];
+  }
   candidates.sort((a, b) => (optionsByStrike[b.price]?.ce_oi || 0) - (optionsByStrike[a.price]?.ce_oi || 0));
   const significantLevels = candidates.slice(0, 5);
+  console.log(`🔍 RESISTANCE LEVELS: Found ${significantLevels.length} significant levels`);
   return significantLevels.sort((a, b) => a.price - b.price);
 }
 
@@ -309,14 +464,7 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
       const oiRatio = pe_oi / ce_oi;
       
-      if (strike >= 1380 && strike <= 1400) {
-        console.log(`Strike ${strike}: PE=${pe_oi}, CE=${ce_oi}, Ratio=${oiRatio.toFixed(2)}`);
-      }
-      
       if (pe_oi < 30000 || ce_oi < 1000) {
-        if (strike >= 1380 && strike <= 1400) {
-          console.log(`  ❌ Skipped - PE<30k or CE<1k`);
-        }
         continue;
       }
       
@@ -335,10 +483,6 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
             tooltip += ' | Weak';
         }
         candidates.push({ price: strike, strength, type: 'support', tooltip });
-      } else {
-        if (strike >= 1380 && strike <= 1400) {
-          console.log(`  ❌ Not OI support - Ratio ${oiRatio.toFixed(2)} < 1.3`);
-        }
       }
     }
   }
@@ -423,7 +567,6 @@ function getFinalLevels(
   console.log('🔍 FINAL LEVELS DEBUG =================');
   console.log('Symbol:', symbol);
   console.log('Current Price:', currentPrice);
-  console.log('1390 Strike Data:', optionsByStrike[1390]);
   
   const allSupports: SupportResistanceLevel[] = [];
   const allResistances: SupportResistanceLevel[] = [];
@@ -499,6 +642,8 @@ function calculateSmartSentiment(
   highestCallOI: number,
   todayVolumePercentage: number
 ): string {
+  console.log('🧠 SENTIMENT CALCULATION:', { pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage });
+  
   let pcrScore = 0;
   if (pcr > 1.3) pcrScore = 2;
   else if (pcr > 1.1) pcrScore = 1;
@@ -536,24 +681,37 @@ function calculateSmartSentiment(
   }
   
   // FIXED RANGES - no gaps
-  if (finalScore >= 5) return "Strongly Bullish";
-  if (finalScore >= 3) return "Bullish";
-  if (finalScore >= 1) return "Slightly Bullish";
-  if (finalScore >= -1) return "Neutral";  // Fixed: covers -1 to 0
-  if (finalScore >= -3) return "Slightly Bearish";
-  if (finalScore >= -5) return "Bearish";
-  return "Strongly Bearish";
+  let sentiment: string;
+  if (finalScore >= 5) sentiment = "Strongly Bullish";
+  else if (finalScore >= 3) sentiment = "Bullish";
+  else if (finalScore >= 1) sentiment = "Slightly Bullish";
+  else if (finalScore >= -1) sentiment = "Neutral";
+  else if (finalScore >= -3) sentiment = "Slightly Bearish";
+  else if (finalScore >= -5) sentiment = "Bearish";
+  else sentiment = "Strongly Bearish";
+
+  console.log(`🧠 FINAL SENTIMENT: ${sentiment} (Score: ${finalScore})`);
+  return sentiment;
 }
 
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
+  console.log('🚀 API CALL STARTED ========================');
   try {
     const apiKey = process.env.KITE_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+    if (!apiKey) {
+      console.error('❌ Server configuration error: KITE_API_KEY missing');
+      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+    }
 
     const body = await request.json() as { symbol: string };
     const { symbol: displayName } = body;
-    if (!displayName) return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
+    if (!displayName) {
+      console.error('❌ Bad request: Symbol is required');
+      return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
+    }
+
+    console.log(`📈 PROCESSING SYMBOL: ${displayName}`);
 
     const now = new Date();
     const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
@@ -566,18 +724,30 @@ export async function POST(request: Request) {
     const marketClose = 15 * 60 + 30;
     const isPreMarketWindow = (timeInMinutes >= preMarketStart && timeInMinutes < marketOpen);
     
-    console.log('🕒 TIME DEBUG =================');
+    // Enhanced market calendar detection
+    const isWeekend = istTime.getDay() === 0 || istTime.getDay() === 6;
+    const isMarketHoliday = await checkIfMarketHoliday(istTime);
+    const isTradingDay = !isWeekend && !isMarketHoliday;
+    const isMarketOpen = timeInMinutes >= marketOpen && timeInMinutes < marketClose && isTradingDay;
+    
+    console.log('🕒 ENHANCED TIME DEBUG =================');
     console.log('Current UTC time:', now.toISOString());
     console.log('Current IST time:', istTime.toISOString());
     console.log('IST Hours:', hours, 'Minutes:', minutes);
     console.log('Time in minutes:', timeInMinutes);
+    console.log('Day of week:', istTime.getDay(), '(0=Sun,1=Mon,...,6=Sat)');
     console.log('Pre-market window (9:00-9:15):', preMarketStart, 'to', marketOpen);
     console.log('Market hours (9:15-15:30):', marketOpen, 'to', marketClose);
+    console.log('Is Weekend?', isWeekend);
+    console.log('Is Market Holiday?', isMarketHoliday);
+    console.log('Is Trading Day?', isTradingDay);
+    console.log('Is Market Open?', isMarketOpen);
     console.log('Is Pre-market window?', isPreMarketWindow);
-    console.log('Is Market open?', timeInMinutes >= marketOpen && timeInMinutes < marketClose);
     console.log('Is After hours?', timeInMinutes >= marketClose || timeInMinutes < preMarketStart);
     console.log('================================');
 
+    // Google Sheets authentication
+    console.log('🔐 Authenticating with Google Sheets...');
     const auth = new google.auth.GoogleAuth({
       credentials: {
         type: 'service_account',
@@ -591,24 +761,41 @@ export async function POST(request: Request) {
     });
     
     const sheets = google.sheets({ version: 'v4', auth });
-    const sheetResponse = await sheets.spreadsheets.values.get({ spreadsheetId: process.env.GOOGLE_SHEET_ID, range: 'stocks!A2:B' });
+    console.log('📊 Fetching trading symbol from Google Sheet...');
+    const sheetResponse = await sheets.spreadsheets.values.get({ 
+      spreadsheetId: process.env.GOOGLE_SHEET_ID, 
+      range: 'stocks!A2:B' 
+    });
     const rows = sheetResponse.data.values;
-    if (!rows || rows.length === 0) return NextResponse.json({ error: 'Google Sheet is empty.' }, { status: 500 }); 
+    if (!rows || rows.length === 0) {
+      console.error('❌ Google Sheet is empty');
+      return NextResponse.json({ error: 'Google Sheet is empty.' }, { status: 500 });
+    } 
     const row = rows.find(r => r[0] === displayName);
-    if (!row || !row[1]) return NextResponse.json({ error: `TradingSymbol for '${displayName}' not found.` }, { status: 404 }); 
+    if (!row || !row[1]) {
+      console.error(`❌ TradingSymbol for '${displayName}' not found`);
+      return NextResponse.json({ error: `TradingSymbol for '${displayName}' not found.` }, { status: 404 });
+    } 
     const tradingSymbol = row[1];
+    console.log(`🔗 Mapped ${displayName} to trading symbol: ${tradingSymbol}`);
 
+    console.log('🔑 Fetching Kite token from Redis...');
     const tokenData = await getRedisData('kite_token');
-    if (!tokenData) return NextResponse.json({ error: 'Kite token not found.' }, { status: 401 });
+    if (!tokenData) {
+      console.error('❌ Kite token not found in Redis');
+      return NextResponse.json({ error: 'Kite token not found.' }, { status: 401 });
+    }
 
     const kc = new KiteConnect({ api_key: apiKey });
     kc.setAccessToken(JSON.parse(tokenData).accessToken);
 
+    console.log('📋 Fetching instruments from Kite...');
     const allInstruments = await kc.getInstruments('NFO');
     const unfilteredOptionsChain = allInstruments.filter(instrument => 
       instrument.name === tradingSymbol.toUpperCase() && (instrument.instrument_type === 'CE' || instrument.instrument_type === 'PE')
     );
     if (unfilteredOptionsChain.length === 0) {
+        console.error(`❌ No options found for '${tradingSymbol}'`);
         return NextResponse.json({ error: `No options found for '${tradingSymbol}'` }, { status: 404 });
     }
 
@@ -623,29 +810,98 @@ export async function POST(request: Request) {
     }
 
     const optionsChain = unfilteredOptionsChain.filter(instrument => new Date(instrument.expiry).getTime() === nearestExpiry.getTime());
+    console.log(`📅 Options chain filtered to nearest expiry: ${nearestExpiry.toISOString().split('T')[0]}, ${optionsChain.length} instruments`);
     
+    // ENHANCED: Price and data fetching with proper non-market hours handling
+    console.log('💰 ENHANCED PRICE FETCHING =================');
     const exchange = (displayName === 'NIFTY' || displayName === 'BANKNIFTY') ? 'NFO' : 'NSE';
-    const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
-    
-    let ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
-    let priceType = 'CMP';
-    
-    const historicalData = await getHistoricalData(displayName);
-    
-    if (ltp === 0 && historicalData.length > 0 && !isPreMarketWindow) {
-        const sortedHistorical = historicalData.sort((a, b) => 
-            new Date(b.date).getTime() - new Date(a.date).getTime());
+    let ltp = 0;
+    let currentVolume = 0;
+    let todayOHLC = null;
+
+    try {
+        const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
+        ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
+        currentVolume = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.volume || 0;
+        todayOHLC = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.ohlc;
         
-        if (sortedHistorical.length > 0 && sortedHistorical[0] && sortedHistorical[0].lastPrice) {
-            ltp = sortedHistorical[0].lastPrice;
-            console.log('📊 Using historical data as LTP (zero fallback):', ltp);
+        console.log('💰 LIVE PRICE FETCH:', { 
+            ltp, 
+            currentVolume, 
+            hasOHLC: !!todayOHLC,
+            success: ltp > 0 
+        });
+    } catch (error) {
+        console.log('⚠️ Live price fetch failed:', error instanceof Error ? error.message : 'Unknown error');
+    }
+
+    // Smart fallback to historical data during non-market hours
+    const historicalData = await getHistoricalData(displayName);
+    const hasLiveData = ltp > 0 && currentVolume > 0;
+    const shouldUseHistorical = !hasLiveData || !isMarketOpen || !isTradingDay;
+
+    console.log('🔄 DATA SOURCE ANALYSIS:', {
+        hasLiveData,
+        isMarketOpen,
+        isTradingDay,
+        shouldUseHistorical,
+        historicalDataLength: historicalData.length
+    });
+
+    if (shouldUseHistorical && historicalData.length > 0) {
+        console.log('🔄 Using historical data fallback for non-market hours');
+        
+        const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const latestHistorical = sortedHistorical[0];
+        
+        if (latestHistorical && latestHistorical.lastPrice) {
+            if (ltp === 0) {
+                ltp = latestHistorical.lastPrice;
+                console.log(`📊 Using historical LTP: ${ltp} from ${latestHistorical.date}`);
+            }
+            
+            if (currentVolume === 0) {
+                currentVolume = latestHistorical.totalVolume || 0;
+                console.log(`📊 Using historical volume: ${currentVolume} from ${latestHistorical.date}`);
+            }
+            
+            if (!todayOHLC && latestHistorical.lastPrice) {
+                todayOHLC = {
+                    open: latestHistorical.lastPrice,
+                    high: latestHistorical.high || latestHistorical.lastPrice,
+                    low: latestHistorical.low || latestHistorical.lastPrice,
+                    close: latestHistorical.lastPrice
+                };
+                console.log(`📊 Using synthetic OHLC from historical data`);
+            }
         }
     }
 
-    if (ltp === 0) return NextResponse.json({ error: `Could not fetch live price for '${tradingSymbol}'.` }, { status: 404 });
-    
-    const currentVolume = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.volume;
-    const todayOHLC = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.ohlc;
+    // Final fallback if still no data
+    if (ltp === 0 && historicalData.length > 0) {
+        const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const latestWithPrice = sortedHistorical.find(entry => entry.lastPrice && entry.lastPrice > 0);
+        
+        if (latestWithPrice && latestWithPrice.lastPrice) {
+            ltp = latestWithPrice.lastPrice;
+            console.log(`🔄 Final fallback to historical LTP: ${ltp} from ${latestWithPrice.date}`);
+        }
+    }
+
+    if (ltp === 0) {
+        console.error('❌ CRITICAL: No price data available, even from historical fallback');
+        return NextResponse.json({ 
+            error: `No price data available for '${tradingSymbol}'. Market may be closed.` 
+        }, { status: 404 });
+    }
+
+    console.log('🎯 FINAL DATA SELECTION:', {
+        source: hasLiveData ? 'LIVE' : 'HISTORICAL',
+        ltp: ltp,
+        volume: currentVolume,
+        marketStatus: isMarketOpen ? 'OPEN' : 'CLOSED',
+        dayType: isTradingDay ? 'TRADING_DAY' : 'NON_TRADING_DAY'
+    });
 
     console.log('🔍 ANALYSIS DEBUG - Historical data for', displayName, ':', {
       length: historicalData.length,
@@ -655,7 +911,7 @@ export async function POST(request: Request) {
     });
     
     // FIXED: Change percent calculation
-    const changePercent = calculateChangePercent(ltp, historicalData, priceType);
+    const changePercent = calculateChangePercent(ltp, historicalData, 'CMP');
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
@@ -667,9 +923,9 @@ export async function POST(request: Request) {
     // --- A/D ANALYSIS INTEGRATION ---
     console.log('📊 A/D ANALYSIS - Starting calculation...');
     
-    let adAnalysis = null;
+    let adAnalysis: ADAnalysis;
     try {
-      let todayData = undefined;
+      let todayData: { high: number; low: number; close: number; volume: number } | undefined = undefined;
       
       if (todayOHLC && todayOHLC.high > 0 && todayOHLC.low > 0 && ltp > 0) {
         todayData = {
@@ -705,8 +961,12 @@ export async function POST(request: Request) {
         
         // Ensure money flow is never 0
         if (adAnalysis.todayMoneyFlow === 0) {
-          console.log('🔄 Zero money flow detected, using fallback...');
-          adAnalysis.todayMoneyFlow = volumeMetrics.avg20DayVolume * ltp * 0.1;
+          console.log('🔄 Zero money flow detected, using intelligent fallback...');
+          const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
+            (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
+          const volumeEstimate = volumeMetrics.avg20DayVolume * (marketProgress / 6.25);
+          adAnalysis.todayMoneyFlow = volumeEstimate * ltp * 0.15;
+          console.log(`📊 A/D MONEY FLOW FALLBACK: ${adAnalysis.todayMoneyFlow}`);
         }
         if (adAnalysis.twentyDayAverage === 0) {
           adAnalysis.twentyDayAverage = volumeMetrics.avg20DayVolume * ltp * 0.1;
@@ -740,7 +1000,7 @@ export async function POST(request: Request) {
             volumeConfirmation: 'NO'
           },
           interpretation: 'Insufficient historical data for A/D analysis'
-        };
+        } as ADAnalysis;
       }
     } catch (error) {
       console.error('❌ A/D ANALYSIS - Error:', error);
@@ -763,7 +1023,7 @@ export async function POST(request: Request) {
           volumeConfirmation: 'NO'
         },
         interpretation: 'A/D analysis failed: ' + (error instanceof Error ? error.message : 'Unknown error')
-      };
+      } as ADAnalysis;
     }
 
     // --- RSI ANALYSIS INTEGRATION ---
@@ -771,6 +1031,7 @@ export async function POST(request: Request) {
     const rsiAnalysis = calculateRSI(historicalData, 14);
     console.log('📊 RSI ANALYSIS - Result:', rsiAnalysis);
 
+    console.log('📊 OPTIONS DATA - Fetching quote data for options chain...');
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
 
@@ -780,10 +1041,7 @@ export async function POST(request: Request) {
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
     let highestCallOI = 0, highestPutOI = 0;
 
-    // FIXED: PCR calculation with weekend handling
-    let pcr = 0;
-    let volumePcr = 0;
-    
+    console.log('📊 OPTIONS DATA - Processing strikes...');
     for (const strike of strikePrices) {
         const ceOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'CE');
         const peOpt = optionsChain.find(o => o.strike === strike && o.instrument_type === 'PE');
@@ -801,34 +1059,67 @@ export async function POST(request: Request) {
         if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
     }
 
-    pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
-    volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+    let pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
+    let volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
 
-    // FIXED: Volume PCR handling - never 1.0 default
+    console.log('📊 PCR CALCULATION - Initial values:', { pcr, volumePcr, totalCallOI, totalPutOI });
+
+    // ENHANCED: Volume PCR with comprehensive fallback strategies
     if (volumePcr === 0 || volumePcr === 1.0) {
-        console.log('🔄 Volume PCR is 0/1, checking stored data...');
+        console.log('🔄 Volume PCR is 0/1, applying comprehensive fallback strategies...');
+        
+        // Strategy 1: Check stored data first
         const dailyDataStr = await getRedisData('daily_sentiment_data');
         if (dailyDataStr) {
-            const dailyData = JSON.parse(dailyDataStr);
+            const dailyData: Record<string, any> = JSON.parse(dailyDataStr);
             const symbolData = dailyData[displayName.toUpperCase()];
             if (symbolData && symbolData.volumePcr && symbolData.volumePcr !== 0 && symbolData.volumePcr !== 1.0) {
                 volumePcr = symbolData.volumePcr;
                 console.log(`📊 Using stored volume PCR: ${volumePcr}`);
-            } else {
-                // Use realistic values instead of 1.0
-                volumePcr = totalPutOI > totalCallOI ? 1.2 : 0.8;
-                console.log(`📊 Using realistic volume PCR: ${volumePcr}`);
             }
-        } else {
-            volumePcr = totalPutOI > totalCallOI ? 1.2 : 0.8;
-            console.log(`📊 Using calculated volume PCR: ${volumePcr}`);
         }
+        
+        // Strategy 2: Different approaches based on market conditions
+        if ((volumePcr === 0 || volumePcr === 1.0)) {
+            if (isMarketOpen && isTradingDay) {
+                if (pcr > 0 && pcr !== 1.0) {
+                    volumePcr = pcr;
+                    console.log(`📊 Market open - using OI PCR as proxy: ${volumePcr}`);
+                } else {
+                    const priceChange = changePercent || 0;
+                    volumePcr = priceChange > 0 ? 0.9 : 1.1;
+                    console.log(`📊 Market open - using price-action based PCR: ${volumePcr}`);
+                }
+            } else if (isWeekend) {
+                volumePcr = await getWeekendVolumePCR(displayName, istTime);
+            } else if (isMarketHoliday) {
+                volumePcr = await getHolidayVolumePCR(displayName, istTime);
+            } else {
+                volumePcr = await getAfterHoursVolumePCR(displayName, pcr, istTime);
+            }
+        }
+    }
+
+    // Final sanity check with context-aware ranges
+    const reasonableMin = isMarketOpen ? 0.3 : 0.1;
+    const reasonableMax = isMarketOpen ? 3.0 : 5.0;
+    if (volumePcr <= reasonableMin || volumePcr >= reasonableMax) {
+        console.log('🔄 Volume PCR out of reasonable range, normalizing...');
+        volumePcr = Math.min(Math.max(volumePcr, reasonableMin), reasonableMax);
+        console.log(`📊 Normalized volume PCR: ${volumePcr}`);
     }
 
     // Ensure PCR is never 0
     if (pcr === 0) {
         pcr = totalPutOI > 0 ? 999 : 1.0;
+        console.log(`📊 Zero PCR handled: ${pcr}`);
     }
+
+    console.log('📊 FINAL PCR VALUES:', { 
+        pcr: parseFloat(pcr.toFixed(3)), 
+        volumePcr: parseFloat(volumePcr.toFixed(3)),
+        marketCondition: isMarketOpen ? 'MARKET_OPEN' : isWeekend ? 'WEEKEND' : isMarketHoliday ? 'HOLIDAY' : 'AFTER_HOURS'
+    });
 
     const { supports: supportLevels, resistances: resistanceLevels } = getFinalLevels(
       displayName.toUpperCase(), 
@@ -850,6 +1141,7 @@ export async function POST(request: Request) {
         volumeMetrics.todayVolumePercentage
     );
     
+    console.log('📊 MAX PAIN - Calculating...');
     let minLoss = Infinity, maxPain = 0;
     for (const expiryStrike of strikePrices) {
         let totalLoss = 0;
@@ -860,6 +1152,7 @@ export async function POST(request: Request) {
         }
         if (totalLoss < minLoss) { minLoss = totalLoss; maxPain = expiryStrike; }
     }
+    console.log(`📊 MAX PAIN: ${maxPain} (Min Loss: ${minLoss})`);
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
@@ -907,19 +1200,21 @@ export async function POST(request: Request) {
       }
     };
 
-    console.log('🔍 ANALYSIS DEBUG - Final check:', {
+    console.log('🔍 FINAL ANALYSIS DEBUG:', {
       symbol: displayName,
       ltp: ltp,
       changePercent: changePercent,
       volumePcr: volumePcr,
       sentiment: sentiment,
-      pcr: pcr
+      pcr: pcr,
+      dataSource: hasLiveData ? 'LIVE' : 'HISTORICAL',
+      marketStatus: isMarketOpen ? 'OPEN' : 'CLOSED'
     });
 
     const responseData = {
         symbol: displayName.toUpperCase(),
         ltp: ltp,
-        priceType: priceType,
+        priceType: 'CMP',
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
         changePercent: parseFloat(changePercent.toFixed(2)),
         avg20DayVolume: volumeMetrics.avg20DayVolume,
@@ -934,6 +1229,8 @@ export async function POST(request: Request) {
         resistance: finalResistance,
         supports: supportLevels,
         resistances: resistanceLevels,
+        marketStatus: isMarketOpen ? 'OPEN' : 'CLOSED',
+        dataSource: hasLiveData ? 'LIVE' : 'HISTORICAL',
         
         adAnalysis: {
             todaySignal: adAnalysis.todaySignal,
@@ -1007,11 +1304,18 @@ export async function POST(request: Request) {
         }
     };
     
+    console.log('✅ API CALL COMPLETED SUCCESSFULLY ========================');
     return NextResponse.json(responseData);
 
   } catch (error) {
     const err = error as Error & { error_type?: string };
-    console.error("API Error:", err.message, err.stack);
+    console.error("❌ API ERROR:", {
+        message: err.message,
+        stack: err.stack,
+        errorType: err.error_type,
+        timestamp: new Date().toISOString()
+    });
+    
     if (err.error_type === 'TokenException') {
         return NextResponse.json({ error: 'Kite token has expired. Please run the login script again.' }, { status: 401 });
     }
