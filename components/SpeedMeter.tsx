@@ -222,7 +222,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
             <div className={`w-2 h-2 rounded-full ${
               analysisData.pcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
             }`} />
-            <span>PCR: {analysisData.pcr !== undefined ? '✓' : '✗'}</span>
+            <span>OI PCR: {analysisData.pcr !== undefined ? '✓' : '✗'}</span>
           </div>
           <div className="flex items-center gap-1">
             <div className={`w-2 h-2 rounded-full ${
