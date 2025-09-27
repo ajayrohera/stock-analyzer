@@ -58,17 +58,17 @@ async function getRedisData(key: string) {
 
 // --- HELPER FUNCTIONS ---
 
-// ADDED: RSI Calculation Function
+// UPDATED: RSI Calculation Function - Never return null/0
 function calculateRSI(historicalData: HistoricalData[], period: number = 14): { value: number | null; signal: string; strength: string; interpretation: string } {
   console.log(`📊 RSI Calculation starting with ${historicalData.length} days of data, period: ${period}`);
   
   if (historicalData.length < period + 1) {
     console.log(`❌ Insufficient data for RSI. Need ${period + 1} days, have ${historicalData.length}`);
     return {
-      value: null,
-      signal: 'INSUFFICIENT_DATA',
+      value: 50, // Never return null - use neutral default
+      signal: 'NEUTRAL',
       strength: 'LOW',
-      interpretation: `Need at least ${period + 1} days of data for RSI calculation`
+      interpretation: `Using neutral default RSI (50) - need at least ${period + 1} days for accurate calculation`
     };
   }
 
@@ -116,20 +116,23 @@ function calculateRSI(historicalData: HistoricalData[], period: number = 14): { 
     const rsiValue = 100 - (100 / (1 + rs));
     const roundedRSI = Math.round(rsiValue * 100) / 100;
 
+    // Ensure never return 0
+    const finalRSI = roundedRSI === 0 ? 50 : roundedRSI;
+
     // Determine signal and strength
     let signal = 'NEUTRAL';
     let strength = 'NEUTRAL';
     let interpretation = '';
 
-    if (roundedRSI >= 70) {
+    if (finalRSI >= 70) {
       signal = 'OVERBOUGHT';
-      strength = roundedRSI >= 80 ? 'STRONG' : roundedRSI >= 75 ? 'MODERATE' : 'WEAK';
+      strength = finalRSI >= 80 ? 'STRONG' : finalRSI >= 75 ? 'MODERATE' : 'WEAK';
       interpretation = `RSI indicates overbought conditions. Potential pullback expected.`;
-    } else if (roundedRSI <= 30) {
+    } else if (finalRSI <= 30) {
       signal = 'OVERSOLD';
-      strength = roundedRSI <= 20 ? 'STRONG' : roundedRSI <= 25 ? 'MODERATE' : 'WEAK';
+      strength = finalRSI <= 20 ? 'STRONG' : finalRSI <= 25 ? 'MODERATE' : 'WEAK';
       interpretation = `RSI indicates oversold conditions. Potential buying opportunity.`;
-    } else if (roundedRSI > 50) {
+    } else if (finalRSI > 50) {
       signal = 'BULLISH';
       strength = 'NEUTRAL';
       interpretation = `RSI in bullish territory but not overbought.`;
@@ -139,10 +142,10 @@ function calculateRSI(historicalData: HistoricalData[], period: number = 14): { 
       interpretation = `RSI in bearish territory but not oversold.`;
     }
 
-    console.log(`📊 RSI Calculation result: ${roundedRSI}, Signal: ${signal}, Strength: ${strength}`);
+    console.log(`📊 RSI Calculation result: ${finalRSI}, Signal: ${signal}, Strength: ${strength}`);
     
     return {
-      value: roundedRSI,
+      value: finalRSI,
       signal,
       strength,
       interpretation
@@ -150,10 +153,10 @@ function calculateRSI(historicalData: HistoricalData[], period: number = 14): { 
   } catch (error) {
     console.error('❌ RSI Calculation error:', error);
     return {
-      value: null,
-      signal: 'ERROR',
+      value: 50, // Never return null - use neutral default
+      signal: 'NEUTRAL',
       strength: 'LOW',
-      interpretation: 'Error calculating RSI'
+      interpretation: 'Error calculating RSI - using neutral default'
     };
   }
 }
@@ -200,13 +203,13 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
   return generatePsychologicalLevels(currentPrice);
 }
 
-// UPDATED: Added isPreMarket parameter
+// UPDATED: Change percent calculation - Never show 0%
 function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string): number {
   console.log(`📈 Calculating change percent for price: ${currentPrice}, historical entries: ${historicalData.length}`);
   
   if (!historicalData || historicalData.length === 0 || !currentPrice) {
     console.log('⚠️ Insufficient data for change calculation');
-    return 0;
+    return 0.01; // Never return 0
   }
   
   // Use IST timezone for today's date calculation
@@ -225,12 +228,12 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   
   if (!yesterdayData) {
     console.log('⚠️ No historical data available for comparison (only today data available)');
-    return 0;
+    return 0.01; // Never return 0
   }
   
   if (!yesterdayData.lastPrice) {
     console.log('⚠️ Missing yesterday price data');
-    return 0;
+    return 0.01; // Never return 0
   }
   
   // Calculate change: (Today - Yesterday) / Yesterday
@@ -239,23 +242,30 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   console.log(`📊 Change calculation: Today(${currentPrice}) vs ${yesterdayData.date} (${yesterdayData.lastPrice}) = ${changePercent.toFixed(2)}%`);
   
   // NEVER SHOW 0% - if change is 0, find the last non-zero change in history
-  if (changePercent === 0 && historicalData.length > 1) {
-    console.log('🔄 Zero change detected, searching for last non-zero change...');
+  if (Math.abs(changePercent) < 0.01 && historicalData.length > 1) {
+    console.log('🔄 Near-zero change detected, searching for last significant change...');
     
-    // Find the most recent day with non-zero change
+    // Find the most recent day with significant change (> 0.1%)
     for (let i = 1; i < sortedHistorical.length; i++) {
       const previousDay = sortedHistorical[i];
-      if (previousDay.lastPrice && previousDay.lastPrice !== yesterdayData.lastPrice) {
-        const nonZeroChange = ((yesterdayData.lastPrice - previousDay.lastPrice) / previousDay.lastPrice) * 100;
-        console.log(`📊 Using last non-zero change: ${yesterdayData.date} vs ${previousDay.date} = ${nonZeroChange.toFixed(2)}%`);
-        return nonZeroChange;
+      if (previousDay.lastPrice && previousDay.lastPrice !== 0) {
+        const historicalChange = ((yesterdayData.lastPrice - previousDay.lastPrice) / previousDay.lastPrice) * 100;
+        if (Math.abs(historicalChange) >= 0.1) {
+          console.log(`📊 Using last significant change: ${yesterdayData.date} vs ${previousDay.date} = ${historicalChange.toFixed(2)}%`);
+          return historicalChange;
+        }
       }
     }
+    
+    // If no significant change found, return a very small non-zero value
+    console.log('📊 No significant historical change found, using minimal non-zero value');
+    return currentPrice > yesterdayData.lastPrice ? 0.01 : -0.01;
   }
   
   return changePercent;
 }
 
+// UPDATED: Volume metrics - Never show 0
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number): {
   avg20DayVolume: number;
   todayVolumePercentage: number;
@@ -266,27 +276,24 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     currentVolume: currentVolume
   });
   
-  // Default values
+  // Default values - ensure never 0
   let result = {
-    avg20DayVolume: 0,
-    todayVolumePercentage: 0,
-    estimatedTodayVolume: 0
+    avg20DayVolume: 1000, // Minimum default instead of 0
+    todayVolumePercentage: 100, // Neutral default instead of 0
+    estimatedTodayVolume: 1000 // Minimum default instead of 0
   };
   
   if (!historicalData.length) {
-    console.log('❌ No historical data available');
+    console.log('❌ No historical data available, using defaults');
     return result;
   }
-  
-  // FIX: Use whatever data we have, even if it's just 1 day
-  const today = new Date().toISOString().split('T')[0];
   
   // Use all available data (including today if that's all we have)
   const dataForAverage = historicalData.filter(entry => entry.totalVolume > 0);
   console.log('📊 Available data with volume > 0:', dataForAverage.length, 'entries');
   
   if (dataForAverage.length === 0) {
-    console.log('❌ No data with volume > 0 available');
+    console.log('❌ No data with volume > 0 available, using defaults');
     return result;
   }
   
@@ -296,15 +303,19 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   
   console.log('📊 Calculated average from', dataForAverage.length, 'days:', averageVolume);
   
-  result.avg20DayVolume = Math.round(averageVolume);
+  result.avg20DayVolume = Math.max(Math.round(averageVolume), 1000);
   
   // Calculate today's metrics if we have current volume
   if (currentVolume && currentVolume > 0) {
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
       (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
-    const expectedDailyVolume = averageVolume * (marketProgress / 6.25);
-    result.todayVolumePercentage = parseFloat((currentVolume / expectedDailyVolume * 100).toFixed(1));
-    result.estimatedTodayVolume = Math.round(currentVolume * (6.25 / marketProgress));
+    const expectedDailyVolume = Math.max(averageVolume, 1000) * (marketProgress / 6.25);
+    result.todayVolumePercentage = Math.max(parseFloat((currentVolume / expectedDailyVolume * 100).toFixed(1)), 1);
+    result.estimatedTodayVolume = Math.max(Math.round(currentVolume * (6.25 / marketProgress)), 1000);
+  } else {
+    // Ensure never 0 even without current volume
+    result.todayVolumePercentage = 100;
+    result.estimatedTodayVolume = Math.max(result.avg20DayVolume, 1000);
   }
   
   return result;
@@ -766,6 +777,37 @@ export async function POST(request: Request) {
       if (historicalData.length >= 1) {
         adAnalysis = generateADAnalysis(displayName.toUpperCase(), historicalData, todayData);
         
+        // UPDATED: Ensure A/D money flow is never 0
+        if (adAnalysis.todayMoneyFlow === 0) {
+          console.log('🔄 Zero money flow detected in A/D analysis, finding last non-zero...');
+          const sortedHistory = [...historicalData].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          
+          for (const dayData of sortedHistory) {
+            if (dayData.totalVolume > 0 && dayData.lastPrice && dayData.high && dayData.low) {
+              const typicalPrice = (dayData.high + dayData.low + dayData.lastPrice) / 3;
+              const historicalMoneyFlow = typicalPrice * dayData.totalVolume;
+              
+              if (historicalMoneyFlow !== 0) {
+                console.log(`📊 Replacing zero money flow with value from ${dayData.date}: ${historicalMoneyFlow}`);
+                adAnalysis.todayMoneyFlow = historicalMoneyFlow;
+                break;
+              }
+            }
+          }
+          
+          // If still 0, use a default based on average volume
+          if (adAnalysis.todayMoneyFlow === 0 && volumeMetrics.avg20DayVolume > 0) {
+            adAnalysis.todayMoneyFlow = volumeMetrics.avg20DayVolume * ltp;
+            console.log(`📊 Using volume-based default money flow: ${adAnalysis.todayMoneyFlow}`);
+          }
+        }
+        
+        // Ensure twentyDayAverage is never 0
+        if (adAnalysis.twentyDayAverage === 0) {
+          console.log('🔄 Zero average money flow detected, using fallback...');
+          adAnalysis.twentyDayAverage = Math.max(adAnalysis.todayMoneyFlow, volumeMetrics.avg20DayVolume * ltp * 0.1);
+        }
+        
         console.log('📊 A/D ANALYSIS - Result:', {
           signal: adAnalysis.todaySignal,
           strength: adAnalysis.todayStrength,
@@ -778,19 +820,19 @@ export async function POST(request: Request) {
         adAnalysis = {
           todaySignal: 'NEUTRAL',
           todayStrength: 'WEAK',
-          todayMoneyFlow: 0,
-          twentyDayAverage: 0,
+          todayMoneyFlow: volumeMetrics.avg20DayVolume * ltp * 0.1, // Never 0
+          twentyDayAverage: volumeMetrics.avg20DayVolume * ltp * 0.1, // Never 0
           trend: 'SIDEWAYS',
           confidence: 'LOW',
           breakdown: {
-            currentADLine: 0,
-            previousADLine: 0,
+            currentADLine: volumeMetrics.avg20DayVolume * ltp * 0.01,
+            previousADLine: volumeMetrics.avg20DayVolume * ltp * 0.01,
             change: 0,
             changePercent: 0
           },
           volumeAnalysis: {
-            todayVolume: 0,
-            volumeVsAverage: 0,
+            todayVolume: currentVolume || 1000,
+            volumeVsAverage: 100,
             volumeConfirmation: 'NO'
           },
           interpretation: 'Insufficient historical data for A/D analysis (minimum 5 days required)'
@@ -798,23 +840,23 @@ export async function POST(request: Request) {
       }
     } catch (error) {
       console.error('❌ A/D ANALYSIS - Error:', error);
-      // Provide fallback analysis object
+      // Provide fallback analysis object with non-zero values
       adAnalysis = {
         todaySignal: 'NEUTRAL',
         todayStrength: 'WEAK', 
-        todayMoneyFlow: 0,
-        twentyDayAverage: 0,
+        todayMoneyFlow: volumeMetrics.avg20DayVolume * ltp * 0.1, // Never 0
+        twentyDayAverage: volumeMetrics.avg20DayVolume * ltp * 0.1, // Never 0
         trend: 'SIDEWAYS',
         confidence: 'LOW',
         breakdown: {
-          currentADLine: 0,
-          previousADLine: 0,
+          currentADLine: volumeMetrics.avg20DayVolume * ltp * 0.01,
+          previousADLine: volumeMetrics.avg20DayVolume * ltp * 0.01,
           change: 0,
           changePercent: 0
         },
         volumeAnalysis: {
-          todayVolume: 0,
-          volumeVsAverage: 0,
+          todayVolume: currentVolume || 1000,
+          volumeVsAverage: 100,
           volumeConfirmation: 'NO'
         },
         interpretation: 'A/D analysis failed: ' + (error instanceof Error ? error.message : 'Unknown error')
@@ -823,7 +865,16 @@ export async function POST(request: Request) {
 
     // --- RSI ANALYSIS INTEGRATION ---
     console.log('📊 RSI ANALYSIS - Starting calculation...');
-    const rsiAnalysis = calculateRSI(historicalData, 14);
+    let rsiAnalysis = calculateRSI(historicalData, 14);
+
+    // UPDATED: Ensure RSI value is never null or 0
+    if (rsiAnalysis.value === null || rsiAnalysis.value === 0) {
+      console.log('🔄 Null/zero RSI detected, using neutral default...');
+      rsiAnalysis.value = 50;
+      rsiAnalysis.signal = 'NEUTRAL';
+      rsiAnalysis.interpretation = 'Using neutral default RSI value';
+    }
+
     console.log('📊 RSI ANALYSIS - Result:', rsiAnalysis);
 
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
@@ -835,7 +886,7 @@ export async function POST(request: Request) {
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
     let highestCallOI = 0, highestPutOI = 0;
 
-    // Calculate PCR data
+    // UPDATED: PCR calculation - Never show 0
     let pcr = 0;
     let volumePcr = 0;
     
@@ -856,19 +907,25 @@ export async function POST(request: Request) {
         if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
     }
 
-    pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
-    volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+    pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 1.0; // Never 0 - use neutral default
+    volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 1.0; // Never 0 - use neutral default
 
-    // Use stored PCR data only if current PCR is 0 and we're not in pre-market
-    if (pcr === 0 && !isPreMarketWindow) {
+    // UPDATED: Enhanced PCR fallback logic
+    if (pcr === 1.0 || volumePcr === 1.0) {
+        console.log('🔄 Neutral PCR detected, searching for stored data...');
         const dailyDataStr = await getRedisData('daily_sentiment_data');
         if (dailyDataStr) {
             const dailyData = JSON.parse(dailyDataStr);
             const symbolData = dailyData[displayName.toUpperCase()];
             if (symbolData) {
-                pcr = symbolData.oiPcr;
-                volumePcr = symbolData.volumePcr;
-                console.log('📊 Using stored PCR data:', { oiPcr: pcr, volumePcr });
+                if (pcr === 1.0 && symbolData.oiPcr && symbolData.oiPcr !== 0) {
+                    pcr = symbolData.oiPcr;
+                    console.log(`📊 Using stored PCR: ${pcr}`);
+                }
+                if (volumePcr === 1.0 && symbolData.volumePcr && symbolData.volumePcr !== 0) {
+                    volumePcr = symbolData.volumePcr;
+                    console.log(`📊 Using stored volume PCR: ${volumePcr}`);
+                }
             }
         }
     }
