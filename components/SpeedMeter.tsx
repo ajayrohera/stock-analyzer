@@ -14,91 +14,50 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
   const [isPulsing, setIsPulsing] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
 
-  // Convert backend sentiment to score (EXACT same mapping as Smart Sentiment Card)
-  const convertSentimentToScore = (analysisData: any) => {
-    const sentiment = analysisData.sentiment || 'NEUTRAL';
-    console.log('🔍 SpeedMeter DEBUG - Raw sentiment from backend:', sentiment);
+  // DIRECTLY USE THE SCORE FROM SMART SENTIMENT - NO CALCULATION
+  const getScoreFromBackend = (analysisData: any) => {
+    // Take the score directly from backend smart sentiment
+    const score = analysisData?.sentimentScore || 0;
+    const sentiment = analysisData?.sentiment || 'NEUTRAL';
     
-    // EXACT same mapping as used in Smart Sentiment Card
-    let score = 0;
-    let displaySentiment = 'NEUTRAL';
+    console.log('🔍 SpeedMeter - Direct backend data:', {
+      scoreFromBackend: score,
+      sentimentFromBackend: sentiment,
+      hasBreakdown: !!analysisData?.sentimentBreakdown
+    });
     
-    switch(sentiment?.toUpperCase()) {
-      case 'STRONGLY BULLISH':
-      case 'STRONGLY_BULLISH':
-        score = 8;
-        displaySentiment = 'STRONGLY_BULLISH';
-        break;
-      case 'BULLISH':
-        score = 5;
-        displaySentiment = 'BULLISH';
-        break;
-      case 'SLIGHTLY BULLISH':
-      case 'SLIGHTLY_BULLISH':
-        score = 2;
-        displaySentiment = 'SLIGHTLY_BULLISH';
-        break;
-      case 'NEUTRAL':
-        score = 0;
-        displaySentiment = 'NEUTRAL';
-        break;
-      case 'SLIGHTLY BEARISH':
-      case 'SLIGHTLY_BEARISH':
-        score = -2;
-        displaySentiment = 'SLIGHTLY_BEARISH';
-        break;
-      case 'BEARISH':
-        score = -5;
-        displaySentiment = 'BEARISH';
-        break;
-      case 'STRONGLY BEARISH':
-      case 'STRONGLY_BEARISH':
-        score = -8;
-        displaySentiment = 'STRONGLY_BEARISH';
-        break;
-      default:
-        score = 0;
-        displaySentiment = 'NEUTRAL';
-    }
-
-    // Simple confidence calculation based on data availability
-    const confidence = analysisData.supports?.length > 0 && 
-                      analysisData.resistances?.length > 0 && 
-                      analysisData.pcr !== undefined ? 85 : 65;
-
-    console.log('🔍 SpeedMeter DEBUG - Final score:', { score, sentiment: displaySentiment, confidence });
-    
-    return { score, sentiment: displaySentiment, confidence };
+    return { score, sentiment };
   };
 
-  // Score interpretation helper
+  // Score interpretation helper (display only)
   const getScoreInterpretation = (score: number): string => {
     const absScore = Math.abs(score);
     
-    if (absScore >= 7) return 'Very strong market conviction';
-    if (absScore >= 4) return 'Strong directional bias';
-    if (absScore >= 2) return 'Moderate market sentiment';
-    if (absScore >= 1) return 'Weak directional signal';
-    
+    if (absScore >= 5) return 'Very strong market conviction';
+    if (absScore >= 3) return 'Strong directional bias';
+    if (absScore >= 1) return 'Moderate market sentiment';
     return 'Neutral market conditions';
   };
 
-  // Convert sentiment to score and animate
+  // Animate meter with the actual backend score
   useEffect(() => {
     if (analysisData && !isLoading) {
-      const meterResult = convertSentimentToScore(analysisData);
+      const backendData = getScoreFromBackend(analysisData);
+      const actualScore = backendData.score;
+      
+      console.log('🔄 SpeedMeter Update - Using backend score:', actualScore);
       
       // Check for significant change to trigger pulse
-      if (Math.abs(meterResult.score - currentScore) > 3) {
+      if (Math.abs(actualScore - currentScore) > 3) {
         setIsPulsing(true);
         setTimeout(() => setIsPulsing(false), 1000);
       }
       
       if (!hasAnimated) {
-        animateMeter(meterResult.score);
+        animateMeter(actualScore);
         setHasAnimated(true);
       } else {
-        setCurrentScore(meterResult.score);
+        setCurrentScore(actualScore);
       }
     } else if (!analysisData) {
       setCurrentScore(0);
@@ -124,32 +83,30 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 6) return 'text-green-400';
+    if (score >= 5) return 'text-green-400';
     if (score >= 3) return 'text-green-300';
     if (score >= 1) return 'text-green-200';
-    if (score <= -6) return 'text-red-500';
+    if (score <= -5) return 'text-red-500';
     if (score <= -3) return 'text-red-400';
     if (score <= -1) return 'text-red-300';
     return 'text-yellow-400';
   };
 
-  const getSentimentIcon = (sentiment: string) => {
-    switch (sentiment) {
-      case 'STRONGLY_BULLISH': return <TrendingUp className="text-green-400" size={18} />;
-      case 'BULLISH': return <TrendingUp className="text-green-300" size={18} />;
-      case 'SLIGHTLY_BULLISH': return <TrendingUp className="text-green-200" size={18} />;
-      case 'STRONGLY_BEARISH': return <TrendingDown className="text-red-500" size={18} />;
-      case 'BEARISH': return <TrendingDown className="text-red-400" size={18} />;
-      case 'SLIGHTLY_BEARISH': return <TrendingDown className="text-red-300" size={18} />;
-      default: return <Gauge className="text-yellow-400" size={18} />;
-    }
+  const getSentimentIcon = (score: number) => {
+    if (score >= 5) return <TrendingUp className="text-green-400" size={18} />;
+    if (score >= 3) return <TrendingUp className="text-green-300" size={18} />;
+    if (score >= 1) return <TrendingUp className="text-green-200" size={18} />;
+    if (score <= -5) return <TrendingDown className="text-red-500" size={18} />;
+    if (score <= -3) return <TrendingDown className="text-red-400" size={18} />;
+    if (score <= -1) return <TrendingDown className="text-red-300" size={18} />;
+    return <Gauge className="text-yellow-400" size={18} />;
   };
 
   const getNeedlePosition = (score: number) => {
     return 50 + (score / 10) * 50;
   };
 
-  const result = analysisData ? convertSentimentToScore(analysisData) : null;
+  const backendData = analysisData ? getScoreFromBackend(analysisData) : null;
 
   if (isLoading) {
     return (
@@ -186,7 +143,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
           </button>
         </div>
         <p className="text-gray-400 text-sm">
-          Visual representation of smart sentiment analysis
+          Direct display of backend smart sentiment analysis
         </p>
       </div>
 
@@ -214,13 +171,11 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
           <div className={`text-4xl font-bold ${getScoreColor(currentScore)} mb-3`}>
             {currentScore > 0 ? '+' : ''}{currentScore.toFixed(1)}
           </div>
-          {result && (
+          {backendData && (
             <>
               <div className="flex items-center justify-center text-sm text-gray-300 gap-2 mb-2">
-                {getSentimentIcon(result.sentiment)}
-                <span className="capitalize">{result.sentiment.toLowerCase().replace('_', ' ')}</span>
-                <span>•</span>
-                <span>{result.confidence}% confidence</span>
+                {getSentimentIcon(currentScore)}
+                <span className="capitalize">{backendData.sentiment.toLowerCase()}</span>
               </div>
               <div className="text-xs text-gray-400">
                 {getScoreInterpretation(currentScore)}
@@ -229,19 +184,19 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
           )}
         </div>
 
-        {/* Simple Breakdown */}
-        {showBreakdown && result && (
+        {/* Show actual backend data */}
+        {showBreakdown && backendData && (
           <div className="mt-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-            <h4 className="text-sm font-semibold text-gray-300 mb-3">Sentiment Source</h4>
+            <h4 className="text-sm font-semibold text-gray-300 mb-3">Backend Data (Direct from Smart Sentiment)</h4>
             <div className="space-y-2 text-xs text-gray-400">
               <div className="flex justify-between">
-                <span>Backend Sentiment:</span>
-                <span className="capitalize">{result.sentiment.toLowerCase().replace('_', ' ')}</span>
+                <span>Smart Sentiment:</span>
+                <span className="capitalize">{backendData.sentiment.toLowerCase()}</span>
               </div>
               <div className="flex justify-between">
-                <span>Mapped Score:</span>
-                <span className={getScoreColor(result.score)}>
-                  {result.score > 0 ? '+' : ''}{result.score}
+                <span>Smart Score:</span>
+                <span className={getScoreColor(backendData.score)}>
+                  {backendData.score > 0 ? '+' : ''}{backendData.score}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -252,37 +207,30 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
                 <span>Volume PCR:</span>
                 <span>{analysisData.volumePcr?.toFixed(2) || 'N/A'}</span>
               </div>
+              
+              {/* Show the actual breakdown from backend */}
+              {analysisData.sentimentBreakdown && analysisData.sentimentBreakdown.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-700">
+                  <div className="font-semibold mb-2 text-center">Scoring Breakdown</div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {analysisData.sentimentBreakdown.map((line: string, index: number) => (
+                      <div 
+                        key={index} 
+                        className={`text-2xs py-1 px-2 rounded ${
+                          line.includes('---') ? 'border-t border-gray-600 my-1' : 
+                          line.includes('Total:') ? 'font-bold bg-gray-700/50' : 
+                          'bg-gray-800/30'
+                        }`}
+                      >
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
-
-        {/* Data Quality Indicators */}
-        <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-500">
-          <div className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${
-              analysisData.supports?.length > 0 ? 'bg-green-400' : 'bg-gray-500'
-            }`} />
-            <span>Supports: {analysisData.supports?.length || 0}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${
-              analysisData.resistances?.length > 0 ? 'bg-green-400' : 'bg-gray-500'
-            }`} />
-            <span>Resistances: {analysisData.resistances?.length || 0}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${
-              analysisData.pcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
-            }`} />
-            <span>PCR: {analysisData.pcr !== undefined ? '✓' : '✗'}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${
-              analysisData.volumePcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
-            }`} />
-            <span>Vol. PCR: {analysisData.volumePcr !== undefined ? '✓' : '✗'}</span>
-          </div>
-        </div>
       </div>
     </div>
   );
