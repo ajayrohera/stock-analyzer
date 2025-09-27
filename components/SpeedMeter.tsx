@@ -8,171 +8,71 @@ interface SpeedMeterProps {
   isLoading?: boolean;
 }
 
-interface MeterResult {
-  score: number;
-  sentiment: string;
-  confidence: number;
-  factors: {
-    sentiment: number;
-    adAnalysis: number;
-    rsi: number;
-    volume: number;
-    supports: number;
-  };
-}
-
 export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMeterProps) {
   const [currentScore, setCurrentScore] = useState(0);
   const [hasAnimated, setHasAnimated] = useState(false);
   const [isPulsing, setIsPulsing] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
 
-  // Enhanced confidence calculation
-  const calculateConfidence = (analysisData: any): number => {
-    let confidenceFactors = 0;
-    let totalFactors = 0;
-
-    // Factor 1: Support/Resistance data quality
-    if (analysisData.supports?.length > 0 && analysisData.resistances?.length > 0) {
-      confidenceFactors += 25;
-    }
-    totalFactors += 25;
-
-    // Factor 2: Volume data validity
-    if (analysisData.avg20DayVolume > 0 && analysisData.todayVolumePercentage > 0) {
-      confidenceFactors += 20;
-    }
-    totalFactors += 20;
-
-    // Factor 3: PCR data availability
-    if (analysisData.pcr !== undefined && analysisData.volumePcr !== undefined) {
-      confidenceFactors += 20;
-    }
-    totalFactors += 20;
-
-    // Factor 4: A/D Analysis quality
-    if (analysisData.adAnalysis?.confidence && analysisData.adAnalysis.confidence !== 'LOW') {
-      confidenceFactors += 20;
-    }
-    totalFactors += 20;
-
-    // Factor 5: RSI data availability
-    if (analysisData.rsiAnalysis?.value !== null && analysisData.rsiAnalysis?.value !== undefined) {
-      confidenceFactors += 15;
-    }
-    totalFactors += 15;
-
-    return totalFactors > 0 ? Math.round((confidenceFactors / totalFactors) * 100) : 65;
-  };
-
-  // Enhanced sentiment scoring with factor breakdown
-  const convertSentimentToScore = (analysisData: any): MeterResult => {
+  // Convert backend sentiment to score (EXACT same mapping as Smart Sentiment Card)
+  const convertSentimentToScore = (analysisData: any) => {
     const sentiment = analysisData.sentiment || 'NEUTRAL';
-    let baseScore = 0;
+    console.log('🔍 SpeedMeter DEBUG - Raw sentiment from backend:', sentiment);
+    
+    // EXACT same mapping as used in Smart Sentiment Card
+    let score = 0;
     let displaySentiment = 'NEUTRAL';
     
-    // Base score from sentiment
     switch(sentiment?.toUpperCase()) {
       case 'STRONGLY BULLISH':
       case 'STRONGLY_BULLISH':
-        baseScore = 8;
+        score = 8;
         displaySentiment = 'STRONGLY_BULLISH';
         break;
       case 'BULLISH':
-        baseScore = 5;
+        score = 5;
         displaySentiment = 'BULLISH';
         break;
       case 'SLIGHTLY BULLISH':
       case 'SLIGHTLY_BULLISH':
-        baseScore = 2;
+        score = 2;
         displaySentiment = 'SLIGHTLY_BULLISH';
         break;
       case 'NEUTRAL':
-        baseScore = 0;
+        score = 0;
         displaySentiment = 'NEUTRAL';
         break;
       case 'SLIGHTLY BEARISH':
       case 'SLIGHTLY_BEARISH':
-        baseScore = -2;
+        score = -2;
         displaySentiment = 'SLIGHTLY_BEARISH';
         break;
       case 'BEARISH':
-        baseScore = -5;
+        score = -5;
         displaySentiment = 'BEARISH';
         break;
       case 'STRONGLY BEARISH':
       case 'STRONGLY_BEARISH':
-        baseScore = -8;
+        score = -8;
         displaySentiment = 'STRONGLY_BEARISH';
         break;
       default:
-        baseScore = 0;
+        score = 0;
         displaySentiment = 'NEUTRAL';
     }
 
-    // Initialize factor adjustments
-    let adAdjustment = 0;
-    let rsiAdjustment = 0;
-    let volumeAdjustment = 0;
-    let supportsAdjustment = 0;
+    // Simple confidence calculation based on data availability
+    const confidence = analysisData.supports?.length > 0 && 
+                      analysisData.resistances?.length > 0 && 
+                      analysisData.pcr !== undefined ? 85 : 65;
 
-    // Adjust score based on A/D analysis if available
-    if (analysisData.adAnalysis) {
-      const adSignal = analysisData.adAnalysis.todaySignal;
-      const adStrength = analysisData.adAnalysis.todayStrength;
-      
-      if (adSignal === 'ACCUMULATION') {
-        adAdjustment = adStrength === 'VERY_STRONG' ? 2 : adStrength === 'STRONG' ? 1.5 : 0.5;
-      } else if (adSignal === 'DISTRIBUTION') {
-        adAdjustment = adStrength === 'VERY_STRONG' ? -2 : adStrength === 'STRONG' ? -1.5 : -0.5;
-      }
-    }
-
-    // Adjust based on RSI if available
-    if (analysisData.rsiAnalysis?.value !== null && analysisData.rsiAnalysis?.value !== undefined) {
-      const rsiValue = analysisData.rsiAnalysis.value;
-      if (rsiValue >= 70) {
-        rsiAdjustment = -1; // Overbought - reduce bullish score
-      } else if (rsiValue <= 30) {
-        rsiAdjustment = 1; // Oversold - reduce bearish score
-      }
-    }
-
-    // Volume-based adjustment
-    if (analysisData.todayVolumePercentage > 150) {
-      volumeAdjustment = baseScore > 0 ? 0.5 : baseScore < 0 ? -0.5 : 0;
-    } else if (analysisData.todayVolumePercentage < 70) {
-      volumeAdjustment = baseScore > 0 ? -0.5 : baseScore < 0 ? 0.5 : 0;
-    }
-
-    // Support/Resistance strength adjustment
-    if (analysisData.supports?.length >= 2 && analysisData.resistances?.length >= 2) {
-      supportsAdjustment = 0.5;
-    }
-
-    const adjustedScore = baseScore + adAdjustment + rsiAdjustment + volumeAdjustment + supportsAdjustment;
-
-    // Clamp the score between -10 and 10
-    const finalScore = Math.max(-10, Math.min(10, Number(adjustedScore.toFixed(1))));
+    console.log('🔍 SpeedMeter DEBUG - Final score:', { score, sentiment: displaySentiment, confidence });
     
-    const confidence = calculateConfidence(analysisData);
-
-    return { 
-      score: finalScore, 
-      sentiment: displaySentiment, 
-      confidence,
-      factors: {
-        sentiment: baseScore,
-        adAnalysis: adAdjustment,
-        rsi: rsiAdjustment,
-        volume: volumeAdjustment,
-        supports: supportsAdjustment
-      }
-    };
+    return { score, sentiment: displaySentiment, confidence };
   };
 
   // Score interpretation helper
-  const getScoreInterpretation = (score: number, sentiment: string): string => {
+  const getScoreInterpretation = (score: number): string => {
     const absScore = Math.abs(score);
     
     if (absScore >= 7) return 'Very strong market conviction';
@@ -186,14 +86,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
   // Convert sentiment to score and animate
   useEffect(() => {
     if (analysisData && !isLoading) {
-      console.log('🔍 SpeedMeter DEBUG - Analyzing data:', {
-        sentiment: analysisData.sentiment,
-        adAnalysis: analysisData.adAnalysis?.todaySignal,
-        rsi: analysisData.rsiAnalysis?.value
-      });
-      
       const meterResult = convertSentimentToScore(analysisData);
-      console.log('🔍 SpeedMeter DEBUG - Converted result:', meterResult);
       
       // Check for significant change to trigger pulse
       if (Math.abs(meterResult.score - currentScore) > 3) {
@@ -256,16 +149,6 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
     return 50 + (score / 10) * 50;
   };
 
-  const getFactorColor = (value: number) => {
-    if (value > 0) return 'text-green-400';
-    if (value < 0) return 'text-red-400';
-    return 'text-gray-400';
-  };
-
-  const formatFactorValue = (value: number) => {
-    return value > 0 ? `+${value.toFixed(1)}` : value.toFixed(1);
-  };
-
   const result = analysisData ? convertSentimentToScore(analysisData) : null;
 
   if (isLoading) {
@@ -303,7 +186,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
           </button>
         </div>
         <p className="text-gray-400 text-sm">
-          Multi-factor sentiment analysis
+          Visual representation of smart sentiment analysis
         </p>
       </div>
 
@@ -340,52 +223,34 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
                 <span>{result.confidence}% confidence</span>
               </div>
               <div className="text-xs text-gray-400">
-                {getScoreInterpretation(currentScore, result.sentiment)}
+                {getScoreInterpretation(currentScore)}
               </div>
             </>
           )}
         </div>
 
-        {/* Factor Breakdown */}
+        {/* Simple Breakdown */}
         {showBreakdown && result && (
           <div className="mt-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-            <h4 className="text-sm font-semibold text-gray-300 mb-3">Score Breakdown</h4>
-            <div className="space-y-2 text-xs">
+            <h4 className="text-sm font-semibold text-gray-300 mb-3">Sentiment Source</h4>
+            <div className="space-y-2 text-xs text-gray-400">
               <div className="flex justify-between">
-                <span className="text-gray-400">Base Sentiment</span>
-                <span className={getFactorColor(result.factors.sentiment)}>
-                  {formatFactorValue(result.factors.sentiment)}
-                </span>
+                <span>Backend Sentiment:</span>
+                <span className="capitalize">{result.sentiment.toLowerCase().replace('_', ' ')}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-400">A/D Analysis</span>
-                <span className={getFactorColor(result.factors.adAnalysis)}>
-                  {formatFactorValue(result.factors.adAnalysis)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">RSI Indicator</span>
-                <span className={getFactorColor(result.factors.rsi)}>
-                  {formatFactorValue(result.factors.rsi)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Volume Signal</span>
-                <span className={getFactorColor(result.factors.volume)}>
-                  {formatFactorValue(result.factors.volume)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Support Levels</span>
-                <span className={getFactorColor(result.factors.supports)}>
-                  {formatFactorValue(result.factors.supports)}
-                </span>
-              </div>
-              <div className="border-t border-gray-700 pt-2 mt-2 flex justify-between font-semibold">
-                <span className="text-gray-300">Total Score</span>
+                <span>Mapped Score:</span>
                 <span className={getScoreColor(result.score)}>
-                  {result.score > 0 ? '+' : ''}{result.score.toFixed(1)}
+                  {result.score > 0 ? '+' : ''}{result.score}
                 </span>
+              </div>
+              <div className="flex justify-between">
+                <span>PCR:</span>
+                <span>{analysisData.pcr?.toFixed(2) || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Volume PCR:</span>
+                <span>{analysisData.volumePcr?.toFixed(2) || 'N/A'}</span>
               </div>
             </div>
           </div>
@@ -407,15 +272,15 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
           </div>
           <div className="flex items-center gap-1">
             <div className={`w-2 h-2 rounded-full ${
-              analysisData.adAnalysis ? 'bg-green-400' : 'bg-gray-500'
+              analysisData.pcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
             }`} />
-            <span>A/D: {analysisData.adAnalysis ? '✓' : '✗'}</span>
+            <span>PCR: {analysisData.pcr !== undefined ? '✓' : '✗'}</span>
           </div>
           <div className="flex items-center gap-1">
             <div className={`w-2 h-2 rounded-full ${
-              analysisData.rsiAnalysis?.value ? 'bg-green-400' : 'bg-gray-500'
+              analysisData.volumePcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
             }`} />
-            <span>RSI: {analysisData.rsiAnalysis?.value ? '✓' : '✗'}</span>
+            <span>Vol. PCR: {analysisData.volumePcr !== undefined ? '✓' : '✗'}</span>
           </div>
         </div>
       </div>
