@@ -600,6 +600,33 @@ export async function POST(request: Request) {
     const { symbol: displayName } = body;
     if (!displayName) return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
 
+    // 🕒 COMPREHENSIVE TIME DEBUGGING
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); // UTC+5:30
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+    const timeInMinutes = hours * 60 + minutes;
+    
+    // Define time periods
+    const preMarketStart = 9 * 60 + 0;    // 9:00 AM
+    const marketOpen = 9 * 60 + 15;       // 9:15 AM
+    const marketClose = 15 * 60 + 30;     // 3:30 PM
+    
+    // Determine if we're in the special pre-market window (9:00-9:15 AM)
+    const isPreMarketWindow = (timeInMinutes >= preMarketStart && timeInMinutes < marketOpen);
+    
+    console.log('🕒 TIME DEBUG =================');
+    console.log('Current UTC time:', now.toISOString());
+    console.log('Current IST time:', istTime.toISOString());
+    console.log('IST Hours:', hours, 'Minutes:', minutes);
+    console.log('Time in minutes:', timeInMinutes);
+    console.log('Pre-market window (9:00-9:15):', preMarketStart, 'to', marketOpen);
+    console.log('Market hours (9:15-15:30):', marketOpen, 'to', marketClose);
+    console.log('Is Pre-market window?', isPreMarketWindow);
+    console.log('Is Market open?', timeInMinutes >= marketOpen && timeInMinutes < marketClose);
+    console.log('Is After hours?', timeInMinutes >= marketClose || timeInMinutes < preMarketStart);
+    console.log('================================');
+
     const auth = new google.auth.GoogleAuth({
       credentials: {
         type: 'service_account',
@@ -654,31 +681,6 @@ export async function POST(request: Request) {
     let priceType = 'CMP'; // Always show CMP
     
     const historicalData = await getHistoricalData(displayName);
-    
-    // Get current IST time
-    const now = new Date();
-    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const hours = istTime.getHours();
-    const minutes = istTime.getMinutes();
-    const timeInMinutes = hours * 60 + minutes;
-    
-    // Define time periods
-    const preMarketStart = 9 * 60 + 0;    // 9:00 AM
-    const marketOpen = 9 * 60 + 15;       // 9:15 AM
-    const marketClose = 15 * 60 + 30;     // 3:30 PM
-    
-    // Determine if we're in the special pre-market window (9:00-9:15 AM)
-    const isPreMarketWindow = (timeInMinutes >= preMarketStart && timeInMinutes < marketOpen);
-    
-    console.log('🕒 Time check:', { 
-        hours, 
-        minutes, 
-        timeInMinutes, 
-        isPreMarketWindow,
-        preMarketStart,
-        marketOpen,
-        marketClose
-    });
     
     // Handle zero LTP fallback (except during pre-market)
     if (ltp === 0 && historicalData.length > 0 && !isPreMarketWindow) {
