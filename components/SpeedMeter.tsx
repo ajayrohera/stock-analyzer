@@ -205,32 +205,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
         )}
 
         {/* Data Quality Indicators */}
-        <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-500">
-          <div className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${
-              analysisData.supports?.length > 0 ? 'bg-green-400' : 'bg-gray-500'
-            }`} />
-            <span>Supports: {analysisData.supports?.length || 0}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${
-              analysisData.resistances?.length > 0 ? 'bg-green-400' : 'bg-gray-500'
-            }`} />
-            <span>Resistances: {analysisData.resistances?.length || 0}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${
-              analysisData.pcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
-            }`} />
-            <span>OI PCR: {analysisData.pcr !== undefined ? '✓' : '✗'}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${
-              analysisData.volumePcr !== undefined ? 'bg-green-400' : 'bg-gray-500'
-            }`} />
-            <span>Vol. PCR: {analysisData.volumePcr !== undefined ? '✓' : '✗'}</span>
-          </div>
-        </div>
+        
       </div>
     </div>
   );
