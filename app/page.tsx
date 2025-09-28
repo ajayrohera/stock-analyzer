@@ -582,14 +582,8 @@ const VolumeCard = React.memo(({
     return 'text-red-400';
   };
 
-  const areTodayMetricsAvailable = todayVolumePercentage !== null && 
-                                  todayVolumePercentage !== undefined &&
-                                  estimatedTodayVolume !== null && 
-                                  estimatedTodayVolume !== undefined;
-
-  const isUnusualVolume = todayVolumePercentage !== null && 
-                         todayVolumePercentage !== undefined &&
-                         (todayVolumePercentage > 1000 || todayVolumePercentage < -1000);
+  const isMarketOpen = marketStatus === 'OPEN';
+  const hasVolumeData = todayVolumePercentage !== undefined && todayVolumePercentage !== null;
 
   return (
     <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center">
@@ -598,59 +592,45 @@ const VolumeCard = React.memo(({
         <div className="relative group ml-1">
           <Info size={14} className="cursor-pointer" />
           <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-            {marketStatus === 'OPEN' 
+            {isMarketOpen 
               ? "Compares today's volume against 20-day average. Percentage shows progress vs daily average. Estimated projects full day volume."
-              : "Historical 20-day average volume data."}
-            {marketStatus === 'OPEN' && !areTodayMetricsAvailable && (
-              <div className="text-yellow-400 mt-1">
-                Today's volume data temporarily unavailable
-              </div>
-            )}
+              : "Historical 20-day average volume and last trading day's volume data."}
           </div>
         </div>
       </div>
       
+      {/* 20-Day Average - Always Show */}
       {avg20DayVolume !== undefined && avg20DayVolume > 0 && (
         <p className="text-lg font-semibold text-white mt-2">
           20D Avg: {formatVolume(avg20DayVolume)}
         </p>
       )}
       
-      {marketStatus === 'OPEN' && areTodayMetricsAvailable ? (
+      {/* Market Hours - Live Data */}
+      {isMarketOpen && hasVolumeData ? (
         <>
           <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
-            {todayVolumePercentage?.toFixed(1) || '0'}% of Avg
+            Today: 📊 {todayVolumePercentage.toFixed(1)}% of Avg
           </p>
-          
-          {isUnusualVolume && (
-            <div className="flex items-center justify-center mt-1 text-amber-400 text-xs">
-              <AlertTriangle size={12} className="mr-1" />
-              <span>Unusual volume detected - verify on NSE website</span>
-            </div>
+          {estimatedTodayVolume !== undefined && estimatedTodayVolume > 0 && (
+            <p className="text-md text-gray-300 mt-2">
+              Est. Today: {formatVolume(estimatedTodayVolume)}
+            </p>
           )}
-          
-          <p className="text-md text-gray-300 mt-2">
-            Est. Today: {formatVolume(estimatedTodayVolume || 0)}
-          </p>
         </>
-      ) : marketStatus === 'OPEN' ? (
+      ) : 
+      /* Non-Market Hours - Historical Data */
+      hasVolumeData ? (
+        <p className={`text-xl font-bold ${getPercentageColor(todayVolumePercentage)} mt-2`}>
+          Last Volume: {formatVolume(estimatedTodayVolume || 0)} ({todayVolumePercentage.toFixed(1)}% of Avg)
+        </p>
+      ) : (
+        /* No Data Available */
         <div className="mt-2">
           <p className="text-yellow-400 text-sm mb-1">
-            Today's volume data temporarily unavailable
-          </p>
-          <p className="text-gray-400 text-xs">
-            Please try: 
-            <br />• Refreshing the page (F5)
-            <br />• Clearing browser cache
-            <br />• Reopening the browser
+            Volume data unavailable
           </p>
         </div>
-      ) : null}
-      
-      {marketStatus !== 'OPEN' && (
-        <p className="text-gray-400 text-sm mt-2">
-          Live volume data available during market hours
-        </p>
       )}
     </div>
   );
