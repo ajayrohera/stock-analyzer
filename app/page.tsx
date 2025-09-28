@@ -927,7 +927,7 @@ export default function Home() {
           />
         </section>
 
-        <section id="results" className="mt-6 w-full max-w-6xl mx-auto min-h-[100px]">
+        <section id="results" className="mt-6 w-full max-w-6xl mx-auto min-h-[100px] overflow-x-hidden">
           {isLoading && !results && (
             <div className="flex flex-col items-center justify-center p-8">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-cyan mb-4"></div>
