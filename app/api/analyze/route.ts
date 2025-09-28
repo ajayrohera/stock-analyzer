@@ -884,6 +884,13 @@ export async function POST(request: Request) {
 
     // Smart fallback to historical data during non-market hours
     const historicalData = await getHistoricalData(displayName);
+    console.log('🔍 VOLUME DATA SOURCE DEBUG:', {
+  symbol: displayName,
+  historicalEntries: historicalData.length,
+  latestHistorical: historicalData.length > 0 ? historicalData[0] : null,
+  currentVolume: currentVolume,
+  isMarketOpen: isMarketOpen
+});
     const hasLiveData = ltp > 0 && currentVolume > 0;
     const shouldUseHistorical = !hasLiveData || !isMarketOpen || !isTradingDay;
 
