@@ -126,7 +126,7 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
       typedData.adAnalysis !== null
     );
 
-    // Check if rsiAnalysis exists but don't require it to be valid
+    // Check if rsiAnalysis exists but don't require it to be valid.
     const rsiAnalysisIsValid = !typedData.rsiAnalysis || (
       typeof typedData.rsiAnalysis === 'object' &&
       typedData.rsiAnalysis !== null
