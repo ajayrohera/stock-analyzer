@@ -409,11 +409,27 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   result.avg20DayVolume = Math.max(Math.round(averageVolume), 1000);
   
   if (currentVolume && currentVolume > 0) {
+    // MARKET HOURS: Use live volume with projection
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
       (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
     const expectedDailyVolume = Math.max(averageVolume, 1000) * (marketProgress / 6.25);
     result.todayVolumePercentage = Math.max(parseFloat((currentVolume / expectedDailyVolume * 100).toFixed(1)), 1);
     result.estimatedTodayVolume = Math.max(Math.round(currentVolume * (6.25 / marketProgress)), 1000);
+  } else if (historicalData.length > 0) {
+    // NON-MARKET HOURS: Use latest historical volume as "Last Volume"
+    const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const latestHistorical = sortedHistorical[0];
+    
+    if (latestHistorical && latestHistorical.totalVolume > 0) {
+      const lastVolume = latestHistorical.totalVolume;
+      result.todayVolumePercentage = Math.max(parseFloat((lastVolume / averageVolume * 100).toFixed(1)), 1);
+      result.estimatedTodayVolume = lastVolume; // This becomes "Last Volume" in frontend
+      console.log('📊 Using historical volume for non-market hours:', {
+        lastVolume,
+        percentage: result.todayVolumePercentage,
+        averageVolume
+      });
+    }
   }
   
   return result;
