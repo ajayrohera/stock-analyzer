@@ -422,12 +422,16 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     
     if (latestHistorical && latestHistorical.totalVolume > 0) {
       const lastVolume = latestHistorical.totalVolume;
+      
+      // FIX: Use the actual historical volume directly, don't apply market progress logic
       result.todayVolumePercentage = Math.max(parseFloat((lastVolume / averageVolume * 100).toFixed(1)), 1);
       result.estimatedTodayVolume = lastVolume; // This becomes "Last Volume" in frontend
+      
       console.log('📊 Using historical volume for non-market hours:', {
         lastVolume,
         percentage: result.todayVolumePercentage,
-        averageVolume
+        averageVolume,
+        calculatedPercentage: (lastVolume / averageVolume * 100).toFixed(1) + '%'
       });
     }
   }
