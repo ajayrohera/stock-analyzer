@@ -683,7 +683,11 @@ function calculateSmartSentiment(
   else if (pcr < 0.7) pcrScore = -2;
   else if (pcr < 0.9) pcrScore = -1;
 
-  breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • OI PCR ${pcr.toFixed(2)}`);
+  const oiPCRContext = pcr < 0.7 ? " (bearish)" : 
+                    pcr < 0.9 ? " (slightly bearish)" :
+                    pcr <= 1.1 ? " (neutral)" :
+                    pcr <= 1.3 ? " (slightly bullish)" : " (bullish)";
+breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • OI PCR ${pcr.toFixed(2)}${oiPCRContext}`);
 
   // 2. Conviction Score
   let convictionScore = 0;
@@ -692,7 +696,9 @@ function calculateSmartSentiment(
   else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
   else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
 
-  breakdown.push(`${convictionScore >= 0 ? '+' : ''}${convictionScore} • OI Strength`);
+  const oiStrengthContext = convictionScore > 0 ? " (put walls stronger)" : 
+                         convictionScore < 0 ? " (call walls stronger)" : " (balanced OI)";
+breakdown.push(`${convictionScore >= 0 ? '+' : ''}${convictionScore} • OI Strength${oiStrengthContext}`);
 
   // 3. Volume Modifier
   let volumeModifier = 0;
@@ -702,7 +708,11 @@ function calculateSmartSentiment(
   else if (volumePcr > 1.3) volumeModifier = -2;
   else if (volumePcr > 1.1) volumeModifier = -1;
 
-  breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}`);
+  const volumePCRContext = volumePcr < 0.7 ? " (bearish volume)" : 
+                        volumePcr < 0.9 ? " (slightly bearish volume)" :
+                        volumePcr <= 1.1 ? " (neutral volume)" :
+                        volumePcr <= 1.3 ? " (slightly bullish volume)" : " (bullish volume)";
+breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
 
   // Calculate preliminary score
   const preliminaryScore = pcrScore + convictionScore + volumeModifier;
