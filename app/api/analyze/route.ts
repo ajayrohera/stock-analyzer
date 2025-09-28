@@ -715,25 +715,32 @@ function calculateSmartSentiment(
   breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
 
   // 4. Today's Volume Percentage Impact
-  let volumePercentageScore = 0;
-  let volumePercentageContext = "";
+// 4. Today's Volume Percentage Impact - CONTEXT AWARE
+let volumePercentageScore = 0;
+let volumePercentageContext = "";
 
-  if (todayVolumePercentage > 150) {
-    volumePercentageScore = 1;
-    volumePercentageContext = " (high volume)";
-  } else if (todayVolumePercentage < 70) {
-    volumePercentageScore = -1;
-    volumePercentageContext = " (low volume)";
-  } else {
-    volumePercentageScore = 0;
-    volumePercentageContext = " (moderate volume)";
-  }
+// Calculate current sentiment before volume adjustment
+const currentSentiment = pcrScore + convictionScore + volumeModifier;
 
-  breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • Today Volume ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
+if (todayVolumePercentage > 150) {
+  // High volume amplifies existing sentiment
+  volumePercentageScore = currentSentiment > 0 ? 1 : currentSentiment < 0 ? -1 : 0;
+  volumePercentageContext = " (high volume amplifying sentiment)";
+} else if (todayVolumePercentage < 70) {
+  // Low volume: positive if sentiment is bearish, negative if sentiment is bullish
+  volumePercentageScore = currentSentiment < 0 ? 1 : currentSentiment > 0 ? -1 : 0;
+  volumePercentageContext = " (low volume confirming sentiment)";
+} else {
+  volumePercentageScore = 0;
+  volumePercentageContext = " (moderate volume)";
+}
+
+breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • Today Volume ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
+
+// Calculate final score
+const finalScore = currentSentiment + volumePercentageScore;
 
 
-
-  const finalScore = pcrScore + convictionScore + volumeModifier + volumePercentageScore;
 
   // Add separator and total.
   breakdown.push(`Total: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
