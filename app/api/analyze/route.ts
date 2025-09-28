@@ -4,7 +4,7 @@ import { KiteConnect } from 'kiteconnect';
 import { createClient } from 'redis';
 import { generateADAnalysis, ADAnalysis } from '@/utils/ad-analysis';
 
-// --- HELPER TYPES ----
+// --- HELPER TYPES ---
 interface QuoteData {
     [key:string]: { 
         instrument_token: number; 
