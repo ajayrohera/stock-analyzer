@@ -372,14 +372,15 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   return 0.01;
 }
 
-function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number): {
+function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number, isUsingHistoricalFallback: boolean = false): {
   avg20DayVolume: number;
   todayVolumePercentage: number;
   estimatedTodayVolume: number;
 } {
   console.log('📊 calculateVolumeMetrics called with:', {
     historicalDataLength: historicalData.length,
-    currentVolume: currentVolume
+    currentVolume: currentVolume,
+    isUsingHistoricalFallback: isUsingHistoricalFallback
   });
   
   let result = {
@@ -408,15 +409,22 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   
   result.avg20DayVolume = Math.max(Math.round(averageVolume), 1000);
   
-  if (currentVolume && currentVolume > 0) {
+  if (currentVolume && currentVolume > 0 && !isUsingHistoricalFallback) {
     // MARKET HOURS: Use live volume with projection
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
       (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
     const expectedDailyVolume = Math.max(averageVolume, 1000) * (marketProgress / 6.25);
     result.todayVolumePercentage = Math.max(parseFloat((currentVolume / expectedDailyVolume * 100).toFixed(1)), 1);
     result.estimatedTodayVolume = Math.max(Math.round(currentVolume * (6.25 / marketProgress)), 1000);
+    
+    console.log('📊 Using LIVE volume data:', {
+      currentVolume,
+      marketProgress,
+      todayVolumePercentage: result.todayVolumePercentage,
+      estimatedTodayVolume: result.estimatedTodayVolume
+    });
   } else if (historicalData.length > 0) {
-    // NON-MARKET HOURS: Use latest historical volume as "Last Volume"
+    // NON-MARKET HOURS or HISTORICAL FALLBACK: Use latest historical volume as "Last Volume"
     const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     const latestHistorical = sortedHistorical[0];
     
@@ -427,11 +435,12 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
       result.todayVolumePercentage = Math.max(parseFloat((lastVolume / averageVolume * 100).toFixed(1)), 1);
       result.estimatedTodayVolume = lastVolume; // This becomes "Last Volume" in frontend
       
-      console.log('📊 Using historical volume for non-market hours:', {
+      console.log('📊 Using HISTORICAL volume for non-market hours:', {
         lastVolume,
         percentage: result.todayVolumePercentage,
         averageVolume,
-        calculatedPercentage: (lastVolume / averageVolume * 100).toFixed(1) + '%'
+        calculatedPercentage: (lastVolume / averageVolume * 100).toFixed(1) + '%',
+        source: isUsingHistoricalFallback ? 'HISTORICAL_FALLBACK' : 'NON_MARKET_HOURS'
       });
     }
   }
@@ -970,7 +979,7 @@ export async function POST(request: Request) {
     
     // FIXED: Change percent calculation
     const changePercent = calculateChangePercent(ltp, historicalData, 'CMP');
-    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume);
+    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical);
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
       ...volumeMetrics,
