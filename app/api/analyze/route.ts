@@ -731,32 +731,9 @@ function calculateSmartSentiment(
 
   breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • Today Volume ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
 
-  // Calculate preliminary score
-  const preliminaryScore = pcrScore + convictionScore + volumeModifier + volumePercentageScore;
 
-  // 5. Volume Activity Adjustment (existing logic)
-  let volumeAdjustment = 0;
-  const isSignificantVolume = todayVolumePercentage > 150;
-  const isLowVolume = todayVolumePercentage < 70;
 
-  if (isSignificantVolume) {
-    if (preliminaryScore > 0) volumeAdjustment = 1;
-    else if (preliminaryScore < 0) volumeAdjustment = -1;
-  } else if (isLowVolume && Math.abs(preliminaryScore) >= 2) {
-    if (preliminaryScore > 0) volumeAdjustment = -1;
-    else if (preliminaryScore < 0) volumeAdjustment = 1;
-  }
-
-  if (volumeAdjustment !== 0) {
-    const direction = volumeAdjustment > 0 ? "bullish" : "bearish";
-    const context = isSignificantVolume ? 
-      `(high volume amplifying ${direction} sentiment)` : 
-      `(low volume reducing ${direction} conviction)`;
-    
-    breakdown.push(`${volumeAdjustment >= 0 ? '+' : ''}${volumeAdjustment} • Volume Impact ${context}`);
-  }
-
-  const finalScore = preliminaryScore + volumeAdjustment;
+  const finalScore = pcrScore + convictionScore + volumeModifier + volumePercentageScore;
 
   // Add separator and total
   breakdown.push(`Total: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
