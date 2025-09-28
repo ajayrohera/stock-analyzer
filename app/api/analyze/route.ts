@@ -738,7 +738,7 @@ function calculateSmartSentiment(
   // Add separator and total.
   breakdown.push(`Total: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
 
-  // Determine sentiment
+  // Determine sentiment.
   let sentiment: string;
   if (finalScore >= 5) sentiment = "Strongly Bullish";
   else if (finalScore >= 3) sentiment = "Bullish";
