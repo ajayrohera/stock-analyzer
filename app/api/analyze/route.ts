@@ -735,7 +735,7 @@ function calculateSmartSentiment(
 
   const finalScore = pcrScore + convictionScore + volumeModifier + volumePercentageScore;
 
-  // Add separator and total
+  // Add separator and total.
   breakdown.push(`Total: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
 
   // Determine sentiment
