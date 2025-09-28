@@ -698,7 +698,7 @@ function calculateSmartSentiment(
   const finalScore = preliminaryScore + volumeAdjustment;
 
   // Add separator and total
-  breakdown.push('---');
+  
   breakdown.push(`Total: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
 
   // Determine sentiment
