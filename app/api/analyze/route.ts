@@ -727,9 +727,12 @@ if (todayVolumePercentage > 150) {
   volumePercentageScore = currentSentiment > 0 ? 1 : currentSentiment < 0 ? -1 : 0;
   volumePercentageContext = " (high volume amplifying sentiment)";
 } else if (todayVolumePercentage < 70) {
-  // Low volume: positive if sentiment is bearish, negative if sentiment is bullish
+  // Low volume: weakens existing sentiment (positive if bearish, negative if bullish)
   volumePercentageScore = currentSentiment < 0 ? 1 : currentSentiment > 0 ? -1 : 0;
-  volumePercentageContext = " (low volume confirming sentiment)";
+  volumePercentageContext = currentSentiment < 0 ? 
+    " (low volume - weakens bearish conviction)" : 
+    currentSentiment > 0 ? " (low volume - weakens bullish conviction)" : 
+    " (low volume, inconclusive)";
 } else {
   volumePercentageScore = 0;
   volumePercentageContext = " (moderate volume)";
