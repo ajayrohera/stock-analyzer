@@ -691,9 +691,14 @@ function calculateSmartSentiment(
     else if (preliminaryScore < 0) volumeAdjustment = 1;
   }
 
-  if (volumeAdjustment !== 0) {
-    breakdown.push(`${volumeAdjustment >= 0 ? '+' : ''}${volumeAdjustment} • Volume Impact`);
-  }
+if (volumeAdjustment !== 0) {
+  const direction = volumeAdjustment > 0 ? "bullish" : "bearish";
+  const context = isSignificantVolume ? 
+    `(high volume amplifying ${direction} sentiment)` : 
+    `(low volume reducing ${direction} conviction)`;
+  
+  breakdown.push(`${volumeAdjustment >= 0 ? '+' : ''}${volumeAdjustment} • Volume Impact ${context}`);
+}
 
   const finalScore = preliminaryScore + volumeAdjustment;
 
