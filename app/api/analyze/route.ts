@@ -684,10 +684,10 @@ function calculateSmartSentiment(
   else if (pcr < 0.9) pcrScore = -1;
 
   const oiPCRContext = pcr < 0.7 ? " (bearish)" : 
-                    pcr < 0.9 ? " (slightly bearish)" :
-                    pcr <= 1.1 ? " (neutral)" :
-                    pcr <= 1.3 ? " (slightly bullish)" : " (bullish)";
-breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • OI PCR ${pcr.toFixed(2)}${oiPCRContext}`);
+                      pcr < 0.9 ? " (slightly bearish)" :
+                      pcr <= 1.1 ? " (neutral)" :
+                      pcr <= 1.3 ? " (slightly bullish)" : " (bullish)";
+  breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • OI PCR ${pcr.toFixed(2)}${oiPCRContext}`);
 
   // 2. Conviction Score
   let convictionScore = 0;
@@ -697,10 +697,10 @@ breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • OI PCR ${pcr.toFixed(
   else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
 
   const oiStrengthContext = convictionScore > 0 ? " (put walls stronger)" : 
-                         convictionScore < 0 ? " (call walls stronger)" : " (balanced OI)";
-breakdown.push(`${convictionScore >= 0 ? '+' : ''}${convictionScore} • OI Strength${oiStrengthContext}`);
+                           convictionScore < 0 ? " (call walls stronger)" : " (balanced OI)";
+  breakdown.push(`${convictionScore >= 0 ? '+' : ''}${convictionScore} • OI Strength${oiStrengthContext}`);
 
-  // 3. Volume Modifier
+  // 3. Volume PCR Modifier
   let volumeModifier = 0;
   if (volumePcr < 0.7) volumeModifier = 2;
   else if (volumePcr < 0.9) volumeModifier = 1;
@@ -709,15 +709,32 @@ breakdown.push(`${convictionScore >= 0 ? '+' : ''}${convictionScore} • OI Stre
   else if (volumePcr > 1.1) volumeModifier = -1;
 
   const volumePCRContext = volumePcr < 0.7 ? " (bearish volume)" : 
-                        volumePcr < 0.9 ? " (slightly bearish volume)" :
-                        volumePcr <= 1.1 ? " (neutral volume)" :
-                        volumePcr <= 1.3 ? " (slightly bullish volume)" : " (bullish volume)";
-breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
+                          volumePcr < 0.9 ? " (slightly bearish volume)" :
+                          volumePcr <= 1.1 ? " (neutral volume)" :
+                          volumePcr <= 1.3 ? " (slightly bullish volume)" : " (bullish volume)";
+  breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
+
+  // 4. Today's Volume Percentage Impact
+  let volumePercentageScore = 0;
+  let volumePercentageContext = "";
+
+  if (todayVolumePercentage > 150) {
+    volumePercentageScore = 1;
+    volumePercentageContext = " (high volume)";
+  } else if (todayVolumePercentage < 70) {
+    volumePercentageScore = -1;
+    volumePercentageContext = " (low volume)";
+  } else {
+    volumePercentageScore = 0;
+    volumePercentageContext = " (moderate volume)";
+  }
+
+  breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • Today Volume ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
 
   // Calculate preliminary score
-  const preliminaryScore = pcrScore + convictionScore + volumeModifier;
+  const preliminaryScore = pcrScore + convictionScore + volumeModifier + volumePercentageScore;
 
-  // 4. Volume Activity Adjustment
+  // 5. Volume Activity Adjustment (existing logic)
   let volumeAdjustment = 0;
   const isSignificantVolume = todayVolumePercentage > 150;
   const isLowVolume = todayVolumePercentage < 70;
@@ -730,19 +747,18 @@ breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PC
     else if (preliminaryScore < 0) volumeAdjustment = 1;
   }
 
-if (volumeAdjustment !== 0) {
-  const direction = volumeAdjustment > 0 ? "bullish" : "bearish";
-  const context = isSignificantVolume ? 
-    `(high volume amplifying ${direction} sentiment)` : 
-    `(low volume reducing ${direction} conviction)`;
-  
-  breakdown.push(`${volumeAdjustment >= 0 ? '+' : ''}${volumeAdjustment} • Volume Impact ${context}`);
-}
+  if (volumeAdjustment !== 0) {
+    const direction = volumeAdjustment > 0 ? "bullish" : "bearish";
+    const context = isSignificantVolume ? 
+      `(high volume amplifying ${direction} sentiment)` : 
+      `(low volume reducing ${direction} conviction)`;
+    
+    breakdown.push(`${volumeAdjustment >= 0 ? '+' : ''}${volumeAdjustment} • Volume Impact ${context}`);
+  }
 
   const finalScore = preliminaryScore + volumeAdjustment;
 
   // Add separator and total
-  
   breakdown.push(`Total: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
 
   // Determine sentiment
