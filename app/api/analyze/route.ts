@@ -411,12 +411,15 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   
   if (currentVolume && currentVolume > 0 && !isUsingHistoricalFallback) {
     // MARKET HOURS: Use live volume with projection
-    const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
-      (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
+    // Use the IST hours and minutes that are passed as parameters
+const marketProgress = istHours && istMinutes ? 
+  (istHours >= 9 && istHours < 15 ? (istHours - 9) + (istMinutes / 60) : 6.25) : 
+  (new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
+    (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25);
 
-      console.log('🕒 MARKET PROGRESS DEBUG:', {
-  currentHours: new Date().getHours(),
-  currentMinutes: new Date().getMinutes(),
+console.log('🕒 MARKET PROGRESS DEBUG:', {
+  istHours,
+  istMinutes,
   calculatedProgress: marketProgress,
   currentVolume,
   estimatedTodayVolume: Math.round(currentVolume * (6.25 / marketProgress))
@@ -1045,7 +1048,7 @@ export async function POST(request: Request) {
     
     // FIXED: Change percent calculation
     const changePercent = calculateChangePercent(ltp, historicalData, 'CMP');
-    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical);
+    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical,hours,minutes);
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
       ...volumeMetrics,
@@ -1095,8 +1098,8 @@ export async function POST(request: Request) {
         // Ensure money flow is never 0
         if (adAnalysis.todayMoneyFlow === 0) {
           console.log('🔄 Zero money flow detected, using intelligent fallback...');
-          const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
-            (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
+          const marketProgress = hours >= 9 && hours < 15 ? 
+  (hours - 9) + (minutes / 60) : 6.25;
           const volumeEstimate = volumeMetrics.avg20DayVolume * (marketProgress / 6.25);
           adAnalysis.todayMoneyFlow = volumeEstimate * ltp * 0.15;
           console.log(`📊 A/D MONEY FLOW FALLBACK: ${adAnalysis.todayMoneyFlow}`);
