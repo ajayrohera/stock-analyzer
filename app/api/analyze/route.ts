@@ -372,7 +372,7 @@ function calculateChangePercent(currentPrice: number, historicalData: Historical
   return 0.01;
 }
 
-function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number, isUsingHistoricalFallback: boolean = false): {
+function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number, isUsingHistoricalFallback: boolean = false,istHours?: number,istMinutes?: number): {
   avg20DayVolume: number;
   todayVolumePercentage: number;
   estimatedTodayVolume: number;
