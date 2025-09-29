@@ -952,7 +952,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="w-full max-w-5xl mx-auto mt-24 text-center"  style={{ marginTop: '2rem' }}>
+        <section className="w-full max-w-5xl mx-auto mt-24 text-center"  style={{ marginTop: '3rem' }}>
           <h2 className="text-3xl font-bold mb-10">Core Features</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <FeatureCard icon={<BarChart />} title="OI Analysis" description="Visualize support and resistance levels based on real-time Open Interest data." />
@@ -961,7 +961,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="w-full max-w-2xl mx-auto mt-24 p-8 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10">
+        <section className="w-full max-w-2xl mx-auto mt-24 p-8 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10"  style={{ marginTop: '3rem' }}>
           <h2 className="text-3xl font-bold text-center mb-6">Get In Touch</h2>
           <form className="flex flex-col gap-4">
             <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
