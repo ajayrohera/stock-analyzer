@@ -974,7 +974,7 @@ export async function POST(request: Request) {
   isMarketOpen: isMarketOpen
 });
     const hasLiveData = ltp > 0 && currentVolume > 0;
-    const shouldUseHistorical = !hasLiveData || !isMarketOpen || !isTradingDay;
+    const shouldUseHistorical = !hasLiveData || (!isMarketOpen && !isTradingDay);
 
     console.log('🔄 DATA SOURCE ANALYSIS:', {
         hasLiveData,
