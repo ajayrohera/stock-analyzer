@@ -669,7 +669,8 @@ function calculateSmartSentiment(
   volumePcr: number,
   highestPutOI: number,
   highestCallOI: number,
-  todayVolumePercentage: number
+  todayVolumePercentage: number,
+  adAnalysis?: ADAnalysis
 ): { sentiment: string; score: number; breakdown: string[] } {
   console.log('🧠 SENTIMENT CALCULATION:', { pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage });
   
@@ -714,13 +715,42 @@ function calculateSmartSentiment(
                         volumePcr <= 1.3 ? " (slightly bearish volume)" : " (bearish volume)";
   breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
 
-  // 4. Today's Volume Percentage Impact
-// 4. Today's Volume Percentage Impact - CONTEXT AWARE
+// 5. A/D Line Analysis Score
+let adScore = 0;
+let adContext = "";
+
+if (adAnalysis) {
+  switch (adAnalysis.todaySignal) {
+    case 'ACCUMULATION':
+      adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? 2 :
+                adAnalysis.todayStrength === 'STRONG' ? 1 : 0;
+      adContext = ` (${adAnalysis.todayStrength.toLowerCase()} accumulation)`;
+      break;
+    case 'DISTRIBUTION':
+      adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? -2 :
+                adAnalysis.todayStrength === 'STRONG' ? -1 : 0;
+      adContext = ` (${adAnalysis.todayStrength.toLowerCase()} distribution)`;
+      break;
+    case 'NEUTRAL':
+    default:
+      adScore = 0;
+      adContext = " (neutral money flow)";
+      break;
+  }
+} else {
+  adContext = " (data unavailable)";
+}
+
+breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${adContext}`);
+
+  // 4. Today's Volume Percentage Impact - CONTEXT AWARE
 let volumePercentageScore = 0;
 let volumePercentageContext = "";
 
+
+
 // Calculate current sentiment before volume adjustment
-const currentSentiment = pcrScore + convictionScore + volumeModifier;
+const currentSentiment = pcrScore + convictionScore + volumeModifier + adScore;
 
 if (todayVolumePercentage > 150) {
   // High volume amplifies existing sentiment
@@ -1218,7 +1248,8 @@ export async function POST(request: Request) {
         volumePcr,
         highestPutOI,
         highestCallOI,
-        volumeMetrics.todayVolumePercentage
+        volumeMetrics.todayVolumePercentage,
+        adAnalysis
     );
     
     console.log('📊 MAX PAIN - Calculating...');
