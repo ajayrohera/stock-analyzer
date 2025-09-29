@@ -790,7 +790,7 @@ const weightedScore = (
 
 const finalScore = Math.max(-10, Math.min(10, Math.round(weightedScore * 10) / 10));
 
-breakdown.push(`---`);
+breakdown.push(`──────────────`);
 breakdown.push(`Weighted Score: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
 
   // Determine sentiment.
