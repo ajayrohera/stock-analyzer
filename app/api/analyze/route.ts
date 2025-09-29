@@ -708,10 +708,10 @@ function calculateSmartSentiment(
   else if (volumePcr > 1.3) volumeModifier = -2;
   else if (volumePcr > 1.1) volumeModifier = -1;
 
-  const volumePCRContext = volumePcr < 0.7 ? " (bearish volume)" : 
-                          volumePcr < 0.9 ? " (slightly bearish volume)" :
-                          volumePcr <= 1.1 ? " (neutral volume)" :
-                          volumePcr <= 1.3 ? " (slightly bullish volume)" : " (bullish volume)";
+  const volumePCRContext = volumePcr < 0.7 ? " (bullish volume)" : 
+                        volumePcr < 0.9 ? " (slightly bullish volume)" :
+                        volumePcr <= 1.1 ? " (neutral volume)" :
+                        volumePcr <= 1.3 ? " (slightly bearish volume)" : " (bearish volume)";
   breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
 
   // 4. Today's Volume Percentage Impact
