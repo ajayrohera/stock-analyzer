@@ -770,13 +770,28 @@ if (todayVolumePercentage > 150) {
 
 breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • Today Volume ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
 
-// Calculate final score
-const finalScore = currentSentiment + volumePercentageScore;
+// Define weights for each indicator (sum should be 1.0)
+const weights = {
+  oiPcr: 0.25,        // 25% - Most important
+  oiStrength: 0.20,   // 20% - Very important  
+  volumePcr: 0.20,    // 20% - Very important
+  adLine: 0.15,       // 15% - Important
+  volumePercent: 0.10, // 10% - Less important
+};
 
+// Calculate weighted score (normalized to -10 to +10)
+const weightedScore = (
+  (pcrScore * weights.oiPcr) +
+  (convictionScore * weights.oiStrength) +
+  (volumeModifier * weights.volumePcr) +
+  (adScore * weights.adLine) +
+  (volumePercentageScore * weights.volumePercent)
+) * 2; // Multiply by 2 to scale to -10 to +10
 
+const finalScore = Math.max(-10, Math.min(10, Math.round(weightedScore * 10) / 10));
 
-  // Add separator and total.
-  breakdown.push(`Total: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
+breakdown.push(`---`);
+breakdown.push(`Weighted Score: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
 
   // Determine sentiment.
   let sentiment: string;
