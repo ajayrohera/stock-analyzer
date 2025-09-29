@@ -413,6 +413,14 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     // MARKET HOURS: Use live volume with projection
     const marketProgress = new Date().getHours() >= 9 && new Date().getHours() < 15 ? 
       (new Date().getHours() - 9) + (new Date().getMinutes() / 60) : 6.25;
+
+      console.log('🕒 MARKET PROGRESS DEBUG:', {
+  currentHours: new Date().getHours(),
+  currentMinutes: new Date().getMinutes(),
+  calculatedProgress: marketProgress,
+  currentVolume,
+  estimatedTodayVolume: Math.round(currentVolume * (6.25 / marketProgress))
+});
     
     result.todayVolumePercentage = Math.max(parseFloat((currentVolume / averageVolume * 100).toFixed(1)), 1);
     result.estimatedTodayVolume = Math.max(Math.round(currentVolume * (6.25 / marketProgress)), 1000);
