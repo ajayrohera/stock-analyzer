@@ -138,8 +138,11 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
       <div className="text-center mb-6">
         <div className="flex items-center justify-center gap-2 mb-2">
           <Zap className="text-yellow-400" size={20} />
-          <h3 className="text-lg font-bold text-white">Smart Sentiment Score (Weighted)</h3>
+          <h3 className="text-lg font-bold text-white">Weighted Sentiment Score</h3>
         </div>
+          <p className="text-sm text-gray-400 max-w-md mx-auto">
+    A weighted composite score combining OI PCR, volume analysis, money flow, and market strength indicators.
+  </p>
         {/* REMOVED: The line "Direct display of backend smart sentiment analysis" */}
       </div>
 
