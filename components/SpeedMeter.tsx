@@ -138,7 +138,7 @@ export default function SpeedMeter({ analysisData, isLoading = false }: SpeedMet
       <div className="text-center mb-6">
         <div className="flex items-center justify-center gap-2 mb-2">
           <Zap className="text-yellow-400" size={20} />
-          <h3 className="text-lg font-bold text-white">Smart Sentiment Score</h3>
+          <h3 className="text-lg font-bold text-white">Smart Sentiment Score (Weighted)</h3>
         </div>
         {/* REMOVED: The line "Direct display of backend smart sentiment analysis" */}
       </div>
