@@ -681,6 +681,8 @@ function calculateSmartSentiment(
   highestPutOI: number,
   highestCallOI: number,
   todayVolumePercentage: number,
+  estimatedTodayVolume: number, 
+  averageVolume: number, 
   adAnalysis?: ADAnalysis
 ): { sentiment: string; score: number; breakdown: string[] } {
   console.log('🧠 SENTIMENT CALCULATION:', { pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage });
@@ -763,20 +765,23 @@ let volumePercentageContext = "";
 // Calculate current sentiment before volume adjustment
 const currentSentiment = pcrScore + convictionScore + volumeModifier + adScore;
 
-if (todayVolumePercentage > 150) {
+// Calculate estimated volume percentage for classification
+const estimatedVolumePercentage = (estimatedTodayVolume / averageVolume) * 100;
+
+if (estimatedVolumePercentage > 150) {
   // High volume amplifies existing sentiment
   volumePercentageScore = currentSentiment > 0 ? 1 : currentSentiment < 0 ? -1 : 0;
-  volumePercentageContext = " (high volume amplifying sentiment)";
-} else if (todayVolumePercentage < 70) {
-  // Low volume: weakens existing sentiment (positive if bearish, negative if bullish)
+  volumePercentageContext = ` (high volume amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
+} else if (estimatedVolumePercentage < 70) {
+  // Low volume weakens existing sentiment
   volumePercentageScore = currentSentiment < 0 ? 1 : currentSentiment > 0 ? -1 : 0;
   volumePercentageContext = currentSentiment < 0 ? 
-    " (low volume - weakens bearish conviction)" : 
-    currentSentiment > 0 ? " (low volume - weakens bullish conviction)" : 
-    " (low volume, inconclusive)";
+    ` (low volume - weakens bearish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` : 
+    currentSentiment > 0 ? ` (low volume - weakens bullish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` : 
+    ` (low volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
 } else {
   volumePercentageScore = 0;
-  volumePercentageContext = " (moderate volume)";
+  volumePercentageContext = ` (moderate volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
 }
 
 breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • Today Volume ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
@@ -1275,6 +1280,8 @@ export async function POST(request: Request) {
         highestPutOI,
         highestCallOI,
         volumeMetrics.todayVolumePercentage,
+        volumeMetrics.estimatedTodayVolume, 
+        volumeMetrics.avg20DayVolume,
         adAnalysis
     );
     
