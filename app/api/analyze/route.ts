@@ -683,7 +683,8 @@ function calculateSmartSentiment(
   todayVolumePercentage: number,
   estimatedTodayVolume: number, 
   averageVolume: number, 
-  adAnalysis?: ADAnalysis
+  adAnalysis?: ADAnalysis,
+  isMarketOpen?: boolean
 ): { sentiment: string; score: number; breakdown: string[] } {
   console.log('🧠 SENTIMENT CALCULATION:', { pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage });
   
@@ -766,25 +767,38 @@ let volumePercentageContext = "";
 const currentSentiment = pcrScore + convictionScore + volumeModifier + adScore;
 
 // Calculate estimated volume percentage for classification
+// Calculate estimated volume percentage for classification
 const estimatedVolumePercentage = (estimatedTodayVolume / averageVolume) * 100;
 
+// Determine volume label and context
+const volumeLabel = isMarketOpen ? "Today Volume" : "Last Trading Volume";
+
 if (estimatedVolumePercentage > 150) {
-  // High volume amplifies existing sentiment
   volumePercentageScore = currentSentiment > 0 ? 1 : currentSentiment < 0 ? -1 : 0;
-  volumePercentageContext = ` (high volume amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
+  volumePercentageContext = isMarketOpen ? 
+    ` (high volume amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+    ` (high volume amplifying sentiment)`;
 } else if (estimatedVolumePercentage < 70) {
-  // Low volume weakens existing sentiment
   volumePercentageScore = currentSentiment < 0 ? 1 : currentSentiment > 0 ? -1 : 0;
   volumePercentageContext = currentSentiment < 0 ? 
-    ` (low volume - weakens bearish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` : 
-    currentSentiment > 0 ? ` (low volume - weakens bullish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` : 
-    ` (low volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
+    (isMarketOpen ? 
+      ` (low volume - weakens bearish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+      ` (low volume - weakens bearish conviction)`) : 
+    currentSentiment > 0 ? 
+    (isMarketOpen ?
+      ` (low volume - weakens bullish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+      ` (low volume - weakens bullish conviction)`) : 
+    (isMarketOpen ?
+      ` (low volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+      ` (low volume)`);
 } else {
   volumePercentageScore = 0;
-  volumePercentageContext = ` (moderate volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
+  volumePercentageContext = isMarketOpen ? 
+    ` (moderate volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+    ` (moderate volume)`;
 }
 
-breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • Today Volume ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
+breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • ${volumeLabel} ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
 
 // Define weights for each indicator (sum should be 1.0)
 const weights = {
