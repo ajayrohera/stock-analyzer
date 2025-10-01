@@ -1296,7 +1296,8 @@ export async function POST(request: Request) {
         volumeMetrics.todayVolumePercentage,
         volumeMetrics.estimatedTodayVolume, 
         volumeMetrics.avg20DayVolume,
-        adAnalysis
+        adAnalysis,
+        isMarketOpen
     );
     
     console.log('📊 MAX PAIN - Calculating...');
