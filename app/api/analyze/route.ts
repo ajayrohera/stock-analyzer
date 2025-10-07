@@ -868,6 +868,7 @@ function calculateSmartSentiment(
   estimatedTodayVolume: number, 
   averageVolume: number, 
   adAnalysis?: ADAnalysis,
+  vwapAnalysis?: VWAPAnalysis, // ADD VWAP parameter
   isMarketOpen?: boolean
 ): { sentiment: string; score: number; breakdown: string[] } {
   console.log('🧠 SENTIMENT CALCULATION:', { pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage });
@@ -913,96 +914,127 @@ function calculateSmartSentiment(
                         volumePcr <= 1.3 ? " (slightly bearish volume)" : " (bearish volume)";
   breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
 
-// 5. A/D Line Analysis Score
-let adScore = 0;
-let adContext = "";
+  // 4. A/D Line Analysis Score
+  let adScore = 0;
+  let adContext = "";
 
-if (adAnalysis) {
-  switch (adAnalysis.todaySignal) {
-    case 'ACCUMULATION':
-      adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? 2 :
-                adAnalysis.todayStrength === 'STRONG' ? 1 : 0;
-      adContext = ` (${adAnalysis.todayStrength.toLowerCase()} accumulation)`;
-      break;
-    case 'DISTRIBUTION':
-      adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? -2 :
-                adAnalysis.todayStrength === 'STRONG' ? -1 : 0;
-      adContext = ` (${adAnalysis.todayStrength.toLowerCase()} distribution)`;
-      break;
-    case 'NEUTRAL':
-    default:
-      adScore = 0;
-      adContext = " (neutral money flow)";
-      break;
+  if (adAnalysis) {
+    switch (adAnalysis.todaySignal) {
+      case 'ACCUMULATION':
+        adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? 2 :
+                  adAnalysis.todayStrength === 'STRONG' ? 1 : 0;
+        adContext = ` (${adAnalysis.todayStrength.toLowerCase()} accumulation)`;
+        break;
+      case 'DISTRIBUTION':
+        adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? -2 :
+                  adAnalysis.todayStrength === 'STRONG' ? -1 : 0;
+        adContext = ` (${adAnalysis.todayStrength.toLowerCase()} distribution)`;
+        break;
+      case 'NEUTRAL':
+      default:
+        adScore = 0;
+        adContext = " (neutral money flow)";
+        break;
+    }
+  } else {
+    adContext = " (data unavailable)";
   }
-} else {
-  adContext = " (data unavailable)";
-}
 
-breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${adContext}`);
+  breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${adContext}`);
 
-  // 4. Today's Volume Percentage Impact - CONTEXT AWARE
-let volumePercentageScore = 0;
-let volumePercentageContext = "";
+  // 5. VWAP Score - NEW
+  let vwapScore = 0;
+  let vwapContext = "";
 
-// Calculate current sentiment before volume adjustment
-const currentSentiment = pcrScore + convictionScore + volumeModifier + adScore;
+  if (vwapAnalysis && vwapAnalysis.value !== null) {
+    const deviation = vwapAnalysis.deviationPercent;
+    
+    if (deviation > 2.0) {
+      vwapScore = 2; // Strong bullish
+      vwapContext = ` (strong bullish - ${deviation.toFixed(2)}% above VWAP)`;
+    } else if (deviation > 1.0) {
+      vwapScore = 1; // Moderate bullish
+      vwapContext = ` (moderate bullish - ${deviation.toFixed(2)}% above VWAP)`;
+    } else if (deviation > -1.0) {
+      vwapScore = 0; // Neutral
+      vwapContext = ` (neutral - near VWAP)`;
+    } else if (deviation > -2.0) {
+      vwapScore = -1; // Moderate bearish
+      vwapContext = ` (moderate bearish - ${Math.abs(deviation).toFixed(2)}% below VWAP)`;
+    } else {
+      vwapScore = -2; // Strong bearish
+      vwapContext = ` (strong bearish - ${Math.abs(deviation).toFixed(2)}% below VWAP)`;
+    }
+  } else {
+    vwapContext = " (data unavailable)";
+  }
 
-// Calculate estimated volume percentage for classification
-const estimatedVolumePercentage = (estimatedTodayVolume / averageVolume) * 100;
+  breakdown.push(`${vwapScore >= 0 ? '+' : ''}${vwapScore} • VWAP Position${vwapContext}`);
 
-// Determine volume label and context
-const volumeLabel = isMarketOpen ? "Today Volume" : "Last Trading Volume";
+  // 6. Today's Volume Percentage Impact - CONTEXT AWARE
+  let volumePercentageScore = 0;
+  let volumePercentageContext = "";
 
-if (estimatedVolumePercentage > 150) {
-  volumePercentageScore = currentSentiment > 0 ? 1 : currentSentiment < 0 ? -1 : 0;
-  volumePercentageContext = isMarketOpen ? 
-    ` (high volume amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
-    ` (high volume amplifying sentiment)`;
-} else if (estimatedVolumePercentage < 70) {
-  volumePercentageScore = currentSentiment < 0 ? 1 : currentSentiment > 0 ? -1 : 0;
-  volumePercentageContext = currentSentiment < 0 ? 
-    (isMarketOpen ? 
-      ` (low volume - weakens bearish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
-      ` (low volume - weakens bearish conviction)`) : 
-    currentSentiment > 0 ? 
-    (isMarketOpen ?
-      ` (low volume - weakens bullish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
-      ` (low volume - weakens bullish conviction)`) : 
-    (isMarketOpen ?
-      ` (low volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
-      ` (low volume)`);
-} else {
-  volumePercentageScore = 0;
-  volumePercentageContext = isMarketOpen ? 
-    ` (moderate volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
-    ` (moderate volume)`;
-}
+  // Calculate current sentiment before volume adjustment
+  const currentSentiment = pcrScore + convictionScore + volumeModifier + adScore + vwapScore;
 
-breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • ${volumeLabel} ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
+  // Calculate estimated volume percentage for classification
+  const estimatedVolumePercentage = (estimatedTodayVolume / averageVolume) * 100;
 
-// Define weights for each indicator (sum should be 1.0)
-const weights = {
-  oiPcr: 0.25,        // 25% - Most important
-  oiStrength: 0.20,   // 20% - Very important  
-  volumePcr: 0.20,    // 20% - Very important
-  adLine: 0.15,       // 15% - Important
-  volumePercent: 0.10, // 10% - Less important
-};
+  // Determine volume label and context
+  const volumeLabel = isMarketOpen ? "Today Volume" : "Last Trading Volume";
 
-// Calculate weighted score (normalized to -10 to +10)
-const weightedScore = (
-  (pcrScore * weights.oiPcr) +
-  (convictionScore * weights.oiStrength) +
-  (volumeModifier * weights.volumePcr) +
-  (adScore * weights.adLine) +
-  (volumePercentageScore * weights.volumePercent)
-) * 2; // Multiply by 2 to scale to -10 to +10
+  if (estimatedVolumePercentage > 150) {
+    volumePercentageScore = currentSentiment > 0 ? 1 : currentSentiment < 0 ? -1 : 0;
+    volumePercentageContext = isMarketOpen ? 
+      ` (high volume amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+      ` (high volume amplifying sentiment)`;
+  } else if (estimatedVolumePercentage < 70) {
+    volumePercentageScore = currentSentiment < 0 ? 1 : currentSentiment > 0 ? -1 : 0;
+    volumePercentageContext = currentSentiment < 0 ? 
+      (isMarketOpen ? 
+        ` (low volume - weakens bearish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+        ` (low volume - weakens bearish conviction)`) : 
+      currentSentiment > 0 ? 
+      (isMarketOpen ?
+        ` (low volume - weakens bullish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+        ` (low volume - weakens bullish conviction)`) : 
+      (isMarketOpen ?
+        ` (low volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+        ` (low volume)`);
+  } else {
+    volumePercentageScore = 0;
+    volumePercentageContext = isMarketOpen ? 
+      ` (moderate volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
+      ` (moderate volume)`;
+  }
 
-const finalScore = Math.max(-10, Math.min(10, Math.round(weightedScore * 10) / 10));
+  breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • ${volumeLabel} ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
 
-breakdown.push(`──────────────`);
-breakdown.push(`Weighted Score: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
+  // Define weights for each indicator (sum should be 1.0)
+  const weights = {
+    oiPcr: 0.20,        // 20% - Reduced from 25%
+    oiStrength: 0.15,   // 15% - Reduced from 20%  
+    volumePcr: 0.15,    // 15% - Reduced from 20%
+    adLine: 0.15,       // 15% - Same
+    vwap: 0.20,         // 20% - NEW: VWAP gets significant weight
+    volumePercent: 0.10, // 10% - Reduced from 10%
+  };
+
+  // Calculate weighted score (normalized to -10 to +10)
+  const weightedScore = (
+    (pcrScore * weights.oiPcr) +
+    (convictionScore * weights.oiStrength) +
+    (volumeModifier * weights.volumePcr) +
+    (adScore * weights.adLine) +
+    (vwapScore * weights.vwap) + // ADD VWAP to weighted calculation
+    (volumePercentageScore * weights.volumePercent)
+  ) * 2; // Multiply by 2 to scale to -10 to +10
+
+  const finalScore = Math.max(-10, Math.min(10, Math.round(weightedScore * 10) / 10));
+
+  breakdown.push(`──────────────`);
+  breakdown.push(`Weighted Score: ${finalScore >= 0 ? '+' : ''}${finalScore}`);
 
   // Determine sentiment.
   let sentiment: string;
@@ -1491,6 +1523,7 @@ export async function POST(request: Request) {
         volumeMetrics.estimatedTodayVolume, 
         volumeMetrics.avg20DayVolume,
         adAnalysis,
+        vwapAnalysis,
         isMarketOpen
     );
     
