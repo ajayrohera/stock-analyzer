@@ -74,6 +74,30 @@ type RSIAnalysis = {
   };
 };
 
+type VWAPAnalysis = {
+  value: number | null;
+  typicalPrice: number;
+  cumulativeVolume: number;
+  deviationPercent: number;
+  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  strength: 'STRONG' | 'MODERATE' | 'WEAK';
+  interpretation: string;
+  styling?: {
+    valueColor: string;
+    signalColor: string;
+    strengthColor: string;
+    trendIcon: string;
+  };
+  display: {
+    value: string;
+    signal: string;
+    deviation: string;
+    interpretation: string;
+    position: 'ABOVE_VWAP' | 'BELOW_VWAP' | 'AT_VWAP';
+  };
+  formattedLines?: string[];
+};
+
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -96,6 +120,7 @@ type AnalysisResult = {
   resistances: SupportResistanceLevel[];
   adAnalysis?: ADAnalysis;
   rsiAnalysis?: RSIAnalysis;
+  vwapAnalysis?: VWAPAnalysis;
 };
 
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
@@ -131,6 +156,12 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
       typeof typedData.rsiAnalysis === 'object' &&
       typedData.rsiAnalysis !== null
     );
+
+    // Check if vwapAnalysis exists but don't require it to be valid.
+    const vwapAnalysisIsValid = !typedData.vwapAnalysis || (
+      typeof typedData.vwapAnalysis === 'object' &&
+      typedData.vwapAnalysis !== null
+    );
     
     return (!!typedData && 
             typeof typedData.symbol === 'string' && 
@@ -140,7 +171,8 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
             supportsIsValid && 
             resistancesIsValid &&
             adAnalysisIsValid &&
-            rsiAnalysisIsValid);
+            rsiAnalysisIsValid &&
+            vwapAnalysisIsValid);
   } catch (error) { 
     console.error('Validation error:', error); 
     return false; 
@@ -291,8 +323,6 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: SupportRes
   );
 });
 SupportResistanceList.displayName = 'SupportResistanceList';
-
-
 
 const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysis?: ADAnalysis; marketStatus: MarketStatus }) => {
   if (!adAnalysis) {
@@ -470,6 +500,110 @@ const RSIAnalysisCard = React.memo(({ rsiAnalysis }: { rsiAnalysis?: RSIAnalysis
   );
 });
 RSIAnalysisCard.displayName = 'RSIAnalysisCard';
+
+const VWAPAnalysisCard = React.memo(({ vwapAnalysis }: { vwapAnalysis?: VWAPAnalysis }) => {
+  if (!vwapAnalysis || vwapAnalysis.value === null) {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
+        <div className="flex items-center justify-center text-sm text-gray-400">
+          <TrendingUp size={14} className="mr-1.5" />
+          <span>VWAP Analysis</span>
+          <div className="relative group ml-1">
+            <Info size={14} className="cursor-pointer" />
+            <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+              Volume Weighted Average Price (VWAP) tracks the average price weighted by volume.
+              <br />Trading above VWAP suggests bullish bias, below suggests bearish bias.
+              <br />Used by institutions to identify fair value.
+            </div>
+          </div>
+        </div>
+        <p className="text-gray-500 text-sm mt-2">Calculating VWAP...</p>
+        <p className="text-gray-600 text-xs">Market data required</p>
+      </div>
+    );
+  }
+
+  const getDeviationColor = (deviation: number) => {
+    if (deviation > 1.0) return 'text-green-400';
+    if (deviation < -1.0) return 'text-red-500';
+    return 'text-gray-400';
+  };
+
+  const getPositionIcon = (position: string) => {
+    switch (position) {
+      case 'ABOVE_VWAP': return <ArrowUp size={16} className="text-green-400" />;
+      case 'BELOW_VWAP': return <ArrowDown size={16} className="text-red-500" />;
+      default: return <TrendingUp size={16} className="text-gray-400" />;
+    }
+  };
+
+  const getStrengthBadge = (strength: string) => {
+    switch (strength) {
+      case 'STRONG': return 'bg-green-900/50 text-green-400 border border-green-700';
+      case 'MODERATE': return 'bg-yellow-900/50 text-yellow-400 border border-yellow-700';
+      case 'WEAK': return 'bg-gray-700 text-gray-400 border border-gray-600';
+      default: return 'bg-gray-700 text-gray-400 border border-gray-600';
+    }
+  };
+
+  return (
+    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
+      <div className="flex items-center justify-center text-sm text-gray-400">
+        <TrendingUp size={14} className="mr-1.5" />
+        <span>VWAP Analysis</span>
+        <div className="relative group ml-1">
+          <Info size={14} className="cursor-pointer" />
+          <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+            Volume Weighted Average Price (VWAP) tracks the average price weighted by volume.
+            <br />Trading above VWAP suggests bullish bias, below suggests bearish bias.
+            <br /><br />
+            Current VWAP: ₹{vwapAnalysis.value?.toFixed(2) || 'Calculating...'}
+            <br />LTP Position: {vwapAnalysis.deviationPercent >= 0 ? 'ABOVE' : 'BELOW'} VWAP
+            <br />Signal: {vwapAnalysis.signal} ({vwapAnalysis.strength})
+          </div>
+        </div>
+      </div>
+      
+      {/* VWAP Value and Signal */}
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-lg font-bold text-white">
+          ₹{vwapAnalysis.value?.toFixed(2)}
+        </span>
+        <div className="flex items-center">
+          {getPositionIcon(vwapAnalysis.display.position)}
+          <span 
+            className={`text-sm font-semibold ml-1 px-2 py-1 rounded ${getStrengthBadge(vwapAnalysis.strength)}`}
+          >
+            {vwapAnalysis.signal}
+          </span>
+        </div>
+      </div>
+
+      {/* Deviation from VWAP */}
+      <div className="flex items-center justify-center mt-2">
+        <span className={`text-md font-semibold ${getDeviationColor(vwapAnalysis.deviationPercent)}`}>
+          {vwapAnalysis.deviationPercent >= 0 ? '+' : ''}{vwapAnalysis.deviationPercent.toFixed(2)}%
+        </span>
+        <span className="text-gray-400 text-sm ml-1">
+          {vwapAnalysis.deviationPercent > 0 ? 'above' : vwapAnalysis.deviationPercent < 0 ? 'below' : 'at'} VWAP
+        </span>
+      </div>
+
+      {/* Volume Context */}
+      {vwapAnalysis.cumulativeVolume > 0 && (
+        <div className="text-xs text-gray-400 mt-1">
+          Volume: {(vwapAnalysis.cumulativeVolume / 1000).toFixed(1)}K shares
+        </div>
+      )}
+
+      {/* Interpretation */}
+      <div className="text-xs mt-2 text-gray-400 text-left">
+        {vwapAnalysis.interpretation}
+      </div>
+    </div>
+  );
+});
+VWAPAnalysisCard.displayName = 'VWAPAnalysisCard';
 
 const FeatureCard = React.memo(({ icon, title, description }: { icon: React.ReactElement, title: string, description: string }) => ( 
   <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl text-center transition-all duration-300 hover:bg-white/10 hover:scale-105">
@@ -896,22 +1030,10 @@ export default function Home() {
                {/* Row 1 */}
               <SupportResistanceList type="Support" levels={results.supports} />
               <SupportResistanceList type="Resistance" levels={results.resistances} />
-              {/* VWAP Coming Soon Card */}
-              <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
-                <div className="flex items-center justify-center text-sm text-gray-400">
-                  <TrendingUp size={14} className="mr-1.5" />
-                  <span>VWAP Analysis</span>
-                  <div className="relative group ml-1">
-                    <Info size={14} className="cursor-pointer" />
-                    <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-                      Volume Weighted Average Price (VWAP) - Coming Soon
-                      <br />Track institutional trading activity and identify fair value.
-                    </div>
-                  </div>
-                </div>
-                <p className="text-2xl font-bold text-gray-500 mt-2">Coming Soon</p>
-                <p className="text-gray-400 text-sm mt-2">VWAP analysis in development</p>
-              </div>
+              {/* VWAP Card */}
+              <VWAPAnalysisCard 
+                vwapAnalysis={results.vwapAnalysis}
+              />
 
                 {/* Row 2 */}
                 <PCRStatCard 

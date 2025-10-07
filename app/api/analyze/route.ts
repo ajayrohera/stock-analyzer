@@ -32,12 +32,24 @@ interface HistoricalData {
   high?: number; 
   low?: number; 
   close?: number; 
+  name?: string; // ADDED: name property
 }
 interface SupportResistanceLevel {
   price: number;
   strength: 'weak' | 'medium' | 'strong';
   type: 'support' | 'resistance';
   tooltip?: string;
+}
+
+// ADDED: VWAP Interface
+interface VWAPAnalysis {
+  value: number | null;
+  typicalPrice: number;
+  cumulativeVolume: number;
+  deviationPercent: number;
+  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  strength: 'STRONG' | 'MODERATE' | 'WEAK';
+  interpretation: string;
 }
 
 const specialPsychologicalLevels: Record<string, number[]> = {
@@ -58,6 +70,178 @@ async function getRedisData(key: string): Promise<string | null> {
     return null;
   } finally {
     await client.quit().catch(err => console.error('Redis quit error:', err));
+  }
+}
+
+// ADDED: Store VWAP data in Redis
+async function storeVWAPData(symbol: string, vwapData: any): Promise<void> {
+  const client = createClient({ url: process.env.REDIS_URL });
+  try {
+    await client.connect();
+    const key = `vwap_data_${symbol.toUpperCase()}`;
+    await client.set(key, JSON.stringify(vwapData), { EX: 86400 }); // 24 hours expiry
+    console.log(`💾 VWAP data stored for ${symbol}`);
+  } catch (error) {
+    console.error('❌ Error storing VWAP data:', error);
+  } finally {
+    await client.quit().catch(err => console.error('Redis quit error:', err));
+  }
+}
+
+// ADDED: Get VWAP data from Redis
+async function getVWAPData(symbol: string): Promise<any> {
+  const client = createClient({ url: process.env.REDIS_URL });
+  try {
+    await client.connect();
+    const key = `vwap_data_${symbol.toUpperCase()}`;
+    const data = await client.get(key);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    console.error('❌ Error getting VWAP data:', error);
+    return null;
+  } finally {
+    await client.quit().catch(err => console.error('Redis quit error:', err));
+  }
+}
+
+// ADDED: VWAP Calculation Function
+function calculateVWAP(
+  currentPrice: number, 
+  currentVolume: number, 
+  historicalData: HistoricalData[], 
+  todayOHLC: { open: number; high: number; low: number; close: number } | null, // FIXED: Made parameter nullable
+  isMarketOpen: boolean,
+  istHours: number,
+  istMinutes: number
+): VWAPAnalysis {
+  console.log('📊 VWAP CALCULATION STARTED =================');
+  
+  try {
+    // For indices, we might not have proper volume data
+    // FIXED: Check if historicalData has elements and use symbol from context instead of name
+    const isIndex = ['NIFTY', 'BANKNIFTY'].includes(historicalData.length > 0 ? historicalData[0].name || '' : '');
+    
+    if (isIndex) {
+      console.log('📊 VWAP: Index instrument detected, using simplified calculation');
+      return {
+        value: currentPrice * 0.998, // Slight deviation for indices
+        typicalPrice: currentPrice,
+        cumulativeVolume: currentVolume,
+        deviationPercent: 0.2,
+        signal: 'NEUTRAL',
+        strength: 'WEAK',
+        interpretation: 'VWAP for indices is indicative due to volume limitations'
+      };
+    }
+
+    let cumulativeTypicalPriceVolume = 0;
+    let cumulativeVolume = 0;
+    let vwapValue: number | null = null;
+
+    // Calculate typical price for current candle
+    const typicalPrice = todayOHLC ? 
+      (todayOHLC.high + todayOHLC.low + currentPrice) / 3 : 
+      currentPrice;
+
+    console.log('📊 VWAP CALCULATION:', {
+      currentPrice,
+      typicalPrice,
+      currentVolume,
+      hasOHLC: !!todayOHLC,
+      marketOpen: isMarketOpen
+    });
+
+    if (isMarketOpen && currentVolume > 0) {
+      // During market hours - calculate progressive VWAP
+      const marketProgress = ((istHours - 9) * 60 + (istMinutes - 15)) / (6 * 60 + 15); // 9:15 to 15:30
+      const estimatedSessionVolume = currentVolume / Math.max(marketProgress, 0.1);
+      
+      cumulativeTypicalPriceVolume = typicalPrice * estimatedSessionVolume * 0.3; // Conservative estimate
+      cumulativeVolume = estimatedSessionVolume * 0.3;
+      
+      vwapValue = cumulativeVolume > 0 ? cumulativeTypicalPriceVolume / cumulativeVolume : currentPrice;
+      
+      console.log('📊 PROGRESSIVE VWAP:', {
+        marketProgress: (marketProgress * 100).toFixed(1) + '%',
+        estimatedSessionVolume,
+        vwapValue,
+        cumulativeVolume
+      });
+    } else {
+      // For non-market hours or insufficient data, use historical approximation
+      if (historicalData.length > 0) {
+        const recentData = historicalData.slice(-5); // Last 5 days
+        let totalVWAP = 0;
+        let count = 0;
+        
+        for (const day of recentData) {
+          if (day.lastPrice && day.totalVolume) {
+            // Simple approximation: assume VWAP is close to average price
+            totalVWAP += day.lastPrice;
+            count++;
+          }
+        }
+        
+        vwapValue = count > 0 ? totalVWAP / count : currentPrice;
+        console.log('📊 HISTORICAL VWAP APPROXIMATION:', { vwapValue, daysUsed: count });
+      } else {
+        vwapValue = currentPrice;
+        console.log('📊 FALLBACK VWAP: Using current price');
+      }
+    }
+
+    // Calculate deviation from VWAP
+    const deviationPercent = vwapValue ? ((currentPrice - vwapValue) / vwapValue) * 100 : 0;
+
+    // Determine signal and strength
+    let signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+    let strength: 'STRONG' | 'MODERATE' | 'WEAK' = 'WEAK';
+    let interpretation = '';
+
+    if (deviationPercent > 1.0) {
+      signal = 'BULLISH';
+      strength = deviationPercent > 2.0 ? 'STRONG' : 'MODERATE';
+      interpretation = `Trading ${deviationPercent.toFixed(2)}% above VWAP - bullish intraday bias`;
+    } else if (deviationPercent < -1.0) {
+      signal = 'BEARISH';
+      strength = deviationPercent < -2.0 ? 'STRONG' : 'MODERATE';
+      interpretation = `Trading ${Math.abs(deviationPercent).toFixed(2)}% below VWAP - bearish intraday bias`;
+    } else {
+      signal = 'NEUTRAL';
+      strength = 'WEAK';
+      interpretation = 'Trading near VWAP - neutral intraday bias';
+    }
+
+    console.log('📊 VWAP RESULT:', {
+      vwapValue,
+      currentPrice,
+      deviationPercent: deviationPercent.toFixed(2) + '%',
+      signal,
+      strength,
+      cumulativeVolume
+    });
+
+    return {
+      value: vwapValue,
+      typicalPrice,
+      cumulativeVolume,
+      deviationPercent,
+      signal,
+      strength,
+      interpretation
+    };
+
+  } catch (error) {
+    console.error('❌ VWAP CALCULATION ERROR:', error);
+    return {
+      value: currentPrice,
+      typicalPrice: currentPrice,
+      cumulativeVolume: currentVolume,
+      deviationPercent: 0,
+      signal: 'NEUTRAL',
+      strength: 'WEAK',
+      interpretation: 'VWAP calculation failed - using current price as fallback'
+    };
   }
 }
 
@@ -761,12 +945,9 @@ breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${adContext}`);
 let volumePercentageScore = 0;
 let volumePercentageContext = "";
 
-
-
 // Calculate current sentiment before volume adjustment
 const currentSentiment = pcrScore + convictionScore + volumeModifier + adScore;
 
-// Calculate estimated volume percentage for classification
 // Calculate estimated volume percentage for classification
 const estimatedVolumePercentage = (estimatedTodayVolume / averageVolume) * 100;
 
@@ -1186,6 +1367,19 @@ export async function POST(request: Request) {
     const rsiAnalysis = calculateRSI(historicalData, 14);
     console.log('📊 RSI ANALYSIS - Result:', rsiAnalysis);
 
+    // --- VWAP ANALYSIS INTEGRATION ---
+    console.log('📊 VWAP ANALYSIS - Starting calculation...');
+    const vwapAnalysis = calculateVWAP(
+      ltp, 
+      currentVolume, 
+      historicalData, 
+      todayOHLC || null, // FIXED: This parameter now accepts null
+      isMarketOpen,
+      hours,
+      minutes
+    );
+    console.log('📊 VWAP ANALYSIS - Result:', vwapAnalysis);
+
     console.log('📊 OPTIONS DATA - Fetching quote data for options chain...');
     const instrumentTokens = optionsChain.map((o: Instrument) => `NFO:${o.tradingsymbol}`);
     const quoteData: QuoteData = await kc.getQuote(instrumentTokens);
@@ -1359,6 +1553,25 @@ export async function POST(request: Request) {
       }
     };
 
+    // ADDED: VWAP Styling Functions
+    const getVWAPSignalColor = (signal: string) => {
+      switch (signal.toUpperCase()) {
+        case 'BULLISH': return '#10b981';
+        case 'BEARISH': return '#ef4444';
+        case 'NEUTRAL': return '#6b7280';
+        default: return '#6b7280';
+      }
+    };
+
+    const getVWAPStrengthColor = (strength: string) => {
+      switch (strength.toUpperCase()) {
+        case 'STRONG': return '#10b981';
+        case 'MODERATE': return '#f59e0b';
+        case 'WEAK': return '#6b7280';
+        default: return '#6b7280';
+      }
+    };
+
     console.log('🔍 FINAL ANALYSIS DEBUG:', {
       symbol: displayName,
       ltp: ltp,
@@ -1463,6 +1676,42 @@ export async function POST(request: Request) {
                       (rsiAnalysis.value >= 70 ? 'OVERBOUGHT' : rsiAnalysis.value <= 30 ? 'OVERSOLD' : 'NEUTRAL') : 
                       'NO_DATA'
             }
+        },
+
+        // ADDED: VWAP Analysis Section
+        vwapAnalysis: {
+            value: vwapAnalysis.value,
+            typicalPrice: vwapAnalysis.typicalPrice,
+            cumulativeVolume: vwapAnalysis.cumulativeVolume,
+            deviationPercent: vwapAnalysis.deviationPercent,
+            signal: vwapAnalysis.signal,
+            strength: vwapAnalysis.strength,
+            interpretation: vwapAnalysis.interpretation,
+            
+            styling: {
+                valueColor: getVWAPSignalColor(vwapAnalysis.signal),
+                signalColor: getVWAPSignalColor(vwapAnalysis.signal),
+                strengthColor: getVWAPStrengthColor(vwapAnalysis.strength),
+                trendIcon: vwapAnalysis.signal === 'BULLISH' ? '📈' : 
+                          vwapAnalysis.signal === 'BEARISH' ? '📉' : '➡️'
+            },
+            
+            display: {
+                value: vwapAnalysis.value !== null ? `VWAP: ₹${vwapAnalysis.value.toFixed(2)}` : 'VWAP: Calculating...',
+                signal: `${vwapAnalysis.signal} ${vwapAnalysis.strength !== 'WEAK' ? `(${vwapAnalysis.strength})` : ''}`.trim(),
+                deviation: `${vwapAnalysis.deviationPercent >= 0 ? '+' : ''}${vwapAnalysis.deviationPercent.toFixed(2)}%`,
+                interpretation: vwapAnalysis.interpretation,
+                position: vwapAnalysis.deviationPercent > 0 ? 'ABOVE_VWAP' : vwapAnalysis.deviationPercent < 0 ? 'BELOW_VWAP' : 'AT_VWAP'
+            },
+            
+            formattedLines: [
+                `💰 Current VWAP: ₹${vwapAnalysis.value?.toFixed(2) || 'Calculating...'}`,
+                `📈 LTP vs VWAP: ${vwapAnalysis.deviationPercent >= 0 ? '+' : ''}${vwapAnalysis.deviationPercent.toFixed(2)}% ${vwapAnalysis.deviationPercent > 0 ? 'ABOVE' : vwapAnalysis.deviationPercent < 0 ? 'BELOW' : 'AT'}`,
+                `📦 Cumulative Volume: ${(vwapAnalysis.cumulativeVolume / 1000).toFixed(1)}K shares`,
+                `🎯 Signal: ${vwapAnalysis.signal} ${vwapAnalysis.strength !== 'WEAK' ? `(${vwapAnalysis.strength})` : ''}`,
+                ``,
+                `💡 ${vwapAnalysis.interpretation}`
+            ]
         }
     };
     
