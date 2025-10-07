@@ -404,7 +404,7 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
         ))}
       </div>
       
-      <div className="text-xs mt-2 text-gray-400 text-left">
+      <div className="text-xs mt-2 text-gray-400 text-left" style={{ textAlign: 'center' }}>
         {interpretation}
       </div>
     </div>
@@ -493,7 +493,7 @@ const RSIAnalysisCard = React.memo(({ rsiAnalysis }: { rsiAnalysis?: RSIAnalysis
         <span className="text-red-600">Overbought</span>
       </div>
 
-      <div className="text-xs mt-2 text-gray-400 text-left">
+      <div className="text-xs mt-2 text-gray-400 text-left" style={{ textAlign: 'center' }}>
         {rsiAnalysis.interpretation}
       </div>
     </div>
@@ -597,7 +597,7 @@ const VWAPAnalysisCard = React.memo(({ vwapAnalysis }: { vwapAnalysis?: VWAPAnal
       )}
 
       {/* Interpretation */}
-      <div className="text-xs mt-2 text-gray-400 text-left">
+      <div className="text-xs mt-2 text-gray-400 text-left" style={{ textAlign: 'center' }}>
         {vwapAnalysis.interpretation}
       </div>
     </div>
