@@ -868,10 +868,13 @@ function calculateSmartSentiment(
   estimatedTodayVolume: number, 
   averageVolume: number, 
   adAnalysis?: ADAnalysis,
-  vwapAnalysis?: VWAPAnalysis, // ADD VWAP parameter
-  isMarketOpen?: boolean
+  vwapAnalysis?: VWAPAnalysis,
+  isMarketOpen?: boolean,
+  changePercent?: number // ADD changePercent parameter
 ): { sentiment: string; score: number; breakdown: string[] } {
-  console.log('🧠 SENTIMENT CALCULATION:', { pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage });
+  console.log('🧠 SENTIMENT CALCULATION:', { 
+    pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent 
+  });
   
   const breakdown: string[] = [];
   
@@ -942,7 +945,7 @@ function calculateSmartSentiment(
 
   breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${adContext}`);
 
-  // 5. VWAP Score - NEW
+  // 5. VWAP Score
   let vwapScore = 0;
   let vwapContext = "";
 
@@ -971,11 +974,11 @@ function calculateSmartSentiment(
 
   breakdown.push(`${vwapScore >= 0 ? '+' : ''}${vwapScore} • VWAP Position${vwapContext}`);
 
-  // 6. Today's Volume Percentage Impact - CONTEXT AWARE
+  // 6. Today's Volume Percentage Impact - IMPROVED LOGIC
   let volumePercentageScore = 0;
   let volumePercentageContext = "";
 
-  // Calculate current sentiment before volume adjustment
+  // Calculate current sentiment before volume adjustment (excluding volume percentage)
   const currentSentiment = pcrScore + convictionScore + volumeModifier + adScore + vwapScore;
 
   // Calculate estimated volume percentage for classification
@@ -984,12 +987,25 @@ function calculateSmartSentiment(
   // Determine volume label and context
   const volumeLabel = isMarketOpen ? "Today Volume" : "Last Trading Volume";
 
+  // IMPROVED: Score volume based on price-action confirmation
+  const isPriceUp = changePercent && changePercent > 0.5; // Significant uptrend (>0.5%)
+  const isPriceDown = changePercent && changePercent < -0.5; // Significant downtrend (<-0.5%)
+
   if (estimatedVolumePercentage > 150) {
-    volumePercentageScore = currentSentiment > 0 ? 1 : currentSentiment < 0 ? -1 : 0;
-    volumePercentageContext = isMarketOpen ? 
-      ` (high volume amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
-      ` (high volume amplifying sentiment)`;
+    // High volume with price confirmation
+    if (isPriceUp) {
+      volumePercentageScore = 1; // Bullish confirmation
+      volumePercentageContext = ` (high volume confirming bullish move - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
+    } else if (isPriceDown) {
+      volumePercentageScore = -1; // Bearish confirmation  
+      volumePercentageContext = ` (high volume confirming bearish move - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
+    } else {
+      // No strong price trend, amplify existing sentiment
+      volumePercentageScore = currentSentiment > 0 ? 1 : currentSentiment < 0 ? -1 : 0;
+      volumePercentageContext = ` (high volume amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
+    }
   } else if (estimatedVolumePercentage < 70) {
+    // Low volume - weakens conviction
     volumePercentageScore = currentSentiment < 0 ? 1 : currentSentiment > 0 ? -1 : 0;
     volumePercentageContext = currentSentiment < 0 ? 
       (isMarketOpen ? 
@@ -1013,12 +1029,12 @@ function calculateSmartSentiment(
 
   // Define weights for each indicator (sum should be 1.0)
   const weights = {
-    oiPcr: 0.20,        // 20% - Reduced from 25%
-    oiStrength: 0.15,   // 15% - Reduced from 20%  
-    volumePcr: 0.15,    // 15% - Reduced from 20%
-    adLine: 0.15,       // 15% - Same
-    vwap: 0.20,         // 20% - NEW: VWAP gets significant weight
-    volumePercent: 0.10, // 10% - Reduced from 10%
+    oiPcr: 0.20,        // 20%
+    oiStrength: 0.15,   // 15%  
+    volumePcr: 0.15,    // 15%
+    adLine: 0.15,       // 15%
+    vwap: 0.20,         // 20%
+    volumePercent: 0.10, // 10%
   };
 
   // Calculate weighted score (normalized to -10 to +10)
@@ -1027,7 +1043,7 @@ function calculateSmartSentiment(
     (convictionScore * weights.oiStrength) +
     (volumeModifier * weights.volumePcr) +
     (adScore * weights.adLine) +
-    (vwapScore * weights.vwap) + // ADD VWAP to weighted calculation
+    (vwapScore * weights.vwap) +
     (volumePercentageScore * weights.volumePercent)
   ) * 2; // Multiply by 2 to scale to -10 to +10
 
@@ -1524,7 +1540,8 @@ export async function POST(request: Request) {
         volumeMetrics.avg20DayVolume,
         adAnalysis,
         vwapAnalysis,
-        isMarketOpen
+        isMarketOpen,
+        changePercent
     );
     
     console.log('📊 MAX PAIN - Calculating...');
