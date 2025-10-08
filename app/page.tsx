@@ -1,4 +1,4 @@
- // app/page.tsx - COMPLETE FRONTEND CODE
+// app/page.tsx - UPDATED FRONTEND CODE (OI Flow Analysis removed)
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -110,64 +110,6 @@ type VWAPAnalysis = {
   formattedLines?: string[];
 };
 
-type OIAnalysisData = {
-  summary: {
-    totalCallOIChange: number;
-    totalPutOIChange: number;
-    callBuildUp: number;
-    putBuildUp: number;
-    unusualActivityCount: number;
-    totalCallOI: number;
-    totalPutOI: number;
-    callPutRatio: number;
-    avgCallOIChange: number;
-    avgPutOIChange: number;
-  };
-  keyChanges: Array<{
-    strike: number;
-    type: 'CE' | 'PE';
-    changePercent: number;
-    changeAbsolute: number;
-    significance: 'LOW' | 'MEDIUM' | 'HIGH';
-    trend: 'BUILDING' | 'DECLINING' | 'STABLE';
-    currentOI: number;
-    distanceFromLTP: number;
-  }>;
-  insights: string[];
-  unusualActivity: Array<{
-    strike: number;
-    type: 'CE' | 'PE';
-    changePercent: number;
-    message: string;
-  }>;
-  momentum: {
-    callMomentum: 'BULLISH' | 'BEARISH';
-    putMomentum: 'BULLISH' | 'BEARISH';
-    overallMomentum: 'CALL_BUILDUP' | 'PUT_BUILDUP';
-  };
-  hasPreviousData: boolean;
-  interpretation: string;
-  styling: {
-    trendColors: {
-      BUILDING: string;
-      DECLINING: string;
-      STABLE: string;
-    };
-    significanceColors: {
-      HIGH: string;
-      MEDIUM: string;
-      LOW: string;
-    };
-    icons: {
-      BUILDING: string;
-      DECLINING: string;
-      STABLE: string;
-      UNUSUAL: string;
-      SIGNIFICANT: string;
-    };
-  };
-};
-
 type AnalysisResult = {
   symbol: string; 
   pcr: number; 
@@ -191,7 +133,6 @@ type AnalysisResult = {
   adAnalysis?: ADAnalysis;
   rsiAnalysis?: RSIAnalysis;
   vwapAnalysis?: VWAPAnalysis;
-  oiAnalysis?: OIAnalysisData;
 };
 
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
@@ -252,7 +193,6 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
     const adAnalysisIsValid = !typedData.adAnalysis || (typeof typedData.adAnalysis === 'object' && typedData.adAnalysis !== null);
     const rsiAnalysisIsValid = !typedData.rsiAnalysis || (typeof typedData.rsiAnalysis === 'object' && typedData.rsiAnalysis !== null);
     const vwapAnalysisIsValid = !typedData.vwapAnalysis || (typeof typedData.vwapAnalysis === 'object' && typedData.vwapAnalysis !== null);
-    const oiAnalysisIsValid = !typedData.oiAnalysis || (typeof typedData.oiAnalysis === 'object' && typedData.oiAnalysis !== null);
     
     return (!!typedData && 
             typeof typedData.symbol === 'string' && 
@@ -263,8 +203,7 @@ const isAnalysisResult = (data: unknown): data is AnalysisResult => {
             resistancesIsValid &&
             adAnalysisIsValid &&
             rsiAnalysisIsValid &&
-            vwapAnalysisIsValid &&
-            oiAnalysisIsValid);
+            vwapAnalysisIsValid);
   } catch (error) { 
     console.error('Validation error:', error); 
     return false; 
@@ -445,117 +384,6 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: EnhancedSu
 });
 SupportResistanceList.displayName = 'SupportResistanceList';
 
-const OIAnalysisCard = React.memo(({ oiAnalysis }: { oiAnalysis?: OIAnalysisData }) => {
-  if (!oiAnalysis) {
-    return (
-      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
-        <div className="flex items-center justify-center text-sm text-gray-400">
-          <BarChart size={14} className="mr-1.5" />
-          <span>OI Flow Analysis</span>
-          <div className="relative group ml-1">
-            <Info size={14} className="cursor-pointer" />
-            <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-              Options Open Interest (OI) analysis tracks institutional positioning.
-              <br />Shows CALL/PUT buildup, unusual activity, and momentum trends.
-              <br />Data available during market hours.
-            </div>
-          </div>
-        </div>
-        <p className="text-gray-500 text-sm mt-2">Data not available yet</p>
-        <p className="text-gray-600 text-xs">Check during market hours</p>
-      </div>
-    );
-  }
-
-  const formatVolume = (volume: number) => {
-    if (volume >= 1000000) return `${(volume / 1000000).toFixed(1)}M`;
-    if (volume >= 1000) return `${(volume / 1000).toFixed(1)}K`;
-    return volume.toString();
-  };
-
-  return (
-    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
-      <div className="flex items-center justify-center text-sm text-gray-400">
-        <BarChart size={14} className="mr-1.5" />
-        <span>OI Flow Analysis</span>
-        <div className="relative group ml-1">
-          <Info size={14} className="cursor-pointer" />
-          <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-            Options Open Interest (OI) analysis tracks institutional positioning.
-            <br />Shows CALL/PUT buildup, unusual activity, and momentum trends.
-            <br /><br />
-            Total CALL OI: {formatVolume(oiAnalysis.summary.totalCallOI)}
-            <br />Total PUT OI: {formatVolume(oiAnalysis.summary.totalPutOI)}
-            <br />CALL/PUT Ratio: {oiAnalysis.summary.callPutRatio.toFixed(2)}
-          </div>
-        </div>
-      </div>
-      
-      {/* OI Summary */}
-      <div className="flex justify-between items-center mt-2">
-        <div className="text-center">
-          <span className="text-blue-400 text-sm">CALL</span>
-          <p className="text-white font-bold">
-            {oiAnalysis.summary.totalCallOIChange >= 0 ? '+' : ''}{formatVolume(oiAnalysis.summary.totalCallOIChange)}
-          </p>
-        </div>
-        <div className="text-center">
-          <span className="text-orange-400 text-sm">PUT</span>
-          <p className="text-white font-bold">
-            {oiAnalysis.summary.totalPutOIChange >= 0 ? '+' : ''}{formatVolume(oiAnalysis.summary.totalPutOIChange)}
-          </p>
-        </div>
-      </div>
-
-
- 
- {/* Momentum */}
-      <div className="flex justify-center items-center mt-2">
-        <span className={`text-xs font-semibold px-2 py-1 rounded ${
-          oiAnalysis.momentum.overallMomentum === 'CALL_BUILDUP' 
-            ? 'bg-blue-900/50 text-blue-400 border border-blue-700'
-            : 'bg-orange-900/50 text-orange-400 border border-orange-700'
-        }`}>
-          {oiAnalysis.momentum.overallMomentum === 'CALL_BUILDUP' ? 'CALL BUILDUP' : 'PUT BUILDUP'}
-        </span>
-      </div>
-
-      {/* Key Insights */}
-      {oiAnalysis.insights.length > 0 && (
-        <div className="text-xs text-gray-400 mt-2 text-left">
-          {oiAnalysis.insights.slice(0, 2).map((insight, index) => (
-            <div key={index} className="flex items-start mb-1">
-              <span className="mr-1">•</span>
-              <span>{insight}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Unusual Activity */}
-      {oiAnalysis.unusualActivity.length > 0 && (
-        <div className="text-xs mt-2">
-          {oiAnalysis.unusualActivity.slice(0, 1).map((activity, index) => (
-            <div key={index} className={`text-left p-1 rounded ${
-              activity.changePercent > 100 ? 'bg-red-900/30 text-red-300' : 'bg-yellow-900/30 text-yellow-300'
-            }`}>
-              {activity.message}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Historical Context */}
-      {!oiAnalysis.hasPreviousData && (
-        <div className="text-xs text-gray-500 mt-2">
-          First day of OI tracking
-        </div>
-      )}
-    </div>
-  );
-});
-OIAnalysisCard.displayName = 'OIAnalysisCard';
-
 const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysis?: ADAnalysis; marketStatus: MarketStatus }) => {
   if (!adAnalysis) {
     return (
@@ -578,7 +406,6 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
     );
   }
 
-  // Add safety checks for all values
   const signalIcon = getSignalIcon(adAnalysis.todaySignal || 'NEUTRAL');
   const strengthColor = getStrengthColor(adAnalysis.todayStrength || 'WEAK');
   const trendIcon = getTrendIcon(adAnalysis.trend || 'SIDEWAYS');
@@ -589,7 +416,6 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
   const confidence = adAnalysis.confidence || 'LOW';
   const interpretation = adAnalysis.interpretation || 'Analysis data not available';
 
-  // Use formatted lines if available, otherwise create them with safety checks
   const displayLines = adAnalysis.formattedLines || [
     `💰 Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} average`,
     `📊 20-Day Trend: ${trend}`,
@@ -1262,9 +1088,9 @@ export default function Home() {
                {/* Row 1 */}
               <SupportResistanceList type="Support" levels={results.supports} />
               <SupportResistanceList type="Resistance" levels={results.resistances} />
-              {/* OI Analysis Card - NEW */}
-              <OIAnalysisCard 
-                oiAnalysis={results.oiAnalysis}
+              {/* VWAP Analysis Card - REPLACED OI Flow Analysis */}
+              <VWAPAnalysisCard 
+                vwapAnalysis={results.vwapAnalysis}
               />
 
                 {/* Row 2 */}
@@ -1300,11 +1126,6 @@ export default function Home() {
                 />
                 <RSIAnalysisCard 
                   rsiAnalysis={results.rsiAnalysis}
-                />
-
-                {/* Row 4 */}
-                <VWAPAnalysisCard 
-                  vwapAnalysis={results.vwapAnalysis}
                 />
               </div>
             </div>
