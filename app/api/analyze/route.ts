@@ -858,20 +858,22 @@ function getFinalLevels(
   };
 }
 
-// UPDATED: Smart sentiment with OI strength score REMOVED
+// UPDATED: Smart sentiment with scoring breakdown for tooltip
 function calculateSmartSentiment(
   pcr: number,
   volumePcr: number,
+  highestPutOI: number,
+  highestCallOI: number,
   todayVolumePercentage: number,
   estimatedTodayVolume: number, 
   averageVolume: number, 
   adAnalysis?: ADAnalysis,
   vwapAnalysis?: VWAPAnalysis,
   isMarketOpen?: boolean,
-  changePercent?: number
+  changePercent?: number // ADD changePercent parameter
 ): { sentiment: string; score: number; breakdown: string[] } {
   console.log('🧠 SENTIMENT CALCULATION:', { 
-    pcr, volumePcr, todayVolumePercentage, changePercent 
+    pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent 
   });
   
   const breakdown: string[] = [];
@@ -890,7 +892,18 @@ function calculateSmartSentiment(
                       pcr <= 1.3 ? " (slightly bullish)" : " (bullish)";
   breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • OI PCR ${pcr.toFixed(2)}${oiPCRContext}`);
 
-  // 2. Volume PCR Modifier
+  // 2. Conviction Score
+  let convictionScore = 0;
+  if (highestPutOI > highestCallOI * 2) convictionScore = 2;
+  else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
+  else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
+  else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
+
+  const oiStrengthContext = convictionScore > 0 ? " (put walls stronger)" : 
+                           convictionScore < 0 ? " (call walls stronger)" : " (balanced OI)";
+  breakdown.push(`${convictionScore >= 0 ? '+' : ''}${convictionScore} • OI Strength${oiStrengthContext}`);
+
+  // 3. Volume PCR Modifier
   let volumeModifier = 0;
   if (volumePcr < 0.7) volumeModifier = 2;
   else if (volumePcr < 0.9) volumeModifier = 1;
@@ -904,7 +917,7 @@ function calculateSmartSentiment(
                         volumePcr <= 1.3 ? " (slightly bearish volume)" : " (bearish volume)";
   breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
 
-  // 3. A/D Line Analysis Score
+  // 4. A/D Line Analysis Score
   let adScore = 0;
   let adContext = "";
 
@@ -932,7 +945,7 @@ function calculateSmartSentiment(
 
   breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${adContext}`);
 
-  // 4. VWAP Score
+  // 5. VWAP Score
   let vwapScore = 0;
   let vwapContext = "";
 
@@ -961,12 +974,12 @@ function calculateSmartSentiment(
 
   breakdown.push(`${vwapScore >= 0 ? '+' : ''}${vwapScore} • VWAP Position${vwapContext}`);
 
-  // 5. Today's Volume Percentage Impact
+  // 6. Today's Volume Percentage Impact - IMPROVED LOGIC
   let volumePercentageScore = 0;
   let volumePercentageContext = "";
 
   // Calculate current sentiment before volume adjustment (excluding volume percentage)
-  const currentSentiment = pcrScore + volumeModifier + adScore + vwapScore;
+  const currentSentiment = pcrScore + convictionScore + volumeModifier + adScore + vwapScore;
 
   // Calculate estimated volume percentage for classification
   const estimatedVolumePercentage = (estimatedTodayVolume / averageVolume) * 100;
@@ -974,7 +987,7 @@ function calculateSmartSentiment(
   // Determine volume label and context
   const volumeLabel = isMarketOpen ? "Today Volume" : "Last Trading Volume";
 
-  // Score volume based on price-action confirmation
+  // IMPROVED: Score volume based on price-action confirmation
   const isPriceUp = changePercent && changePercent > 0.5; // Significant uptrend (>0.5%)
   const isPriceDown = changePercent && changePercent < -0.5; // Significant downtrend (<-0.5%)
 
@@ -1016,16 +1029,18 @@ function calculateSmartSentiment(
 
   // Define weights for each indicator (sum should be 1.0)
   const weights = {
-    oiPcr: 0.25,        // 25% (increased from 20%)
-    volumePcr: 0.20,    // 20% (increased from 15%)
-    adLine: 0.20,       // 20% (increased from 15%)
-    vwap: 0.25,         // 25% (increased from 20%)
-    volumePercent: 0.10, // 10% (same)
+    oiPcr: 0.20,        // 20%
+    oiStrength: 0.15,   // 15%  
+    volumePcr: 0.15,    // 15%
+    adLine: 0.15,       // 15%
+    vwap: 0.20,         // 20%
+    volumePercent: 0.10, // 10%
   };
 
   // Calculate weighted score (normalized to -10 to +10)
   const weightedScore = (
     (pcrScore * weights.oiPcr) +
+    (convictionScore * weights.oiStrength) +
     (volumeModifier * weights.volumePcr) +
     (adScore * weights.adLine) +
     (vwapScore * weights.vwap) +
@@ -1421,6 +1436,7 @@ export async function POST(request: Request) {
     const strikePrices = [...new Set(optionsChain.map(o => o.strike))].sort((a, b) => a - b);
     
     let totalCallOI = 0, totalPutOI = 0, totalCallVolume = 0, totalPutVolume = 0;
+    let highestCallOI = 0, highestPutOI = 0;
 
     console.log('📊 OPTIONS DATA - Processing strikes...');
     for (const strike of strikePrices) {
@@ -1435,6 +1451,9 @@ export async function POST(request: Request) {
         totalPutOI += pe_oi;
         totalCallVolume += ceLiveData?.volume || 0;
         totalPutVolume += peLiveData?.volume || 0;
+        
+        if (strike > ltp && ce_oi > highestCallOI) highestCallOI = ce_oi;
+        if (strike < ltp && pe_oi > highestPutOI) highestPutOI = pe_oi;
     }
 
     let pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
@@ -1510,10 +1529,12 @@ export async function POST(request: Request) {
     const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : 0;
     const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : 0;
     
-    // UPDATED: Sentiment calculation WITHOUT OI strength score
+    // UPDATED: Sentiment calculation with breakdown
     const sentimentResult = calculateSmartSentiment(
         pcr,
         volumePcr,
+        highestPutOI,
+        highestCallOI,
         volumeMetrics.todayVolumePercentage,
         volumeMetrics.estimatedTodayVolume, 
         volumeMetrics.avg20DayVolume,
