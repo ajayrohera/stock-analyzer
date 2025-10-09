@@ -976,6 +976,8 @@ function calculateSmartSentiment(
     pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent, historicalDataLength
   });
   
+  const dataLength = historicalDataLength || 0;
+
   const breakdown: string[] = [];
   
   // 1. PCR Score
@@ -1037,9 +1039,12 @@ function calculateSmartSentiment(
 
   // Enhanced A/D context for insufficient data
   let enhancedAdContext = adContext;
-  if (historicalDataLength && historicalDataLength < 10) {
-    enhancedAdContext = ` (${historicalDataLength}/10 days - limited data)`;
+  if (dataLength === 0) {
+    enhancedAdContext = " (new stock - data collection in progress)";
+  } else if (dataLength < 10) {
+    enhancedAdContext = ` (${dataLength}/10 days - limited data)`;
   }
+  // No message when sufficient data - just show the analysis result
 
   breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${enhancedAdContext}`);
 
@@ -1116,11 +1121,12 @@ function calculateSmartSentiment(
 
   // Enhanced volume context for new stocks
   let volumeDisplayContext = volumePercentageContext;
-  if (historicalDataLength === 0) {
+  if (dataLength === 0) {
     volumeDisplayContext = " (new stock - data collection in progress)";
-  } else if (historicalDataLength < 5) {
-    volumeDisplayContext = ` (${historicalDataLength}/5 days - limited data)`;
+  } else if (dataLength < 5) {
+    volumeDisplayContext = ` (${dataLength}/5 days - limited data)`;
   }
+  // No message when sufficient data - just show the volume analysis
 
   breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • ${volumeLabel} ${todayVolumePercentage.toFixed(1)}%${volumeDisplayContext}`);
 
@@ -1166,7 +1172,6 @@ function calculateSmartSentiment(
     breakdown
   };
 }
-
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
   console.log('🚀 API CALL STARTED ========================');
