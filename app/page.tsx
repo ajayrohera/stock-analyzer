@@ -1,4 +1,4 @@
-// app/page.tsx - UPDATED FRONTEND CODE (OI Flow Analysis removed)
+// app/page.tsx - UPDATED FRONTEND CODE (with insufficient data handling)
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -133,6 +133,18 @@ type AnalysisResult = {
   adAnalysis?: ADAnalysis;
   rsiAnalysis?: RSIAnalysis;
   vwapAnalysis?: VWAPAnalysis;
+  insufficientData?: boolean;
+  dataSufficiency?: {
+    isFullySufficient: boolean;
+    indicators: {
+      volume: { collected: number; required: number; isReady: boolean };
+      adAnalysis: { collected: number; required: number; isReady: boolean };
+      rsi: { collected: number; required: number; isReady: boolean };
+      vwap: { collected: number; required: number; isReady: boolean };
+      pcr: { collected: number; required: number; isReady: boolean };
+    };
+    totalDaysCollected: number;
+  };
 };
 
 type MarketStatus = 'OPEN' | 'PRE_MARKET' | 'CLOSED' | 'UNKNOWN';
@@ -783,6 +795,51 @@ const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: {
 ));
 PCRStatCard.displayName = 'PCRStatCard';
 
+const ProgressiveDataCard = React.memo(({ 
+  title, 
+  collected, 
+  required,
+  isReady,
+  children,
+  liveData = false
+}: { 
+  title: string;
+  collected: number;
+  required: number;
+  isReady: boolean;
+  children: React.ReactNode;
+  liveData?: boolean;
+}) => {
+  if (isReady) {
+    return (
+      <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px] border border-green-500/30">
+        <div className="flex items-center justify-center text-sm text-green-400 mb-2">
+          <CheckCircle2 size={16} className="mr-2" />
+          <span>{title} {liveData ? '✅ LIVE' : `✅ (${collected}/${required} days)`}</span>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px] border border-yellow-500/30">
+      <div className="flex items-center justify-center text-sm text-yellow-400 mb-2">
+        <span>{title} ({collected}/{required} days)</span>
+      </div>
+      <div className="text-red-400 text-sm font-semibold mb-2">
+        ❌ Need {required - collected} more day{required - collected !== 1 ? 's' : ''}
+      </div>
+      {collected > 0 && (
+        <div className="text-xs text-gray-400">
+          {Math.round((collected / required) * 100)}% complete
+        </div>
+      )}
+    </div>
+  );
+});
+ProgressiveDataCard.displayName = 'ProgressiveDataCard';
+
 // === MAIN COMPONENT ===
 export default function Home() {
   const [symbolList, setSymbolList] = useState<string[]>([]);
@@ -935,14 +992,56 @@ export default function Home() {
       }); 
       const data = await response.json(); 
       
-      if (!isAnalysisResult(data)) {
+      if (data.insufficientData || data.dataSufficiency?.isFullySufficient === false) {
+        setResults({
+          ...data,
+          insufficientData: true
+        });
+        const daysCollected = data.dataSufficiency?.totalDaysCollected || 0;
+        const readyIndicators = Object.values(data.dataSufficiency?.indicators || {}).filter((ind: any) => ind.isReady).length;
+        const totalIndicators = Object.values(data.dataSufficiency?.indicators || {}).length;
+        setApiError(`Data collection: ${daysCollected} days | ${readyIndicators}/${totalIndicators} indicators ready`);
+      } else if (!isAnalysisResult(data)) {
         console.error('❌ Validation failed. Data structure:', JSON.stringify(data, null, 2));
         throw new Error('Invalid response format from server.');
+      } else {
+        setResults(data); 
       }
       
-      setResults(data); 
       setLastRequestTime(currentTime); 
     } catch (error) { 
+      if (error instanceof Error && error.message.includes('INSUFFICIENT_DATA')) {
+        setApiError('New stock detected. Data collection in progress (0/5 days)');
+        setResults({
+          symbol: selectedSymbol,
+          pcr: 1.0,
+          volumePcr: 1.0,
+          maxPain: 0,
+          resistance: 0,
+          support: 0,
+          sentiment: 'NEUTRAL',
+          expiryDate: 'N/A',
+          ltp: 0,
+          lastRefreshed: new Date().toISOString(),
+          priceType: 'LTP',
+          supports: [],
+          resistances: [],
+          insufficientData: true,
+          dataSufficiency: {
+            isFullySufficient: false,
+            totalDaysCollected: 0,
+            indicators: {
+              volume: { collected: 0, required: 5, isReady: false },
+              adAnalysis: { collected: 0, required: 10, isReady: false },
+              rsi: { collected: 0, required: 14, isReady: false },
+              vwap: { collected: 1, required: 1, isReady: true },
+              pcr: { collected: 1, required: 1, isReady: true }
+            }
+          }
+        });
+        return;
+      }
+      
       const errorMap: { [key: string]: { type: string; message: string } } = { 
         TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
         SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
@@ -954,7 +1053,7 @@ export default function Home() {
         setIsLoading(false);
         setLoadingState('IDLE');
     }
-  }, [lastRequestTime, fetchWithRetry, addError]);
+  }, [lastRequestTime, fetchWithRetry, addError, selectedSymbol]);
 
   const handleAnalyze = useCallback(() => { 
     if (isLoading) return; 
@@ -1059,6 +1158,20 @@ export default function Home() {
             <div className="bg-brand-light-dark/50 backdrop-blur-sm border border-white/10 p-6 rounded-xl shadow-2xl text-left animate-fade-in">
               <div className="text-center mb-6">
                 <h2 className="text-3xl font-bold text-white">Analysis for <span className="text-brand-cyan">{results.symbol}</span></h2>
+                
+                {results.insufficientData && (
+                  <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-4 mb-4">
+                    <div className="flex items-center justify-center text-yellow-300">
+                      <AlertTriangle size={20} className="mr-2" />
+                      <span className="font-semibold">New Stock - Data Collection In Progress</span>
+                    </div>
+                    <p className="text-yellow-200 text-sm mt-2 text-center">
+                      {results.dataSufficiency?.totalDaysCollected || 0} days collected. 
+                      Basic indicators available. Advanced analysis unlocking progressively.
+                    </p>
+                  </div>
+                )}
+                
                 <p className="text-gray-400 text-sm">
                   Expiry Date: {results.expiryDate}
                 </p>
@@ -1088,45 +1201,96 @@ export default function Home() {
                {/* Row 1 */}
               <SupportResistanceList type="Support" levels={results.supports} />
               <SupportResistanceList type="Resistance" levels={results.resistances} />
-              {/* VWAP Analysis Card - REPLACED OI Flow Analysis */}
-              <VWAPAnalysisCard 
-                vwapAnalysis={results.vwapAnalysis}
-              />
+              
+              {/* VWAP Analysis - LIVE data */}
+              <ProgressiveDataCard 
+                title="📊 VWAP Analysis"
+                collected={results.dataSufficiency?.indicators.vwap.collected || 1}
+                required={results.dataSufficiency?.indicators.vwap.required || 1}
+                isReady={true}
+                liveData={true}
+              >
+                <VWAPAnalysisCard vwapAnalysis={results.vwapAnalysis} />
+              </ProgressiveDataCard>
 
                 {/* Row 2 */}
-                <PCRStatCard 
-                  title="OI PCR Ratio" 
-                  value={results.pcr} 
-                  sentiment={oiPcrSentiment?.sentiment} 
-                  sentimentColor={oiPcrSentiment?.color} 
-                />
-                <PCRStatCard 
-                  title="Volume PCR" 
-                  value={results.volumePcr} 
-                  sentiment={volumePcrSentiment?.sentiment} 
-                  sentimentColor={volumePcrSentiment?.color} 
-                />
-                <VolumeCard 
-                  avg20DayVolume={results.avg20DayVolume}
-                  todayVolumePercentage={results.todayVolumePercentage}
-                  estimatedTodayVolume={results.estimatedTodayVolume}
-                  marketStatus={marketStatus}
-                  symbol={results.symbol}
-                />
+                {/* PCR Values - LIVE data */}
+                <ProgressiveDataCard 
+                  title="📊 PCR Values"
+                  collected={results.dataSufficiency?.indicators.pcr.collected || 1}
+                  required={results.dataSufficiency?.indicators.pcr.required || 1}
+                  isReady={true}
+                  liveData={true}
+                >
+                  <PCRStatCard 
+                    title="OI PCR Ratio" 
+                    value={results.pcr} 
+                    sentiment={oiPcrSentiment?.sentiment} 
+                    sentimentColor={oiPcrSentiment?.color} 
+                  />
+                </ProgressiveDataCard>
+
+                <ProgressiveDataCard 
+                  title="📊 Volume PCR"
+                  collected={results.dataSufficiency?.indicators.pcr.collected || 1}
+                  required={results.dataSufficiency?.indicators.pcr.required || 1}
+                  isReady={true}
+                  liveData={true}
+                >
+                  <PCRStatCard 
+                    title="Volume PCR" 
+                    value={results.volumePcr} 
+                    sentiment={volumePcrSentiment?.sentiment} 
+                    sentimentColor={volumePcrSentiment?.color} 
+                  />
+                </ProgressiveDataCard>
+
+                {/* Volume Analysis - Progressive */}
+                <ProgressiveDataCard 
+                  title="📊 Volume Analysis"
+                  collected={results.dataSufficiency?.indicators.volume.collected || 0}
+                  required={results.dataSufficiency?.indicators.volume.required || 5}
+                  isReady={results.dataSufficiency?.indicators.volume.isReady || false}
+                >
+                  <VolumeCard 
+                    avg20DayVolume={results.avg20DayVolume}
+                    todayVolumePercentage={results.todayVolumePercentage}
+                    estimatedTodayVolume={results.estimatedTodayVolume}
+                    marketStatus={marketStatus}
+                    symbol={results.symbol}
+                  />
+                </ProgressiveDataCard>
 
                 {/* Row 3 */}
+                {/* Max Pain - Always available */}
                 <DataCard 
                   title="Max Pain" 
                   value={results.maxPain} 
                   tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."
                 />
-                <ADLineAnalysisCard 
-                  adAnalysis={results.adAnalysis}
-                  marketStatus={marketStatus}
-                />
-                <RSIAnalysisCard 
-                  rsiAnalysis={results.rsiAnalysis}
-                />
+                
+                {/* A/D Analysis - Progressive */}
+                <ProgressiveDataCard 
+                  title="📊 A/D Analysis"
+                  collected={results.dataSufficiency?.indicators.adAnalysis.collected || 0}
+                  required={results.dataSufficiency?.indicators.adAnalysis.required || 10}
+                  isReady={results.dataSufficiency?.indicators.adAnalysis.isReady || false}
+                >
+                  <ADLineAnalysisCard 
+                    adAnalysis={results.adAnalysis}
+                    marketStatus={marketStatus}
+                  />
+                </ProgressiveDataCard>
+
+                {/* RSI Analysis - Progressive */}
+                <ProgressiveDataCard 
+                  title="📊 RSI Analysis"
+                  collected={results.dataSufficiency?.indicators.rsi.collected || 0}
+                  required={results.dataSufficiency?.indicators.rsi.required || 14}
+                  isReady={results.dataSufficiency?.indicators.rsi.isReady || false}
+                >
+                  <RSIAnalysisCard rsiAnalysis={results.rsiAnalysis} />
+                </ProgressiveDataCard>
               </div>
             </div>
           )}

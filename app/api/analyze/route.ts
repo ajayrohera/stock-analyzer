@@ -1380,6 +1380,26 @@ export async function POST(request: Request) {
     
     const changePercent = calculateChangePercent(ltp, historicalData, 'CMP');
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical,hours,minutes);
+
+    // === ADD DATA SUFFICIENCY CHECK ===
+const dataSufficiency = {
+    volumeAnalysis: historicalData.length >= 5,
+    adAnalysis: historicalData.length >= 10,
+    rsiAnalysis: historicalData.length >= 14,
+    vwapAnalysis: historicalData.length >= 1, // VWAP works with current day
+    daysCollected: historicalData.length,
+    volumeRequired: 5,
+    adRequired: 10,
+    rsiRequired: 14
+};
+
+console.log('📊 DATA SUFFICIENCY CHECK:', {
+    daysCollected: historicalData.length,
+    volumeAnalysis: dataSufficiency.volumeAnalysis ? 'READY' : `NEEDS ${5 - historicalData.length} MORE DAYS`,
+    adAnalysis: dataSufficiency.adAnalysis ? 'READY' : `NEEDS ${10 - historicalData.length} MORE DAYS`,
+    rsiAnalysis: dataSufficiency.rsiAnalysis ? 'READY' : `NEEDS ${14 - historicalData.length} MORE DAYS`
+});
+// === END DATA SUFFICIENCY CHECK ===
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
       ...volumeMetrics,
@@ -1715,6 +1735,7 @@ export async function POST(request: Request) {
         avg20DayVolume: volumeMetrics.avg20DayVolume,
         todayVolumePercentage: volumeMetrics.todayVolumePercentage,
         estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
+        dataSufficiency: dataSufficiency,
         expiryDate: formattedExpiry,
         sentiment: sentimentResult.sentiment,
         sentimentScore: sentimentResult.score,
