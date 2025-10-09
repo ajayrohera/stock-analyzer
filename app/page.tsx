@@ -1163,7 +1163,7 @@ export default function Home() {
                 <h2 className="text-3xl font-bold text-white">Analysis for <span className="text-brand-cyan">{results.symbol}</span></h2>
                 
                 {results.insufficientData && (
-                  <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-4 mb-4">
+                  <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-4 mb-4 mt-4">
                     <div className="flex items-center justify-center text-yellow-300">
                       <AlertTriangle size={20} className="mr-2" />
                       <span className="font-semibold">New Stock - Data Collection In Progress</span>
