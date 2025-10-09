@@ -1219,7 +1219,7 @@ export default function Home() {
                 {/* Row 2 */}
                 {/* PCR Values - LIVE data */}
                 <ProgressiveDataCard 
-                  title="📊 PCR Values"
+                  title="📊 OI PCR"
                   collected={results.dataSufficiency?.indicators.pcr.collected || 1}
                   required={results.dataSufficiency?.indicators.pcr.required || 1}
                   isReady={true}
