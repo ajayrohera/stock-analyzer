@@ -993,6 +993,7 @@ export default function Home() {
         body: JSON.stringify({ symbol: symbolToAnalyze }), 
       }); 
       const data = await response.json(); 
+      console.log('🔍 DATA SUFFICIENCY DEBUG:', data.dataSufficiency);
       console.log('🔍 RAW API RESPONSE:', JSON.stringify(data, null, 2));
       if (data.insufficientData || data.dataSufficiency?.isFullySufficient === false) {
         setResults({
