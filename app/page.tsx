@@ -815,7 +815,7 @@ const ProgressiveDataCard = React.memo(({
       <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px] border border-green-500/30">
         <div className="flex items-center justify-center text-sm text-green-400 mb-2">
           <CheckCircle2 size={16} className="mr-2" />
-          <span>{title} {liveData ? '✅ LIVE' : `✅ (${collected}/${required} days)`}</span>
+          <span>{title} {liveData ? '✅ LIVE' : `✅`}</span>
         </div>
         {children}
       </div>
