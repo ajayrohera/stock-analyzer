@@ -1,4 +1,4 @@
-// app/page.tsx - UPDATED FRONTEND CODE (with insufficient data handling).
+// app/page.tsx - UPDATED FRONTEND CODE (with insufficient data handling)
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -991,7 +991,7 @@ export default function Home() {
         body: JSON.stringify({ symbol: symbolToAnalyze }), 
       }); 
       const data = await response.json(); 
-      
+      console.log('🔍 RAW API RESPONSE:', JSON.stringify(data, null, 2));
       if (data.insufficientData || data.dataSufficiency?.isFullySufficient === false) {
         setResults({
           ...data,
