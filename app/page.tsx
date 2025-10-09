@@ -825,7 +825,7 @@ const ProgressiveDataCard = React.memo(({
   return (
     <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px] border border-yellow-500/30">
       <div className="flex items-center justify-center text-sm text-yellow-400 mb-2">
-        <span>{title} ({isReady ? "✅ Ready" : `${collected}/${required} days`})</span>
+        <span>{title} {!isReady && `(${collected}/${required} days)`}</span>
       </div>
       {!isReady && (
       <div className="text-red-400 text-sm font-semibold mb-2">
