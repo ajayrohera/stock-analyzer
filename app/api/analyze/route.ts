@@ -993,14 +993,6 @@ function calculateSmartSentiment(
 
   // 2. Conviction Score - REMOVED as requested (call wall line)
   let convictionScore = 0;
-  // if (highestPutOI > highestCallOI * 2) convictionScore = 2;
-  // else if (highestPutOI > highestCallOI * 1.2) convictionScore = 1;
-  // else if (highestCallOI > highestPutOI * 2) convictionScore = -2;
-  // else if (highestCallOI > highestPutOI * 1.2) convictionScore = -1;
-
-  // const oiStrengthContext = convictionScore > 0 ? " (put walls stronger)" : 
-  //                          convictionScore < 0 ? " (call walls stronger)" : " (balanced OI)";
-  // breakdown.push(`${convictionScore >= 0 ? '+' : ''}${convictionScore} • OI Strength${oiStrengthContext}`);
 
   // 3. Volume PCR Modifier
   let volumeModifier = 0;
@@ -1382,24 +1374,46 @@ export async function POST(request: Request) {
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical,hours,minutes);
 
     // === ADD DATA SUFFICIENCY CHECK ===
-const dataSufficiency = {
-    volumeAnalysis: historicalData.length >= 5,
-    adAnalysis: historicalData.length >= 10,
-    rsiAnalysis: historicalData.length >= 14,
-    vwapAnalysis: historicalData.length >= 1, // VWAP works with current day
-    daysCollected: historicalData.length,
-    volumeRequired: 5,
-    adRequired: 10,
-    rsiRequired: 14
-};
+    const historicalDataLength = historicalData.length;
+    const dataSufficiency = {
+        isFullySufficient: historicalDataLength >= 14,
+        totalDaysCollected: historicalDataLength,
+        indicators: {
+            volume: { 
+                collected: historicalDataLength, 
+                required: 5, 
+                isReady: historicalDataLength >= 5 
+            },
+            adAnalysis: { 
+                collected: historicalDataLength, 
+                required: 10, 
+                isReady: historicalDataLength >= 10 
+            },
+            rsi: { 
+                collected: historicalDataLength, 
+                required: 14, 
+                isReady: historicalDataLength >= 14 
+            },
+            vwap: { 
+                collected: Math.max(historicalDataLength, 1), 
+                required: 1, 
+                isReady: true
+            },
+            pcr: { 
+                collected: Math.max(historicalDataLength, 1), 
+                required: 1, 
+                isReady: true
+            }
+        }
+    };
 
-console.log('📊 DATA SUFFICIENCY CHECK:', {
-    daysCollected: historicalData.length,
-    volumeAnalysis: dataSufficiency.volumeAnalysis ? 'READY' : `NEEDS ${5 - historicalData.length} MORE DAYS`,
-    adAnalysis: dataSufficiency.adAnalysis ? 'READY' : `NEEDS ${10 - historicalData.length} MORE DAYS`,
-    rsiAnalysis: dataSufficiency.rsiAnalysis ? 'READY' : `NEEDS ${14 - historicalData.length} MORE DAYS`
-});
-// === END DATA SUFFICIENCY CHECK ===
+    console.log('📊 DATA SUFFICIENCY CHECK:', {
+        daysCollected: historicalDataLength,
+        volumeAnalysis: dataSufficiency.indicators.volume.isReady ? 'READY' : `NEEDS ${5 - historicalDataLength} MORE DAYS`,
+        adAnalysis: dataSufficiency.indicators.adAnalysis.isReady ? 'READY' : `NEEDS ${10 - historicalDataLength} MORE DAYS`,
+        rsiAnalysis: dataSufficiency.indicators.rsi.isReady ? 'READY' : `NEEDS ${14 - historicalDataLength} MORE DAYS`
+    });
+    // === END DATA SUFFICIENCY CHECK ===
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
       ...volumeMetrics,
@@ -1736,6 +1750,7 @@ console.log('📊 DATA SUFFICIENCY CHECK:', {
         todayVolumePercentage: volumeMetrics.todayVolumePercentage,
         estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
         dataSufficiency: dataSufficiency,
+        insufficientData: !dataSufficiency.isFullySufficient,
         expiryDate: formattedExpiry,
         sentiment: sentimentResult.sentiment,
         sentimentScore: sentimentResult.score,
@@ -1849,7 +1864,6 @@ console.log('📊 DATA SUFFICIENCY CHECK:', {
             formattedLines: [
                 `💰 Current VWAP: ₹${vwapAnalysis.value?.toFixed(2) || 'Calculating...'}`,
                 `📈 LTP vs VWAP: ${vwapAnalysis.deviationPercent >= 0 ? '+' : ''}${vwapAnalysis.deviationPercent.toFixed(2)}% ${vwapAnalysis.deviationPercent > 0 ? 'ABOVE' : vwapAnalysis.deviationPercent < 0 ? 'BELOW' : 'AT'}`,
-                                `📈 LTP vs VWAP: ${vwapAnalysis.deviationPercent >= 0 ? '+' : ''}${vwapAnalysis.deviationPercent.toFixed(2)}% ${vwapAnalysis.deviationPercent > 0 ? 'ABOVE' : vwapAnalysis.deviationPercent < 0 ? 'BELOW' : 'AT'}`,
                 `📦 Cumulative Volume: ${(vwapAnalysis.cumulativeVolume / 1000).toFixed(1)}K shares`,
                 `🎯 Signal: ${vwapAnalysis.signal} ${vwapAnalysis.strength !== 'WEAK' ? `(${vwapAnalysis.strength})` : ''}`,
                 ``,
