@@ -1,4 +1,4 @@
-// app/page.tsx - UPDATED FRONTEND CODE (with insufficient data handling)
+// app/page.tsx - UPDATED FRONTEND CODE (with insufficient data handling).
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
