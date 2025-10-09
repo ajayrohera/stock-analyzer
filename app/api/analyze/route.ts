@@ -969,10 +969,11 @@ function calculateSmartSentiment(
   adAnalysis?: ADAnalysis,
   vwapAnalysis?: VWAPAnalysis,
   isMarketOpen?: boolean,
-  changePercent?: number
+  changePercent?: number,
+  historicalDataLength?: number
 ): { sentiment: string; score: number; breakdown: string[] } {
   console.log('🧠 SENTIMENT CALCULATION:', { 
-    pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent 
+    pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent, historicalDataLength
   });
   
   const breakdown: string[] = [];
@@ -1034,7 +1035,13 @@ function calculateSmartSentiment(
     adContext = " (data unavailable)";
   }
 
-  breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${adContext}`);
+  // Enhanced A/D context for insufficient data
+  let enhancedAdContext = adContext;
+  if (historicalDataLength && historicalDataLength < 10) {
+    enhancedAdContext = ` (${historicalDataLength}/10 days - limited data)`;
+  }
+
+  breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${enhancedAdContext}`);
 
   // 5. VWAP Score
   let vwapScore = 0;
@@ -1107,7 +1114,15 @@ function calculateSmartSentiment(
       ` (moderate volume)`;
   }
 
-  breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • ${volumeLabel} ${todayVolumePercentage.toFixed(1)}%${volumePercentageContext}`);
+  // Enhanced volume context for new stocks
+  let volumeDisplayContext = volumePercentageContext;
+  if (historicalDataLength === 0) {
+    volumeDisplayContext = " (new stock - data collection in progress)";
+  } else if (historicalDataLength < 5) {
+    volumeDisplayContext = ` (${historicalDataLength}/5 days - limited data)`;
+  }
+
+  breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • ${volumeLabel} ${todayVolumePercentage.toFixed(1)}%${volumeDisplayContext}`);
 
   // Define weights for each indicator (sum should be 1.0)
   const weights = {
@@ -1291,10 +1306,12 @@ export async function POST(request: Request) {
     }
 
     const historicalData = await getHistoricalData(displayName);
+    const historicalDataLength = historicalData.length;
+    
     console.log('🔍 VOLUME DATA SOURCE DEBUG:', {
   symbol: displayName,
-  historicalEntries: historicalData.length,
-  latestHistorical: historicalData.length > 0 ? historicalData[0] : null,
+  historicalEntries: historicalDataLength,
+  latestHistorical: historicalDataLength > 0 ? historicalData[0] : null,
   currentVolume: currentVolume,
   isMarketOpen: isMarketOpen
 });
@@ -1306,10 +1323,10 @@ export async function POST(request: Request) {
         isMarketOpen,
         isTradingDay,
         shouldUseHistorical,
-        historicalDataLength: historicalData.length
+        historicalDataLength: historicalDataLength
     });
 
-    if (shouldUseHistorical && historicalData.length > 0) {
+    if (shouldUseHistorical && historicalDataLength > 0) {
         console.log('🔄 Using historical data fallback for non-market hours');
         
         const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -1338,7 +1355,7 @@ export async function POST(request: Request) {
         }
     }
 
-    if (ltp === 0 && historicalData.length > 0) {
+    if (ltp === 0 && historicalDataLength > 0) {
         const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         const latestWithPrice = sortedHistorical.find(entry => entry.lastPrice && entry.lastPrice > 0);
         
@@ -1364,9 +1381,9 @@ export async function POST(request: Request) {
     });
 
     console.log('🔍 ANALYSIS DEBUG - Historical data for', displayName, ':', {
-      length: historicalData.length,
+      length: historicalDataLength,
       sample: historicalData.slice(0, 3),
-      hasData: historicalData.length > 0,
+      hasData: historicalDataLength > 0,
       hasVolume: historicalData.filter(entry => entry.totalVolume > 0).length
     });
     
@@ -1374,7 +1391,6 @@ export async function POST(request: Request) {
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical,hours,minutes);
 
     // === ADD DATA SUFFICIENCY CHECK ===
-    const historicalDataLength = historicalData.length;
     const dataSufficiency = {
         isFullySufficient: historicalDataLength >= 14,
         totalDaysCollected: historicalDataLength,
@@ -1436,8 +1452,8 @@ export async function POST(request: Request) {
         };
         
         console.log('📊 A/D ANALYSIS - Using live OHLC data:', todayData);
-      } else if (historicalData.length > 0) {
-        const latestHistorical = historicalData[historicalData.length - 1];
+      } else if (historicalDataLength > 0) {
+        const latestHistorical = historicalData[historicalDataLength - 1];
         if (latestHistorical && latestHistorical.lastPrice && latestHistorical.lastPrice > 0) {
           todayData = {
             high: latestHistorical.lastPrice,
@@ -1452,11 +1468,11 @@ export async function POST(request: Request) {
       console.log('📊 A/D ANALYSIS - Data prepared:', {
         hasTodayData: !!todayData,
         todayData,
-        historicalDataLength: historicalData.length,
+        historicalDataLength: historicalDataLength,
         hasValidOHLC: todayOHLC ? (todayOHLC.high > 0 && todayOHLC.low > 0) : false
       });
 
-      if (historicalData.length >= 1) {
+      if (historicalDataLength >= 1) {
         adAnalysis = generateADAnalysis(displayName.toUpperCase(), historicalData, todayData);
         
         if (adAnalysis.todayMoneyFlow === 0) {
@@ -1648,7 +1664,8 @@ export async function POST(request: Request) {
         adAnalysis,
         vwapAnalysis,
         isMarketOpen,
-        changePercent
+        changePercent,
+        historicalDataLength
     );
     
     console.log('📊 MAX PAIN - Calculating...');
