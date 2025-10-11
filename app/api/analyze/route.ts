@@ -840,9 +840,10 @@ async function findSupportLevels(
   console.log('🔍 OI Supports found:', candidates.map(c => `${c.price} (${c.strength})`));
   if (candidates.length === 0) return [];
   
-  candidates.sort((a, b) => (optionsByStrike[b.price]?.pe_oi || 0) - (optionsByStrike[a.price]?.pe_oi || 0));
+  // Sort by proximity to current price (nearest first)
+  candidates.sort((a, b) => Math.abs(currentPrice - b.price) - Math.abs(currentPrice - a.price));
   const significantLevels = candidates.slice(0, 5);
-  return significantLevels.sort((a, b) => b.price - a.price);
+  return significantLevels.sort((a, b) => b.price - a.price); // Highest support first (nearest to current price)
 }
 
 // ENHANCED: Resistance Levels with OI Trend Analysis
@@ -900,10 +901,11 @@ async function findResistanceLevels(
     return [];
   }
   
-  candidates.sort((a, b) => (optionsByStrike[b.price]?.ce_oi || 0) - (optionsByStrike[a.price]?.ce_oi || 0));
+  // Sort by proximity to current price (nearest first)
+  candidates.sort((a, b) => Math.abs(currentPrice - a.price) - Math.abs(currentPrice - b.price));
   const significantLevels = candidates.slice(0, 5);
   console.log(`🔍 RESISTANCE LEVELS: Found ${significantLevels.length} significant levels`);
-  return significantLevels.sort((a, b) => a.price - b.price);
+  return significantLevels.sort((a, b) => a.price - b.price); // Lowest resistance first (nearest to current price)
 }
 
 function calculateSupportResistance(history: HistoricalData[], currentPrice: number): SupportResistanceLevel[] {
@@ -968,7 +970,7 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   return levels.slice(0, 10);
 }
 
-// ENHANCED: Get Final Levels with Enhanced Data
+// UPDATED: Get Final Levels - OI-ONLY with Nearest Levels First
 async function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -981,122 +983,22 @@ async function getFinalLevels(
   console.log('Symbol:', symbol);
   console.log('Current Price:', currentPrice);
   
-  const allSupports: EnhancedSupportResistanceLevel[] = [];
-  const allResistances: EnhancedSupportResistanceLevel[] = [];
-  
-  const addLevel = (levelToAdd: EnhancedSupportResistanceLevel, list: EnhancedSupportResistanceLevel[]) => {
-    if (!list.some(existingLevel => existingLevel.price === levelToAdd.price)) {
-      list.push(levelToAdd);
-    }
-  };
-
+  // Use only OI-based levels
   console.log('📊 OI-BASED SUPPORT ANALYSIS:');
   const oiSupports = await findSupportLevels(currentPrice, optionsByStrike, allStrikes, symbol);
   console.log('OI Supports found:', oiSupports.map(s => `${s.price} (${s.strength})`));
-  oiSupports.forEach(l => addLevel(l, allSupports));
   
-  console.log('📊 HISTORICAL SUPPORT ANALYSIS:');
-  const historicalLevels = calculateSupportResistance(history, currentPrice);
-  const historicalSupports = historicalLevels.filter(l => l.type === 'support');
-  console.log('Historical Supports found:', historicalSupports.map(s => `${s.price} (${s.strength})`));
-  
-  historicalSupports.forEach(l => {
-    const strikeOI = optionsByStrike[l.price];
-    
-    // Create a formatted tooltip similar to OI-based levels
-    let formattedTooltip = 'Historical Volume Level';
-    if (strikeOI) {
-      formattedTooltip = `PE: ${(strikeOI.pe_oi / 100000).toFixed(1)}L, CE: ${(strikeOI.ce_oi / 100000).toFixed(1)}L | Historical Level (${l.strength})`;
-    } else {
-      formattedTooltip = `Historical Volume Level (${l.strength})`;
-    }
-    
-    addLevel({ 
-      ...l, 
-      tooltip: formattedTooltip, // Override the tooltip
-      currentOI: strikeOI ? { ce_oi: strikeOI.ce_oi, pe_oi: strikeOI.pe_oi } : undefined,
-      oiTrend: undefined 
-    }, allSupports);
-  });
-  
-  console.log('📊 PSYCHOLOGICAL LEVELS:');
-  const psychLevels = getPsychologicalLevels(symbol, currentPrice);
-  const psychSupports = psychLevels.filter(price => price < currentPrice)
-    .map(price => { 
-      const strikeOI = optionsByStrike[price];
-      let tooltip = 'Psychological Level';
-      
-      if (strikeOI) {
-        tooltip = `PE: ${(strikeOI.pe_oi / 100000).toFixed(1)}L, CE: ${(strikeOI.ce_oi / 100000).toFixed(1)}L | Psychological Level`;
-      }
-      
-      return {
-        price, 
-        strength: 'medium' as const, 
-        type: 'support' as const, 
-        tooltip,
-        currentOI: strikeOI ? { ce_oi: strikeOI.ce_oi, pe_oi: strikeOI.pe_oi } : undefined,
-        oiTrend: undefined
-      };
-    });
-  console.log('Psychological Supports found:', psychSupports.map(s => `${s.price} (${s.strength})`));
-  psychSupports.forEach(l => addLevel(l, allSupports));
-  
-  console.log('📊 ALL SUPPORTS BEFORE DEDUPE:');
-  allSupports.forEach((support, index) => {
-    console.log(`  ${index + 1}. ${support.price} - ${support.strength} - ${support.tooltip}`);
-  });
-  
-  const uniqueSupports = allSupports.filter((support, index, array) => 
-    index === array.findIndex(s => s.price === support.price)
-  );
-  
-  const finalSupports = uniqueSupports
-    .sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice))
-    .slice(0, 2);
-  
-  console.log('🎯 FINAL SUPPORTS:', finalSupports.map(s => `${s.price} (${s.strength})`));
-  console.log('====================================');
-  
+  console.log('📊 OI-BASED RESISTANCE ANALYSIS:');
   const oiResistances = await findResistanceLevels(currentPrice, optionsByStrike, allStrikes, symbol);
-  oiResistances.forEach(l => addLevel(l, allResistances));
-  
-  const historicalResistances = historicalLevels.filter(l => l.type === 'resistance');
-  historicalResistances.forEach(l => {
-    const strikeOI = optionsByStrike[l.price];
-    let formattedTooltip = 'Historical Volume Level';
-    if (strikeOI) {
-      formattedTooltip = `CE: ${(strikeOI.ce_oi / 100000).toFixed(1)}L, PE: ${(strikeOI.pe_oi / 100000).toFixed(1)}L | Historical Level (${l.strength})`;
-    } else {
-      formattedTooltip = `Historical Volume Level (${l.strength})`;
-    }
-    addLevel({ ...l, tooltip: formattedTooltip, currentOI: undefined, oiTrend: undefined }, allResistances);
-  });
-  
-  const psychResistances = psychLevels.filter(price => price > currentPrice)
-    .map(price => { 
-      const strikeOI = optionsByStrike[price];
-      let tooltip = 'Psychological Level';
-      
-      if (strikeOI) {
-        tooltip = `CE: ${(strikeOI.ce_oi / 100000).toFixed(1)}L, PE: ${(strikeOI.pe_oi / 100000).toFixed(1)}L | Psychological Level`;
-      }
-      
-      return {
-        price, 
-        strength: 'medium' as const, 
-        type: 'resistance' as const, 
-        tooltip,
-        currentOI: strikeOI ? { ce_oi: strikeOI.ce_oi, pe_oi: strikeOI.pe_oi } : undefined,
-        oiTrend: undefined
-      };
-    });
-  psychResistances.forEach(l => addLevel(l, allResistances));
+  console.log('OI Resistances found:', oiResistances.map(r => `${r.price} (${r.strength})`));
 
-  const finalResistances = allResistances
-    .filter((resistance, index, array) => index === array.findIndex(r => r.price === resistance.price))
-    .sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice))
-    .slice(0, 2);
+  // Take top 2 levels each (already sorted by proximity)
+  const finalSupports = oiSupports.slice(0, 2);
+  const finalResistances = oiResistances.slice(0, 2);
+  
+  console.log('🎯 FINAL SUPPORTS (Nearest First):', finalSupports.map(s => `${s.price} (${s.strength})`));
+  console.log('🎯 FINAL RESISTANCES (Nearest First):', finalResistances.map(r => `${r.price} (${r.strength})`));
+  console.log('====================================');
 
   return {
     supports: finalSupports,
