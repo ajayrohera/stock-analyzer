@@ -87,6 +87,47 @@ async function getRedisData(key: string): Promise<string | null> {
   }
 }
 
+// ADDED: Store OI data in Redis
+async function storeOIData(symbol: string, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>): Promise<void> {
+  const client = createClient({ url: process.env.REDIS_URL });
+  try {
+    await client.connect();
+    
+    const oiHistoryKey = `oi_history_${symbol.toUpperCase()}`;
+    const timestamp = new Date().toISOString();
+    
+    // Get existing OI history
+    const existingData = await client.get(oiHistoryKey);
+    const oiHistory = existingData ? JSON.parse(existingData) : {};
+    
+    // Add new OI data with timestamp
+    oiHistory[timestamp] = {};
+    
+    for (const [strike, oiData] of Object.entries(optionsByStrike)) {
+      oiHistory[timestamp][strike] = {
+        ce_oi: oiData.ce_oi,
+        pe_oi: oiData.pe_oi
+      };
+    }
+    
+    // Keep only last 30 days of data to prevent Redis from growing too large
+    const timestamps = Object.keys(oiHistory).sort();
+    if (timestamps.length > 30) {
+      const oldestTimestamps = timestamps.slice(0, timestamps.length - 30);
+      oldestTimestamps.forEach(oldTimestamp => {
+        delete oiHistory[oldTimestamp];
+      });
+    }
+    
+    await client.set(oiHistoryKey, JSON.stringify(oiHistory), { EX: 2592000 }); // 30 days expiry
+    console.log(`💾 OI data stored for ${symbol} with ${Object.keys(oiHistory).length} timestamps`);
+  } catch (error) {
+    console.error('❌ Error storing OI data:', error);
+  } finally {
+    await client.quit().catch(err => console.error('Redis quit error:', err));
+  }
+}
+
 // ADDED: Store VWAP data in Redis
 async function storeVWAPData(symbol: string, vwapData: any): Promise<void> {
   const client = createClient({ url: process.env.REDIS_URL });
@@ -644,24 +685,64 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   return result;
 }
 
-// NEW: Calculate OI Trend Analysis
-function calculateOITrend(mainOI: number, oppositeOI: number, ratio: number, type: 'support' | 'resistance'): {
+// NEW: Calculate actual OI change from historical data
+async function getOIChangePercent(strike: number, currentOI: number, instrumentType: 'CE' | 'PE', symbol: string): Promise<number | null> {
+  try {
+    // Try to get previous OI data from Redis
+    const oiHistoryKey = `oi_history_${symbol.toUpperCase()}`;
+    const oiHistoryData = await getRedisData(oiHistoryKey);
+    
+    if (oiHistoryData) {
+      const oiHistory: Record<string, Record<string, { ce_oi: number; pe_oi: number }>> = JSON.parse(oiHistoryData);
+      
+      // Get the most recent previous timestamp (excluding current minute if exists)
+      const timestamps = Object.keys(oiHistory).sort();
+      if (timestamps.length >= 2) {
+        const previousTimestamp = timestamps[timestamps.length - 2]; // Second most recent
+        const previousOI = oiHistory[previousTimestamp]?.[strike]?.[instrumentType.toLowerCase() as 'ce_oi' | 'pe_oi'];
+        
+        if (previousOI && previousOI > 0 && currentOI > 0) {
+          const changePercent = ((currentOI - previousOI) / previousOI) * 100;
+          console.log(`📊 OI CHANGE: ${symbol} ${strike}${instrumentType} - ${previousOI} → ${currentOI} = ${changePercent.toFixed(1)}%`);
+          return changePercent;
+        }
+      }
+    }
+    
+    // No historical data available
+    console.log(`📊 OI CHANGE: No historical data for ${symbol} ${strike}${instrumentType}`);
+    return null;
+  } catch (error) {
+    console.error('❌ Error calculating OI change:', error);
+    return null;
+  }
+}
+
+// UPDATED: OI Trend Analysis with actual change calculation
+async function calculateOITrend(
+  mainOI: number, 
+  oppositeOI: number, 
+  ratio: number, 
+  type: 'support' | 'resistance',
+  strike: number,
+  symbol: string
+): Promise<{
   direction: 'BUILDING' | 'DECLINING' | 'STABLE';
   changePercent: number;
   significance: 'LOW' | 'MEDIUM' | 'HIGH';
   icon: string;
-} {
-  const baseChange = Math.random() * 40 - 10;
-  let changePercent = baseChange;
+} | null> {
+  // Determine which OI to track changes for
+  const instrumentType = type === 'support' ? 'PE' : 'CE';
+  const oiToTrack = type === 'support' ? mainOI : mainOI;
   
-  if (ratio > 3) changePercent += 15;
-  else if (ratio > 2) changePercent += 8;
-  else if (ratio > 1.5) changePercent += 3;
+  // Calculate actual change percent
+  const changePercent = await getOIChangePercent(strike, oiToTrack, instrumentType, symbol);
   
-  if (mainOI > 1000000) changePercent += 10;
-  else if (mainOI > 500000) changePercent += 5;
-  
-  changePercent = Math.min(Math.max(changePercent, -20), 50);
+  // If no historical data available, return null to indicate no trend analysis
+  if (changePercent === null) {
+    return null;
+  }
   
   let direction: 'BUILDING' | 'DECLINING' | 'STABLE';
   let significance: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -700,11 +781,17 @@ function calculateOITrend(mainOI: number, oppositeOI: number, ratio: number, typ
 }
 
 // ENHANCED: Support Levels with OI Trend Analysis
-function findSupportLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): EnhancedSupportResistanceLevel[] {
+async function findSupportLevels(
+  currentPrice: number, 
+  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, 
+  allStrikes: number[],
+  symbol: string
+): Promise<EnhancedSupportResistanceLevel[]> {
   console.log('🔍 OI SUPPORT CALCULATION DETAILS:');
   console.log('CMP:', currentPrice);
   
   const candidates: EnhancedSupportResistanceLevel[] = [];
+  
   for (const strike of allStrikes) {
     if (strike < currentPrice) {
       const { ce_oi, pe_oi } = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
@@ -717,10 +804,15 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
       if (oiRatio >= 1.3) {
         console.log(`  ✅ OI SUPPORT CANDIDATE - Strike ${strike}, Ratio ${oiRatio.toFixed(2)}`);
         
-        const oiTrend = calculateOITrend(pe_oi, ce_oi, oiRatio, 'support');
+        const oiTrend = await calculateOITrend(pe_oi, ce_oi, oiRatio, 'support', strike, symbol);
         
         let strength: 'weak' | 'medium' | 'strong';
-        let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L${oiTrend.direction === 'BUILDING' ? ' ↗️' : oiTrend.direction === 'DECLINING' ? ' ↘️' : ''}, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
+        let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
+        
+        // Add trend info to tooltip if available
+        if (oiTrend) {
+          tooltip += `${oiTrend.direction === 'BUILDING' ? ' ↗️' : oiTrend.direction === 'DECLINING' ? ' ↘️' : ''}`;
+        }
         
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
           strength = 'strong';
@@ -738,7 +830,7 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
           strength, 
           type: 'support', 
           tooltip,
-          oiTrend,
+          oiTrend: oiTrend || undefined,
           currentOI: { ce_oi, pe_oi }
         });
       }
@@ -754,7 +846,12 @@ function findSupportLevels(currentPrice: number, optionsByStrike: Record<number,
 }
 
 // ENHANCED: Resistance Levels with OI Trend Analysis
-function findResistanceLevels(currentPrice: number, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, allStrikes: number[]): EnhancedSupportResistanceLevel[] {
+async function findResistanceLevels(
+  currentPrice: number, 
+  optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, 
+  allStrikes: number[],
+  symbol: string
+): Promise<EnhancedSupportResistanceLevel[]> {
   console.log('🔍 RESISTANCE LEVELS: Starting calculation');
   const candidates: EnhancedSupportResistanceLevel[] = [];
   
@@ -765,10 +862,15 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
       
       const oiRatio = ce_oi / pe_oi;
       if (oiRatio >= 1.3) {
-        const oiTrend = calculateOITrend(ce_oi, pe_oi, oiRatio, 'resistance');
+        const oiTrend = await calculateOITrend(ce_oi, pe_oi, oiRatio, 'resistance', strike, symbol);
         
         let strength: 'weak' | 'medium' | 'strong';
-        let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L${oiTrend.direction === 'BUILDING' ? ' ↗️' : oiTrend.direction === 'DECLINING' ? ' ↘️' : ''}, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
+        let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
+        
+        // Add trend info to tooltip if available
+        if (oiTrend) {
+          tooltip += `${oiTrend.direction === 'BUILDING' ? ' ↗️' : oiTrend.direction === 'DECLINING' ? ' ↘️' : ''}`;
+        }
         
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
           strength = 'strong';
@@ -786,7 +888,7 @@ function findResistanceLevels(currentPrice: number, optionsByStrike: Record<numb
           strength, 
           type: 'resistance', 
           tooltip,
-          oiTrend,
+          oiTrend: oiTrend || undefined,
           currentOI: { ce_oi, pe_oi }
         });
       }
@@ -867,13 +969,13 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
 }
 
 // ENHANCED: Get Final Levels with Enhanced Data
-function getFinalLevels(
+async function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
   currentPrice: number, 
   optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, 
   allStrikes: number[]
-): { supports: EnhancedSupportResistanceLevel[], resistances: EnhancedSupportResistanceLevel[] } {
+): Promise<{ supports: EnhancedSupportResistanceLevel[], resistances: EnhancedSupportResistanceLevel[] }> {
   
   console.log('🔍 FINAL LEVELS DEBUG =================');
   console.log('Symbol:', symbol);
@@ -889,7 +991,7 @@ function getFinalLevels(
   };
 
   console.log('📊 OI-BASED SUPPORT ANALYSIS:');
-  const oiSupports = findSupportLevels(currentPrice, optionsByStrike, allStrikes);
+  const oiSupports = await findSupportLevels(currentPrice, optionsByStrike, allStrikes, symbol);
   console.log('OI Supports found:', oiSupports.map(s => `${s.price} (${s.strength})`));
   oiSupports.forEach(l => addLevel(l, allSupports));
   
@@ -929,7 +1031,7 @@ function getFinalLevels(
   console.log('🎯 FINAL SUPPORTS:', finalSupports.map(s => `${s.price} (${s.strength})`));
   console.log('====================================');
   
-  const oiResistances = findResistanceLevels(currentPrice, optionsByStrike, allStrikes);
+  const oiResistances = await findResistanceLevels(currentPrice, optionsByStrike, allStrikes, symbol);
   oiResistances.forEach(l => addLevel(l, allResistances));
   
   const historicalResistances = historicalLevels.filter(l => l.type === 'resistance');
@@ -977,7 +1079,6 @@ function calculateSmartSentiment(
   });
   
   const dataLength = historicalDataLength || 0;
-
   const breakdown: string[] = [];
   
   // 1. PCR Score
@@ -1172,6 +1273,7 @@ function calculateSmartSentiment(
     breakdown
   };
 }
+
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
   console.log('🚀 API CALL STARTED ========================');
@@ -1647,7 +1749,15 @@ export async function POST(request: Request) {
         marketCondition: isMarketOpen ? 'MARKET_OPEN' : isWeekend ? 'WEEKEND' : isMarketHoliday ? 'HOLIDAY' : 'AFTER_HOURS'
     });
 
-    const { supports: supportLevels, resistances: resistanceLevels } = getFinalLevels(
+    // Save OI data for future trend analysis
+    try {
+      await storeOIData(displayName.toUpperCase(), optionsByStrike);
+    } catch (error) {
+      console.error('❌ Error storing OI data:', error);
+      // Continue execution even if OI storage fails
+    }
+
+    const { supports: supportLevels, resistances: resistanceLevels } = await getFinalLevels(
       displayName.toUpperCase(), 
       historicalData, 
       ltp, 
