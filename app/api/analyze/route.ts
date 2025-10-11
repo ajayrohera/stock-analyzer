@@ -816,13 +816,13 @@ async function findSupportLevels(
         
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
           strength = 'strong';
-          tooltip += ' | Strong PUT support';
+          tooltip += ' | Strong PUT writer support';
         } else if (oiRatio >= 1.8) {
           strength = 'medium';
-          tooltip += ' | Medium PUT support';
+          tooltip += ' | Medium PUT writer support';
         } else {
           strength = 'weak';
-          tooltip += ' | Weak PUT support';
+          tooltip += ' | Weak PUT writer support';
         }
         
         candidates.push({ 
@@ -874,13 +874,13 @@ async function findResistanceLevels(
         
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
           strength = 'strong';
-          tooltip += ' | Strong CALL resistance';
+          tooltip += ' | Strong CALL writer resistance';
         } else if (oiRatio >= 1.8) {
           strength = 'medium';
-          tooltip += ' | Medium CALL resistance';
+          tooltip += ' | Medium CALL writer resistance';
         } else {
           strength = 'weak';
-          tooltip += ' | Weak CALL resistance';
+          tooltip += ' | Weak CALL writer resistance';
         }
         
         candidates.push({ 
@@ -999,27 +999,46 @@ async function getFinalLevels(
   const historicalLevels = calculateSupportResistance(history, currentPrice);
   const historicalSupports = historicalLevels.filter(l => l.type === 'support');
   console.log('Historical Supports found:', historicalSupports.map(s => `${s.price} (${s.strength})`));
-  // In getFinalLevels function, update the historical supports section:
-historicalSupports.forEach(l => {
-  const strikeOI = optionsByStrike[l.price];
-  addLevel({ 
-    ...l, 
-    currentOI: strikeOI ? { ce_oi: strikeOI.ce_oi, pe_oi: strikeOI.pe_oi } : undefined,
-    oiTrend: undefined 
-  }, allSupports);
-});
+  
+  historicalSupports.forEach(l => {
+    const strikeOI = optionsByStrike[l.price];
+    
+    // Create a formatted tooltip similar to OI-based levels
+    let formattedTooltip = 'Historical Volume Level';
+    if (strikeOI) {
+      formattedTooltip = `PE: ${(strikeOI.pe_oi / 100000).toFixed(1)}L, CE: ${(strikeOI.ce_oi / 100000).toFixed(1)}L | Historical Level (${l.strength})`;
+    } else {
+      formattedTooltip = `Historical Volume Level (${l.strength})`;
+    }
+    
+    addLevel({ 
+      ...l, 
+      tooltip: formattedTooltip, // Override the tooltip
+      currentOI: strikeOI ? { ce_oi: strikeOI.ce_oi, pe_oi: strikeOI.pe_oi } : undefined,
+      oiTrend: undefined 
+    }, allSupports);
+  });
   
   console.log('📊 PSYCHOLOGICAL LEVELS:');
   const psychLevels = getPsychologicalLevels(symbol, currentPrice);
   const psychSupports = psychLevels.filter(price => price < currentPrice)
-    .map(price => ({ 
-      price, 
-      strength: 'medium' as const, 
-      type: 'support' as const, 
-      tooltip: 'Psychological Level',
-      currentOI: undefined,
-      oiTrend: undefined
-    }));
+    .map(price => { 
+      const strikeOI = optionsByStrike[price];
+      let tooltip = 'Psychological Level';
+      
+      if (strikeOI) {
+        tooltip = `PE: ${(strikeOI.pe_oi / 100000).toFixed(1)}L, CE: ${(strikeOI.ce_oi / 100000).toFixed(1)}L | Psychological Level`;
+      }
+      
+      return {
+        price, 
+        strength: 'medium' as const, 
+        type: 'support' as const, 
+        tooltip,
+        currentOI: strikeOI ? { ce_oi: strikeOI.ce_oi, pe_oi: strikeOI.pe_oi } : undefined,
+        oiTrend: undefined
+      };
+    });
   console.log('Psychological Supports found:', psychSupports.map(s => `${s.price} (${s.strength})`));
   psychSupports.forEach(l => addLevel(l, allSupports));
   
@@ -1043,17 +1062,35 @@ historicalSupports.forEach(l => {
   oiResistances.forEach(l => addLevel(l, allResistances));
   
   const historicalResistances = historicalLevels.filter(l => l.type === 'resistance');
-  historicalResistances.forEach(l => addLevel({ ...l, currentOI: undefined, oiTrend: undefined }, allResistances));
+  historicalResistances.forEach(l => {
+    const strikeOI = optionsByStrike[l.price];
+    let formattedTooltip = 'Historical Volume Level';
+    if (strikeOI) {
+      formattedTooltip = `CE: ${(strikeOI.ce_oi / 100000).toFixed(1)}L, PE: ${(strikeOI.pe_oi / 100000).toFixed(1)}L | Historical Level (${l.strength})`;
+    } else {
+      formattedTooltip = `Historical Volume Level (${l.strength})`;
+    }
+    addLevel({ ...l, tooltip: formattedTooltip, currentOI: undefined, oiTrend: undefined }, allResistances);
+  });
   
   const psychResistances = psychLevels.filter(price => price > currentPrice)
-    .map(price => ({ 
-      price, 
-      strength: 'medium' as const, 
-      type: 'resistance' as const, 
-      tooltip: 'Psychological Level',
-      currentOI: undefined,
-      oiTrend: undefined
-    }));
+    .map(price => { 
+      const strikeOI = optionsByStrike[price];
+      let tooltip = 'Psychological Level';
+      
+      if (strikeOI) {
+        tooltip = `CE: ${(strikeOI.ce_oi / 100000).toFixed(1)}L, PE: ${(strikeOI.pe_oi / 100000).toFixed(1)}L | Psychological Level`;
+      }
+      
+      return {
+        price, 
+        strength: 'medium' as const, 
+        type: 'resistance' as const, 
+        tooltip,
+        currentOI: strikeOI ? { ce_oi: strikeOI.ce_oi, pe_oi: strikeOI.pe_oi } : undefined,
+        oiTrend: undefined
+      };
+    });
   psychResistances.forEach(l => addLevel(l, allResistances));
 
   const finalResistances = allResistances
