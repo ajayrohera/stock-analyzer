@@ -999,7 +999,15 @@ async function getFinalLevels(
   const historicalLevels = calculateSupportResistance(history, currentPrice);
   const historicalSupports = historicalLevels.filter(l => l.type === 'support');
   console.log('Historical Supports found:', historicalSupports.map(s => `${s.price} (${s.strength})`));
-  historicalSupports.forEach(l => addLevel({ ...l, currentOI: undefined, oiTrend: undefined }, allSupports));
+  // In getFinalLevels function, update the historical supports section:
+historicalSupports.forEach(l => {
+  const strikeOI = optionsByStrike[l.price];
+  addLevel({ 
+    ...l, 
+    currentOI: strikeOI ? { ce_oi: strikeOI.ce_oi, pe_oi: strikeOI.pe_oi } : undefined,
+    oiTrend: undefined 
+  }, allSupports);
+});
   
   console.log('📊 PSYCHOLOGICAL LEVELS:');
   const psychLevels = getPsychologicalLevels(symbol, currentPrice);
