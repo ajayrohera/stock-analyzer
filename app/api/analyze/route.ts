@@ -53,6 +53,7 @@ interface EnhancedSupportResistanceLevel extends SupportResistanceLevel {
     ce_oi: number;
     pe_oi: number;
   };
+  displayStrength?: string; // Added for formatted display with arrow
 }
 
 // ADDED: VWAP Interface
@@ -807,23 +808,18 @@ async function findSupportLevels(
         const oiTrend = await calculateOITrend(pe_oi, ce_oi, oiRatio, 'support', strike, symbol);
         
         let strength: 'weak' | 'medium' | 'strong';
-        let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
-        
-        // Add trend info to tooltip if available
-        if (oiTrend) {
-          tooltip += `${oiTrend.direction === 'BUILDING' ? ' ↗️' : oiTrend.direction === 'DECLINING' ? ' ↘️' : ''}`;
-        }
+        let tooltip = `PE: ${(pe_oi / 100000).toFixed(1)}L, CE: ${(ce_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1 | PUT writer support`;
         
         if ((oiRatio >= 3 && pe_oi > 1000000) || (oiRatio >= 4) || (pe_oi > 2000000)) {
           strength = 'strong';
-          tooltip += ' | Strong PUT writer support';
         } else if (oiRatio >= 1.8) {
           strength = 'medium';
-          tooltip += ' | Medium PUT writer support';
         } else {
           strength = 'weak';
-          tooltip += ' | Weak PUT writer support';
         }
+        
+        // Create display strength with arrow
+        const displayStrength = oiTrend ? `${strength} ${oiTrend.icon}` : `${strength} ➡️`;
         
         candidates.push({ 
           price: strike, 
@@ -831,7 +827,8 @@ async function findSupportLevels(
           type: 'support', 
           tooltip,
           oiTrend: oiTrend || undefined,
-          currentOI: { ce_oi, pe_oi }
+          currentOI: { ce_oi, pe_oi },
+          displayStrength // Added for formatted display
         });
       }
     }
@@ -866,23 +863,18 @@ async function findResistanceLevels(
         const oiTrend = await calculateOITrend(ce_oi, pe_oi, oiRatio, 'resistance', strike, symbol);
         
         let strength: 'weak' | 'medium' | 'strong';
-        let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1`;
-        
-        // Add trend info to tooltip if available
-        if (oiTrend) {
-          tooltip += `${oiTrend.direction === 'BUILDING' ? ' ↗️' : oiTrend.direction === 'DECLINING' ? ' ↘️' : ''}`;
-        }
+        let tooltip = `CE: ${(ce_oi / 100000).toFixed(1)}L, PE: ${(pe_oi / 100000).toFixed(1)}L, Ratio: ${oiRatio.toFixed(2)}:1 | CALL writer resistance`;
         
         if ((oiRatio >= 3 && ce_oi > 1000000) || (oiRatio >= 4) || (ce_oi > 2000000)) {
           strength = 'strong';
-          tooltip += ' | Strong CALL writer resistance';
         } else if (oiRatio >= 1.8) {
           strength = 'medium';
-          tooltip += ' | Medium CALL writer resistance';
         } else {
           strength = 'weak';
-          tooltip += ' | Weak CALL writer resistance';
         }
+        
+        // Create display strength with arrow
+        const displayStrength = oiTrend ? `${strength} ${oiTrend.icon}` : `${strength} ➡️`;
         
         candidates.push({ 
           price: strike, 
@@ -890,7 +882,8 @@ async function findResistanceLevels(
           type: 'resistance', 
           tooltip,
           oiTrend: oiTrend || undefined,
-          currentOI: { ce_oi, pe_oi }
+          currentOI: { ce_oi, pe_oi },
+          displayStrength // Added for formatted display
         });
       }
     }
@@ -1751,13 +1744,22 @@ export async function POST(request: Request) {
       return flow.toFixed(0);
     };
 
-    const getStrengthColor = (strength: string) => {
-      switch (strength.toUpperCase()) {
-        case 'VERY_STRONG': return '#10b981';
-        case 'STRONG': return '#3b82f6';
-        case 'MODERATE': return '#f59e0b';
-        case 'WEAK': return '#6b7280';
-        default: return '#6b7280';
+    const getStrengthColor = (strength: string, type: 'support' | 'resistance') => {
+      if (type === 'support') {
+        switch (strength.toUpperCase()) {
+          case 'STRONG': return '#10b981'; // Green
+          case 'MEDIUM': return '#f59e0b'; // Orange
+          case 'WEAK': return '#ef4444';   // Red
+          default: return '#6b7280';
+        }
+      } else {
+        // Resistance - opposite colors
+        switch (strength.toUpperCase()) {
+          case 'STRONG': return '#ef4444'; // Red
+          case 'MEDIUM': return '#f59e0b'; // Orange
+          case 'WEAK': return '#10b981';   // Green
+          default: return '#6b7280';
+        }
       }
     };
 
@@ -1839,8 +1841,18 @@ export async function POST(request: Request) {
         maxPain,
         support: finalSupport, 
         resistance: finalResistance,
-        supports: supportLevels,
-        resistances: resistanceLevels,
+        supports: supportLevels.map(level => ({
+          ...level,
+          styling: {
+            strengthColor: getStrengthColor(level.strength, 'support')
+          }
+        })),
+        resistances: resistanceLevels.map(level => ({
+          ...level,
+          styling: {
+            strengthColor: getStrengthColor(level.strength, 'resistance')
+          }
+        })),
         marketStatus: isMarketOpen ? 'OPEN' : 'CLOSED',
         dataSource: hasLiveData ? 'LIVE' : 'HISTORICAL',
         
@@ -1852,7 +1864,7 @@ export async function POST(request: Request) {
             
             styling: {
                 signalColor: getSignalColor(adAnalysis.todaySignal),
-                strengthColor: getStrengthColor(adAnalysis.todayStrength),
+                strengthColor: getStrengthColor(adAnalysis.todayStrength, 'support'),
                 trendIcon: adAnalysis.trend.toUpperCase() === 'BULLISH' ? '📈' : 
                           adAnalysis.trend.toUpperCase() === 'BEARISH' ? '📉' : '➡️',
                 confidenceIcon: adAnalysis.confidence === 'HIGH' ? '🎯' : adAnalysis.confidence === 'MEDIUM' ? '🎯' : '🎯'
@@ -1901,7 +1913,7 @@ export async function POST(request: Request) {
             styling: {
                 valueColor: getRSIColor(rsiAnalysis.value),
                 signalColor: getRSISignalColor(rsiAnalysis.signal),
-                strengthColor: getStrengthColor(rsiAnalysis.strength),
+                strengthColor: getStrengthColor(rsiAnalysis.strength, 'support'),
                 trendIcon: rsiAnalysis.signal === 'BULLISH' ? '📈' : 
                           rsiAnalysis.signal === 'BEARISH' ? '📉' : '➡️'
             },
