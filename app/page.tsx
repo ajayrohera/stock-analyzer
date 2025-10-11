@@ -24,6 +24,11 @@ type EnhancedSupportResistanceLevel = SupportResistanceLevel & {
     ce_oi: number;
     pe_oi: number;
   };
+    displayStrength?: string;
+  styling?: {
+    strengthColor: string;
+  };
+  tooltip?: string;
 };
 
 type ADAnalysis = {
@@ -248,13 +253,12 @@ const getAdvancedPcrSentiment = (pcrValue: number, type: 'OI' | 'VOLUME'): { sen
   }
 };
 
-const getStrengthColor = (strength: string): string => {
+const getStrengthColor = (strength: string) => {
   switch (strength) {
-    case 'VERY_STRONG': return 'text-green-400';
-    case 'STRONG': return 'text-green-300';
-    case 'MODERATE': return 'text-yellow-400';
-    case 'WEAK': return 'text-gray-400';
-    default: return 'text-gray-400';
+    case 'strong': return 'bg-green-900/50 text-green-400 border border-green-700';
+    case 'medium': return 'bg-yellow-900/50 text-yellow-400 border border-yellow-700';
+    case 'weak': return 'bg-red-900/50 text-red-400 border border-red-700';
+    default: return 'bg-gray-800 text-gray-300';
   }
 };
 
@@ -349,11 +353,14 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: EnhancedSu
                 <span className={`text-xs font-semibold uppercase px-2 py-1 rounded ${getStrengthColor(level.strength)}`}>
                   {level.strength}
                 </span>
-                {level.oiTrend && (
-                  <span className={`ml-2 text-xs font-semibold ${getOITrendColor(level.oiTrend.direction)}`}>
-                    {level.oiTrend.icon} {formatOIChange(level.oiTrend.changePercent)}
-                  </span>
-                )}
+                            {level.displayStrength && (
+              <span className={`ml-2 text-xs font-semibold ${
+                level.strength === 'strong' ? 'text-green-400' : 
+                level.strength === 'medium' ? 'text-yellow-400' : 'text-red-400'
+              }`}>
+                {level.displayStrength}
+              </span>
+            )}
                 {level.tooltip && (
                   <div className="relative group">
                     <Info size={14} className="ml-2 text-gray-400 cursor-pointer" />
