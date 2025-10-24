@@ -350,9 +350,7 @@ const SupportResistanceList = React.memo(({ levels, type }: { levels: EnhancedSu
             <div className="flex justify-between items-center">
               <span className={`text-xl font-bold ${headerColor}`}>{level.price}</span>
               <div className="flex items-center">
-                <span className={`text-xs font-semibold uppercase px-2 py-1 rounded ${getStrengthColor(level.strength)}`}>
-                  {level.strength}
-                </span>
+                
                             {level.displayStrength && (
               <span className={`ml-2 text-xs font-semibold ${
                 level.strength === 'strong' ? 'text-green-400' : 
