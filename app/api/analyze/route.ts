@@ -174,7 +174,7 @@ function calculateVWAP(
   
   try {
     const isIndex = ['NIFTY', 'BANKNIFTY'].includes(historicalData.length > 0 ? historicalData[0].name || '' : '');
-    
+
     if (isIndex) {
       console.log('📊 VWAP: Index instrument detected, using simplified calculation');
       return {
@@ -575,32 +575,92 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
   return generatedLevels;
 }
 
-// FIXED: Change percent calculation - never 0%
-function calculateChangePercent(currentPrice: number, historicalData: HistoricalData[], priceType: string): number {
-  console.log(`📈 Calculating change percent for price: ${currentPrice}, historical entries: ${historicalData.length}`);
+// FIXED: Change percent calculation using Zerodha's actual previous close
+async function calculateChangePercent(
+  currentPrice: number, 
+  historicalData: HistoricalData[], 
+  priceType: string,
+  kite?: any,
+  tradingSymbol?: string,
+  exchange?: string
+): Promise<number> {
+  console.log(`📈 Calculating change percent for: ${tradingSymbol}, Current: ${currentPrice}`);
   
-  if (!historicalData || historicalData.length === 0 || !currentPrice) {
-    console.log('⚠️ Insufficient data for change calculation');
-    return 0.01;
+  if (!currentPrice || currentPrice <= 0) {
+    console.log('⚠️ Invalid current price for change calculation');
+    return 0;
   }
   
-  const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  // Try to get previous close from Zerodha quote data first
+  if (kite && tradingSymbol && exchange) {
+    try {
+      console.log('🔍 Attempting to fetch previous close from Zerodha...');
+      const quoteData = await kite.getQuote([`${exchange}:${tradingSymbol}`]);
+      const instrumentData = quoteData[`${exchange}:${tradingSymbol}`];
+      
+      if (instrumentData && instrumentData.ohlc && instrumentData.ohlc.close > 0) {
+        const previousClose = instrumentData.ohlc.close;
+        const changePercent = ((currentPrice - previousClose) / previousClose) * 100;
+        
+        console.log(`📊 Zerodha-based change: ${currentPrice} vs ${previousClose} = ${changePercent.toFixed(2)}%`);
+        return changePercent;
+      }
+    } catch (error) {
+      console.log('⚠️ Failed to fetch from Zerodha, falling back to historical data:', error);
+    }
+  }
+  
+  // Fallback to historical data calculation
+  if (!historicalData || historicalData.length === 0) {
+    console.log('⚠️ No historical data available for change calculation');
+    return 0;
+  }
+  
+  // Sort by date (newest first) and find most recent valid price
+  const sortedHistorical = [...historicalData].sort((a, b) => 
+    new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
   
   for (const dayData of sortedHistorical) {
-    if (dayData.lastPrice && dayData.lastPrice !== currentPrice && dayData.lastPrice > 0) {
+    if (dayData.lastPrice && dayData.lastPrice > 0) {
       const changePercent = ((currentPrice - dayData.lastPrice) / dayData.lastPrice) * 100;
-      console.log(`📊 Change calculation: Today(${currentPrice}) vs ${dayData.date} (${dayData.lastPrice}) = ${changePercent.toFixed(2)}%`);
-      
-      if (Math.abs(changePercent) < 0.01) {
-        console.log('📊 Change is near zero, using minimal non-zero value');
-        return currentPrice > dayData.lastPrice ? 0.01 : -0.01;
-      }
+      console.log(`📊 Historical-based change: ${currentPrice} vs ${dayData.lastPrice} (${dayData.date}) = ${changePercent.toFixed(2)}%`);
       return changePercent;
     }
   }
   
-  console.log('📊 All historical prices are same, using minimal change');
-  return 0.01;
+  console.log('📊 No valid reference price found');
+  return 0;
+}
+
+// ADDED: Price verification function
+async function verifyPriceData(kite: any, tradingSymbol: string, exchange: string) {
+  try {
+    const quoteData = await kite.getQuote([`${exchange}:${tradingSymbol}`]);
+    const instrumentData = quoteData[`${exchange}:${tradingSymbol}`];
+    
+    console.log('🔍 PRICE VERIFICATION DEBUG:', {
+      symbol: tradingSymbol,
+      currentPrice: instrumentData?.last_price,
+      previousClose: instrumentData?.ohlc?.close,
+      open: instrumentData?.ohlc?.open,
+      high: instrumentData?.ohlc?.high,
+      low: instrumentData?.ohlc?.low,
+      volume: instrumentData?.volume,
+      timestamp: new Date().toISOString()
+    });
+    
+    if (instrumentData?.last_price && instrumentData?.ohlc?.close) {
+      const actualChange = ((instrumentData.last_price - instrumentData.ohlc.close) / instrumentData.ohlc.close) * 100;
+      console.log(`🎯 ACTUAL ZERODHA CHANGE: ${actualChange.toFixed(2)}%`);
+      return actualChange;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('❌ Price verification failed:', error);
+    return null;
+  }
 }
 
 function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number, isUsingHistoricalFallback: boolean = false,istHours?: number,istMinutes?: number): {
@@ -1493,14 +1553,18 @@ export async function POST(request: Request) {
         dayType: isTradingDay ? 'TRADING_DAY' : 'NON_TRADING_DAY'
     });
 
-    console.log('🔍 ANALYSIS DEBUG - Historical data for', displayName, ':', {
-      length: historicalDataLength,
-      sample: historicalData.slice(0, 3),
-      hasData: historicalDataLength > 0,
-      hasVolume: historicalData.filter(entry => entry.totalVolume > 0).length
-    });
+    // Add price verification
+    const actualChange = await verifyPriceData(kc, tradingSymbol, exchange);
     
-    const changePercent = calculateChangePercent(ltp, historicalData, 'CMP');
+    // FIXED: Use the new calculateChangePercent function with proper parameters
+    const changePercent = await calculateChangePercent(ltp, historicalData, 'CMP', kc, tradingSymbol, exchange);
+    
+    console.log(`🔍 ${displayName} ACTUAL VS CALCULATED:`, {
+      actualZerodhaChange: actualChange,
+      ourCalculatedChange: changePercent,
+      discrepancy: actualChange !== null ? Math.abs(actualChange - changePercent) : 'N/A'
+    });
+
     const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical,hours,minutes);
 
     // === ADD DATA SUFFICIENCY CHECK ===
@@ -2020,7 +2084,7 @@ export async function POST(request: Request) {
             
             formattedLines: [
                 `💰 Current VWAP: ₹${vwapAnalysis.value?.toFixed(2) || 'Calculating...'}`,
-                `📈 LTP vs VWAP: ${vwapAnalysis.deviationPercent >= 0 ? '+' : ''}${vwapAnalysis.deviationPercent.toFixed(2)}% ${vwapAnalysis.deviationPercent > 0 ? 'ABOVE' : vwapAnalysis.deviationPercent < 0 ? 'BELOW' : 'AT'}`,
+                                `📈 LTP vs VWAP: ${vwapAnalysis.deviationPercent >= 0 ? '+' : ''}${vwapAnalysis.deviationPercent.toFixed(2)}% ${vwapAnalysis.deviationPercent > 0 ? 'ABOVE' : vwapAnalysis.deviationPercent < 0 ? 'BELOW' : 'AT'}`,
                 `📦 Cumulative Volume: ${(vwapAnalysis.cumulativeVolume / 1000).toFixed(1)}K shares`,
                 `🎯 Signal: ${vwapAnalysis.signal} ${vwapAnalysis.strength !== 'WEAK' ? `(${vwapAnalysis.strength})` : ''}`,
                 ``,
