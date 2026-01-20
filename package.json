@@ -15,7 +15,7 @@
     "googleapis": "^159.0.0",
     "kiteconnect": "^5.1.0",
     "lucide-react": "^0.542.0",
-    "next": "^15.4.2",
+    "next": "15.4.10",
     "next-auth": "^4.24.11",
     "open": "^10.2.0",
     "react": "19.1.0",
