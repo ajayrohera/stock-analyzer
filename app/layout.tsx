@@ -1,21 +1,19 @@
-// This is the corrected code for your app/layout.tsx file
-
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Fira_Code } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Google Fonts
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const firaCode = Fira_Code({
+  variable: "--font-fira-code",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  // You can customize these for your site
   title: "Insight Engine",
   description: "Stock & Index Analyzer for Options Data",
 };
@@ -27,12 +25,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      {/* 
-        HERE IS THE FIX: 
-        We are keeping your fonts and adding the background and text color classes.
-      */}
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-brand-dark text-gray-300`}
+        className={`${inter.variable} ${firaCode.variable} antialiased bg-brand-dark text-gray-300`}
       >
         {children}
       </body>
