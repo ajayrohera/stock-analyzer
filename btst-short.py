@@ -21,15 +21,15 @@ from kiteconnect import KiteConnect
 
 # ================= ZERODHA SETUP =================
 API_KEY = "tpwjbkqec6xshvau"
-ACCESS_TOKEN = "8R4zTSTTJH2Ga0XIfu85ruR6EBZ5CfX2"
+ACCESS_TOKEN = "CNsIkvYSgkvpmAajTcJ20LPFCMtZpGbW"
 
 kite = KiteConnect(api_key=API_KEY)
 kite.set_access_token(ACCESS_TOKEN)
 
 # ================= CONFIG =================
 SCAN_INTERVAL_MIN = 5
-START_TIME = dtime(14, 00)
-STOP_TIME = dtime(15, 20)
+START_TIME = dtime(15, 10)
+STOP_TIME = dtime(15, 25)
 
 MAX_BTST = 2
 WEAK_SCORE_THRESHOLD = 60

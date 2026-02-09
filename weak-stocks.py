@@ -17,7 +17,7 @@ from kiteconnect import KiteConnect
 # ================= CONFIG ================= #
 
 API_KEY = "tpwjbkqec6xshvau"
-ACCESS_TOKEN = "8R4zTSTTJH2Ga0XIfu85ruR6EBZ5CfX2"
+ACCESS_TOKEN = "CNsIkvYSgkvpmAajTcJ20LPFCMtZpGbW"
 
 SCAN_INTERVAL_SECONDS = 300  # 5 minutes
 START_CONFIRM_TIME = dtime(9, 45)
