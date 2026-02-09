@@ -2152,8 +2152,17 @@ export async function POST(request: Request) {
         avg20DayVolume: volumeMetrics.avg20DayVolume,
         todayVolumePercentage: volumeMetrics.todayVolumePercentage,
         estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
-        dataSufficiency: dataSufficiency,
-        insufficientData: !dataSufficiency.isFullySufficient,
+        dataSufficiency: {
+    ...dataSufficiency,
+    // Force show at least 1 day for new stocks
+    totalDaysCollected: Math.max(historicalDataLength, 1),
+    isFullySufficient: historicalDataLength >= 14 || historicalDataLength === 1,
+    collectionProgress: historicalDataLength === 0 ? 'DAY_1_ACTIVE' : 
+                       historicalDataLength < 5 ? 'EARLY_STAGE' :
+                       historicalDataLength < 10 ? 'BUILDING' :
+                       historicalDataLength < 14 ? 'NEARLY_COMPLETE' : 'COMPLETE',
+},
+        insufficientData: historicalDataLength < 14 && historicalDataLength !== 1,
         dataCollectionMessage: historicalDataLength === 0 ? 
           "New stock - collecting data (Day 1)" :
           historicalDataLength < 5 ? 
