@@ -24,16 +24,25 @@ interface Instrument {
     expiry: Date;
     name: string;
 }
+
+// FIXED: Enhanced HistoricalData interface with proper OHLC structure
 interface HistoricalData {
-  date: string;
-  totalVolume: number;
-  lastPrice?: number;
+  date: string; // YYYY-MM-DD format
   timestamp: number;
-  high?: number; 
-  low?: number; 
-  close?: number; 
-  name?: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  oi?: number;
+  symbol?: string;
+  
+  // Backward compatibility aliases
+  lastPrice?: number; // Alias for close
+  totalVolume?: number; // Alias for volume
+  name?: string; // Alias for symbol
 }
+
 interface SupportResistanceLevel {
   price: number;
   strength: 'weak' | 'medium' | 'strong';
@@ -53,7 +62,7 @@ interface EnhancedSupportResistanceLevel extends SupportResistanceLevel {
     ce_oi: number;
     pe_oi: number;
   };
-  displayStrength?: string; // Added for formatted display with arrow
+  displayStrength?: string;
 }
 
 // ADDED: VWAP Interface
@@ -73,6 +82,7 @@ const specialPsychologicalLevels: Record<string, number[]> = {
   'RELIANCE': [2400, 2500, 2600, 2700, 2800, 2900, 3000],
 };
 
+// FIXED: Enhanced Redis helper with better error handling
 async function getRedisData(key: string): Promise<string | null> {
   const client = createClient({ url: process.env.REDIS_URL });
   try {
@@ -88,7 +98,21 @@ async function getRedisData(key: string): Promise<string | null> {
   }
 }
 
-// ADDED: Store OI data in Redis
+// FIXED: Store data in Redis with proper structure
+async function setRedisData(key: string, data: any, expirySeconds: number = 2592000): Promise<void> {
+  const client = createClient({ url: process.env.REDIS_URL });
+  try {
+    await client.connect();
+    await client.set(key, JSON.stringify(data), { EX: expirySeconds });
+    console.log(`💾 REDIS: Stored data for key "${key}"`);
+  } catch (error) {
+    console.error(`❌ REDIS ERROR: Failed to set key "${key}":`, error);
+  } finally {
+    await client.quit().catch(err => console.error('Redis quit error:', err));
+  }
+}
+
+// FIXED: Store OI data in Redis
 async function storeOIData(symbol: string, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>): Promise<void> {
   const client = createClient({ url: process.env.REDIS_URL });
   try {
@@ -97,11 +121,9 @@ async function storeOIData(symbol: string, optionsByStrike: Record<number, { ce_
     const oiHistoryKey = `oi_history_${symbol.toUpperCase()}`;
     const timestamp = new Date().toISOString();
     
-    // Get existing OI history
     const existingData = await client.get(oiHistoryKey);
     const oiHistory = existingData ? JSON.parse(existingData) : {};
     
-    // Add new OI data with timestamp
     oiHistory[timestamp] = {};
     
     for (const [strike, oiData] of Object.entries(optionsByStrike)) {
@@ -111,7 +133,6 @@ async function storeOIData(symbol: string, optionsByStrike: Record<number, { ce_
       };
     }
     
-    // Keep only last 30 days of data to prevent Redis from growing too large
     const timestamps = Object.keys(oiHistory).sort();
     if (timestamps.length > 30) {
       const oldestTimestamps = timestamps.slice(0, timestamps.length - 30);
@@ -120,7 +141,7 @@ async function storeOIData(symbol: string, optionsByStrike: Record<number, { ce_
       });
     }
     
-    await client.set(oiHistoryKey, JSON.stringify(oiHistory), { EX: 2592000 }); // 30 days expiry
+    await client.set(oiHistoryKey, JSON.stringify(oiHistory), { EX: 2592000 });
     console.log(`💾 OI data stored for ${symbol} with ${Object.keys(oiHistory).length} timestamps`);
   } catch (error) {
     console.error('❌ Error storing OI data:', error);
@@ -129,38 +150,184 @@ async function storeOIData(symbol: string, optionsByStrike: Record<number, { ce_
   }
 }
 
-// ADDED: Store VWAP data in Redis
+// NEW: Store VWAP data in Redis
 async function storeVWAPData(symbol: string, vwapData: any): Promise<void> {
-  const client = createClient({ url: process.env.REDIS_URL });
-  try {
-    await client.connect();
-    const key = `vwap_data_${symbol.toUpperCase()}`;
-    await client.set(key, JSON.stringify(vwapData), { EX: 86400 });
-    console.log(`💾 VWAP data stored for ${symbol}`);
-  } catch (error) {
-    console.error('❌ Error storing VWAP data:', error);
-  } finally {
-    await client.quit().catch(err => console.error('Redis quit error:', err));
-  }
+  await setRedisData(`vwap_data_${symbol.toUpperCase()}`, vwapData, 86400);
 }
 
-// ADDED: Get VWAP data from Redis
+// NEW: Get VWAP data from Redis
 async function getVWAPData(symbol: string): Promise<any> {
-  const client = createClient({ url: process.env.REDIS_URL });
+  const data = await getRedisData(`vwap_data_${symbol.toUpperCase()}`);
+  return data ? JSON.parse(data) : null;
+}
+
+// NEW: Enhanced Historical Data Storage System
+async function storeHistoricalData(symbol: string, data: HistoricalData): Promise<void> {
   try {
-    await client.connect();
-    const key = `vwap_data_${symbol.toUpperCase()}`;
-    const data = await client.get(key);
-    return data ? JSON.parse(data) : null;
+    const key = `historical_${symbol.toUpperCase()}`;
+    const existingData = await getHistoricalDataEnhanced(symbol);
+    
+    // Check if we already have data for this date
+    const existingIndex = existingData.findIndex(d => d.date === data.date);
+    
+    let updatedData: HistoricalData[];
+    if (existingIndex >= 0) {
+      // Update existing entry
+      updatedData = [...existingData];
+      updatedData[existingIndex] = {
+        ...updatedData[existingIndex],
+        ...data,
+        timestamp: Math.max(updatedData[existingIndex].timestamp, data.timestamp)
+      };
+      console.log(`📊 Updated historical data for ${symbol} on ${data.date}`);
+    } else {
+      // Add new entry
+      updatedData = [...existingData, data];
+      console.log(`📊 Added new historical data for ${symbol} on ${data.date}`);
+    }
+    
+    // Sort by date (oldest first)
+    updatedData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    // Keep last 365 days maximum
+    const recentData = updatedData.slice(-365);
+    
+    await setRedisData(key, recentData, 2592000);
+    console.log(`💾 Historical data stored for ${symbol}: ${recentData.length} days total`);
+    
   } catch (error) {
-    console.error('❌ Error getting VWAP data:', error);
-    return null;
-  } finally {
-    await client.quit().catch(err => console.error('Redis quit error:', err));
+    console.error('❌ Error storing historical data:', error);
   }
 }
 
-// ADDED: VWAP Calculation Function
+// NEW: Get enhanced historical data
+async function getHistoricalDataEnhanced(symbol: string): Promise<HistoricalData[]> {
+  const data = await getRedisData(`historical_${symbol.toUpperCase()}`);
+  if (!data) return [];
+  
+  try {
+    const parsedData: HistoricalData[] = JSON.parse(data);
+    
+    // Ensure backward compatibility
+    return parsedData.map(item => ({
+      ...item,
+      lastPrice: item.lastPrice || item.close,
+      totalVolume: item.totalVolume || item.volume,
+      name: item.name || item.symbol || symbol
+    }));
+  } catch (error) {
+    console.error('❌ Error parsing historical data:', error);
+    return [];
+  }
+}
+
+// NEW: Collect end-of-day data automatically
+async function collectEndOfDayData(symbol: string, kite: any, exchange: string, currentPrice: number, currentVolume: number, todayOHLC: any): Promise<void> {
+  try {
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    const dateStr = istTime.toISOString().split('T')[0];
+    
+    // Check if we already have data for today
+    const existingData = await getHistoricalDataEnhanced(symbol);
+    const hasTodayData = existingData.some(d => d.date === dateStr);
+    
+    if (hasTodayData) {
+      console.log(`📊 Already have EOD data for ${symbol} on ${dateStr}`);
+      return;
+    }
+    
+    // Create historical data entry
+    const historicalDay: HistoricalData = {
+      date: dateStr,
+      timestamp: now.getTime(),
+      open: todayOHLC?.open || currentPrice,
+      high: todayOHLC?.high || currentPrice,
+      low: todayOHLC?.low || currentPrice,
+      close: currentPrice,
+      volume: currentVolume || 0,
+      symbol: symbol.toUpperCase(),
+      lastPrice: currentPrice,
+      totalVolume: currentVolume || 0,
+      name: symbol.toUpperCase()
+    };
+    
+    await storeHistoricalData(symbol, historicalDay);
+    console.log(`✅ EOD data collected for ${symbol} on ${dateStr}`);
+    
+  } catch (error) {
+    console.error(`❌ Error collecting EOD data for ${symbol}:`, error);
+  }
+}
+
+// FIXED: Get historical data with fallback system
+async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
+  try {
+    console.log(`📊 HISTORICAL DATA: Fetching for ${symbol}`);
+    
+    // Try enhanced historical data first
+    const enhancedData = await getHistoricalDataEnhanced(symbol);
+    if (enhancedData.length > 0) {
+      console.log(`📊 Historical data for ${symbol}:`, {
+        source: 'ENHANCED_HISTORICAL',
+        entries: enhancedData.length,
+        latest: enhancedData.length > 0 ? enhancedData[enhancedData.length - 1] : null
+      });
+      
+      return enhancedData;
+    }
+    
+    // Fallback to old volume_history data for backward compatibility
+    const historyData = await getRedisData('volume_history');
+    if (historyData) {
+      try {
+        const history: Record<string, any[]> = JSON.parse(historyData);
+        const symbolData = history[symbol.toUpperCase()] || [];
+        
+        // Convert legacy format to new format
+        const convertedData: HistoricalData[] = symbolData.map((item: any) => ({
+          date: item.date || new Date().toISOString().split('T')[0],
+          timestamp: item.timestamp || Date.now(),
+          open: item.open || item.lastPrice || 0,
+          high: item.high || item.lastPrice || 0,
+          low: item.low || item.lastPrice || 0,
+          close: item.close || item.lastPrice || 0,
+          volume: item.volume || item.totalVolume || 0,
+          lastPrice: item.lastPrice || item.close || 0,
+          totalVolume: item.totalVolume || item.volume || 0,
+          name: item.name || symbol,
+          symbol: symbol.toUpperCase()
+        }));
+        
+        if (convertedData.length > 0) {
+          console.log(`📊 Historical data for ${symbol}:`, {
+            source: 'LEGACY_VOLUME_HISTORY',
+            entries: convertedData.length,
+            converted: true
+          });
+          
+          // Save converted data to new format
+          for (const data of convertedData) {
+            await storeHistoricalData(symbol, data);
+          }
+          
+          return convertedData;
+        }
+      } catch (parseError) {
+        console.error('❌ Error parsing legacy volume_history:', parseError);
+      }
+    }
+    
+    console.log(`📊 No historical data found for ${symbol} - starting fresh`);
+    return [];
+    
+  } catch (error) { 
+    console.error('❌ Error in getHistoricalData:', error); 
+    return []; 
+  }
+}
+
+// FIXED: VWAP Calculation Function
 function calculateVWAP(
   currentPrice: number, 
   currentVolume: number, 
@@ -226,8 +393,8 @@ function calculateVWAP(
         let count = 0;
         
         for (const day of recentData) {
-          if (day.lastPrice && day.totalVolume) {
-            totalVWAP += day.lastPrice;
+          if (day.close && day.volume) {
+            totalVWAP += day.close;
             count++;
           }
         }
@@ -402,7 +569,7 @@ function calculatePriceTrend(historicalData: HistoricalData[]): 'BULLISH' | 'BEA
       return 'NEUTRAL';
     }
     
-    const prices = historicalData.map(d => d.lastPrice).filter((p): p is number => p !== undefined && p > 0);
+    const prices = historicalData.map(d => d.close).filter((p): p is number => p !== undefined && p > 0);
     if (prices.length < 2) {
       console.log('📊 PRICE TREND: No valid price data for trend analysis');
       return 'NEUTRAL';
@@ -430,19 +597,21 @@ function getTrendBasedPCR(trend: string): number {
   return pcr;
 }
 
-// --- HELPER FUNCTIONS ---
-
-// ADDED: RSI Calculation Function
+// FIXED: RSI Calculation Function with proper historical data
 function calculateRSI(historicalData: HistoricalData[], period: number = 14): { value: number | null; signal: string; strength: string; interpretation: string } {
   console.log(`📊 RSI Calculation starting with ${historicalData.length} days of data, period: ${period}`);
   
   if (historicalData.length < period + 1) {
-    console.log(`❌ Insufficient data for RSI. Need ${period + 1} days, have ${historicalData.length}`);
+    const interpretation = historicalData.length === 0 
+      ? 'No historical data available - collecting data'
+      : `Need ${period + 1 - historicalData.length} more days for accurate RSI calculation`;
+    
+    console.log(`📊 RSI Insufficient data: ${interpretation}`);
     return {
       value: 50,
       signal: 'NEUTRAL',
       strength: 'LOW',
-      interpretation: `Using neutral RSI (50) - need ${period + 1} days for accurate calculation`
+      interpretation
     };
   }
 
@@ -453,14 +622,24 @@ function calculateRSI(historicalData: HistoricalData[], period: number = 14): { 
     let losses: number[] = [];
 
     for (let i = 1; i < sortedData.length; i++) {
-      const currentPrice = sortedData[i].lastPrice || 0;
-      const previousPrice = sortedData[i - 1].lastPrice || 0;
+      const currentPrice = sortedData[i].close || 0;
+      const previousPrice = sortedData[i - 1].close || 0;
       
       if (currentPrice > 0 && previousPrice > 0) {
         const change = currentPrice - previousPrice;
         gains.push(change > 0 ? change : 0);
         losses.push(change < 0 ? Math.abs(change) : 0);
       }
+    }
+
+    if (gains.length < period || losses.length < period) {
+      console.log(`📊 RSI: Not enough price changes for calculation`);
+      return {
+        value: 50,
+        signal: 'NEUTRAL',
+        strength: 'LOW',
+        interpretation: 'Insufficient price movement data for RSI calculation'
+      };
     }
 
     let avgGain = gains.slice(0, period).reduce((sum, gain) => sum + gain, 0) / period;
@@ -527,31 +706,6 @@ function calculateRSI(historicalData: HistoricalData[], period: number = 14): { 
   }
 }
 
-async function getHistoricalData(symbol: string): Promise<HistoricalData[]> {
-  try {
-    console.log(`📊 HISTORICAL DATA: Fetching for ${symbol}`);
-    const historyData = await getRedisData('volume_history');
-    if (!historyData) {
-      console.log('❌ No volume_history data found in Redis');
-      return [];
-    }
-    
-    const history: Record<string, HistoricalData[]> = JSON.parse(historyData);
-    const symbolData = history[symbol.toUpperCase()] || [];
-    
-    console.log(`📊 Historical data for ${symbol}:`, {
-      found: symbolData.length > 0,
-      entries: symbolData.length,
-      latest: symbolData.length > 0 ? symbolData[symbolData.length - 1] : null
-    });
-    
-    return symbolData;
-  } catch (error) { 
-    console.error('❌ Error in getHistoricalData:', error); 
-    return []; 
-  }
-}
-
 function generatePsychologicalLevels(currentPrice: number): number[] {
   const levels: number[] = [];
   const priceRange = currentPrice * 0.2;
@@ -575,7 +729,7 @@ function getPsychologicalLevels(symbol: string, currentPrice: number): number[] 
   return generatedLevels;
 }
 
-// FIXED: Change percent calculation using Zerodha's actual previous close
+// FIXED: Change percent calculation
 async function calculateChangePercent(
   currentPrice: number, 
   historicalData: HistoricalData[], 
@@ -622,9 +776,9 @@ async function calculateChangePercent(
   );
   
   for (const dayData of sortedHistorical) {
-    if (dayData.lastPrice && dayData.lastPrice > 0) {
-      const changePercent = ((currentPrice - dayData.lastPrice) / dayData.lastPrice) * 100;
-      console.log(`📊 Historical-based change: ${currentPrice} vs ${dayData.lastPrice} (${dayData.date}) = ${changePercent.toFixed(2)}%`);
+    if (dayData.close && dayData.close > 0) {
+      const changePercent = ((currentPrice - dayData.close) / dayData.close) * 100;
+      console.log(`📊 Historical-based change: ${currentPrice} vs ${dayData.close} (${dayData.date}) = ${changePercent.toFixed(2)}%`);
       return changePercent;
     }
   }
@@ -633,7 +787,7 @@ async function calculateChangePercent(
   return 0;
 }
 
-// ADDED: Price verification function
+// FIXED: Price verification function
 async function verifyPriceData(kite: any, tradingSymbol: string, exchange: string) {
   try {
     const quoteData = await kite.getQuote([`${exchange}:${tradingSymbol}`]);
@@ -663,7 +817,14 @@ async function verifyPriceData(kite: any, tradingSymbol: string, exchange: strin
   }
 }
 
-function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?: number, isUsingHistoricalFallback: boolean = false,istHours?: number,istMinutes?: number): {
+// FIXED: Volume metrics calculation with proper historical data
+function calculateVolumeMetrics(
+  historicalData: HistoricalData[], 
+  currentVolume?: number, 
+  isUsingHistoricalFallback: boolean = false,
+  istHours?: number,
+  istMinutes?: number
+): {
   avg20DayVolume: number;
   todayVolumePercentage: number;
   estimatedTodayVolume: number;
@@ -674,6 +835,7 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     isUsingHistoricalFallback: isUsingHistoricalFallback
   });
   
+  // Default values for new stocks
   let result = {
     avg20DayVolume: 1000,
     todayVolumePercentage: 100,
@@ -681,19 +843,19 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
   };
   
   if (!historicalData.length) {
-    console.log('❌ No historical data available');
+    console.log('📊 No historical data available - using defaults for new stock');
     return result;
   }
   
-  const dataForAverage = historicalData.filter(entry => entry.totalVolume > 0);
+  const dataForAverage = historicalData.filter(entry => entry.volume > 0);
   console.log('📊 Available data with volume > 0:', dataForAverage.length, 'entries');
   
   if (dataForAverage.length === 0) {
-    console.log('❌ No data with volume > 0 available');
+    console.log('📊 No data with volume > 0 available');
     return result;
   }
   
-  const totalVolume = dataForAverage.reduce((sum, entry) => sum + entry.totalVolume, 0);
+  const totalVolume = dataForAverage.reduce((sum, entry) => sum + entry.volume, 0);
   const averageVolume = totalVolume / dataForAverage.length;
   
   console.log('📊 Calculated average from', dataForAverage.length, 'days:', averageVolume);
@@ -727,8 +889,8 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
     const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     const latestHistorical = sortedHistorical[0];
     
-    if (latestHistorical && latestHistorical.totalVolume > 0) {
-      const lastVolume = latestHistorical.totalVolume;
+    if (latestHistorical && latestHistorical.volume > 0) {
+      const lastVolume = latestHistorical.volume;
       
       result.todayVolumePercentage = Math.max(parseFloat((lastVolume / averageVolume * 100).toFixed(1)), 1);
       result.estimatedTodayVolume = lastVolume;
@@ -749,17 +911,15 @@ function calculateVolumeMetrics(historicalData: HistoricalData[], currentVolume?
 // NEW: Calculate actual OI change from historical data
 async function getOIChangePercent(strike: number, currentOI: number, instrumentType: 'CE' | 'PE', symbol: string): Promise<number | null> {
   try {
-    // Try to get previous OI data from Redis
     const oiHistoryKey = `oi_history_${symbol.toUpperCase()}`;
     const oiHistoryData = await getRedisData(oiHistoryKey);
     
     if (oiHistoryData) {
       const oiHistory: Record<string, Record<string, { ce_oi: number; pe_oi: number }>> = JSON.parse(oiHistoryData);
       
-      // Get the most recent previous timestamp (excluding current minute if exists)
       const timestamps = Object.keys(oiHistory).sort();
       if (timestamps.length >= 2) {
-        const previousTimestamp = timestamps[timestamps.length - 2]; // Second most recent
+        const previousTimestamp = timestamps[timestamps.length - 2];
         const previousOI = oiHistory[previousTimestamp]?.[strike]?.[instrumentType.toLowerCase() as 'ce_oi' | 'pe_oi'];
         
         if (previousOI && previousOI > 0 && currentOI > 0) {
@@ -770,7 +930,6 @@ async function getOIChangePercent(strike: number, currentOI: number, instrumentT
       }
     }
     
-    // No historical data available
     console.log(`📊 OI CHANGE: No historical data for ${symbol} ${strike}${instrumentType}`);
     return null;
   } catch (error) {
@@ -779,7 +938,7 @@ async function getOIChangePercent(strike: number, currentOI: number, instrumentT
   }
 }
 
-// UPDATED: OI Trend Analysis with actual change calculation
+// FIXED: OI Trend Analysis with actual change calculation
 async function calculateOITrend(
   mainOI: number, 
   oppositeOI: number, 
@@ -793,14 +952,11 @@ async function calculateOITrend(
   significance: 'LOW' | 'MEDIUM' | 'HIGH';
   icon: string;
 } | null> {
-  // Determine which OI to track changes for
   const instrumentType = type === 'support' ? 'PE' : 'CE';
   const oiToTrack = type === 'support' ? mainOI : mainOI;
   
-  // Calculate actual change percent
   const changePercent = await getOIChangePercent(strike, oiToTrack, instrumentType, symbol);
   
-  // If no historical data available, return null to indicate no trend analysis
   if (changePercent === null) {
     return null;
   }
@@ -841,7 +997,7 @@ async function calculateOITrend(
   };
 }
 
-// ENHANCED: Support Levels with OI Trend Analysis
+// FIXED: Support Levels with OI Trend Analysis
 async function findSupportLevels(
   currentPrice: number, 
   optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, 
@@ -878,7 +1034,6 @@ async function findSupportLevels(
           strength = 'weak';
         }
         
-        // Create display strength with arrow
         const displayStrength = oiTrend ? `${strength} ${oiTrend.icon}` : `${strength} ➡️`;
         
         candidates.push({ 
@@ -888,7 +1043,7 @@ async function findSupportLevels(
           tooltip,
           oiTrend: oiTrend || undefined,
           currentOI: { ce_oi, pe_oi },
-          displayStrength // Added for formatted display
+          displayStrength
         });
       }
     }
@@ -897,13 +1052,12 @@ async function findSupportLevels(
   console.log('🔍 OI Supports found:', candidates.map(c => `${c.price} (${c.strength})`));
   if (candidates.length === 0) return [];
   
-  // Sort by proximity to current price (nearest first)
   candidates.sort((a, b) => Math.abs(currentPrice - b.price) - Math.abs(currentPrice - a.price));
   const significantLevels = candidates.slice(0, 5);
-  return significantLevels.sort((a, b) => b.price - a.price); // Highest support first (nearest to current price)
+  return significantLevels.sort((a, b) => b.price - a.price);
 }
 
-// ENHANCED: Resistance Levels with OI Trend Analysis
+// FIXED: Resistance Levels with OI Trend Analysis
 async function findResistanceLevels(
   currentPrice: number, 
   optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>, 
@@ -933,7 +1087,6 @@ async function findResistanceLevels(
           strength = 'weak';
         }
         
-        // Create display strength with arrow
         const displayStrength = oiTrend ? `${strength} ${oiTrend.icon}` : `${strength} ➡️`;
         
         candidates.push({ 
@@ -943,7 +1096,7 @@ async function findResistanceLevels(
           tooltip,
           oiTrend: oiTrend || undefined,
           currentOI: { ce_oi, pe_oi },
-          displayStrength // Added for formatted display
+          displayStrength
         });
       }
     }
@@ -954,11 +1107,10 @@ async function findResistanceLevels(
     return [];
   }
   
-  // Sort by proximity to current price (nearest first)
   candidates.sort((a, b) => Math.abs(currentPrice - a.price) - Math.abs(currentPrice - b.price));
   const significantLevels = candidates.slice(0, 5);
   console.log(`🔍 RESISTANCE LEVELS: Found ${significantLevels.length} significant levels`);
-  return significantLevels.sort((a, b) => a.price - b.price); // Lowest resistance first (nearest to current price)
+  return significantLevels.sort((a, b) => a.price - b.price);
 }
 
 function calculateSupportResistance(history: HistoricalData[], currentPrice: number): SupportResistanceLevel[] {
@@ -970,10 +1122,10 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   const priceRange = currentPrice * 0.20;
   
   history.forEach(entry => {
-    if (entry.lastPrice && Math.abs(entry.lastPrice - currentPrice) <= priceRange) {
-      const roundedPrice = Math.round(entry.lastPrice / 5) * 5;
+    if (entry.close && Math.abs(entry.close - currentPrice) <= priceRange) {
+      const roundedPrice = Math.round(entry.close / 5) * 5;
       const currentData = priceLevels.get(roundedPrice) || {volume: 0, strength: 'weak'};
-      const newVolume = currentData.volume + (entry.totalVolume || 0);
+      const newVolume = currentData.volume + (entry.volume || 0);
       
       let strength: 'weak' | 'medium' | 'strong' = 'weak';
       if (newVolume > currentPrice * 1000) strength = 'medium';
@@ -1023,7 +1175,7 @@ function calculateSupportResistance(history: HistoricalData[], currentPrice: num
   return levels.slice(0, 10);
 }
 
-// UPDATED: Get Final Levels - OI-ONLY with Nearest Levels First
+// FIXED: Get Final Levels - OI-ONLY with Nearest Levels First
 async function getFinalLevels(
   symbol: string, 
   history: HistoricalData[], 
@@ -1036,7 +1188,6 @@ async function getFinalLevels(
   console.log('Symbol:', symbol);
   console.log('Current Price:', currentPrice);
   
-  // Use only OI-based levels
   console.log('📊 OI-BASED SUPPORT ANALYSIS:');
   const oiSupports = await findSupportLevels(currentPrice, optionsByStrike, allStrikes, symbol);
   console.log('OI Supports found:', oiSupports.map(s => `${s.price} (${s.strength})`));
@@ -1045,7 +1196,6 @@ async function getFinalLevels(
   const oiResistances = await findResistanceLevels(currentPrice, optionsByStrike, allStrikes, symbol);
   console.log('OI Resistances found:', oiResistances.map(r => `${r.price} (${r.strength})`));
 
-  // Take top 2 levels each (already sorted by proximity)
   const finalSupports = oiSupports.slice(0, 2);
   const finalResistances = oiResistances.slice(0, 2);
   
@@ -1059,7 +1209,7 @@ async function getFinalLevels(
   };
 }
 
-// UPDATED: Smart sentiment with proper volume classification
+// FIXED: Smart sentiment with proper volume classification
 function calculateSmartSentiment(
   pcr: number,
   volumePcr: number,
@@ -1081,7 +1231,6 @@ function calculateSmartSentiment(
   const dataLength = historicalDataLength || 0;
   const breakdown: string[] = [];
   
-  // 1. PCR Score
   let pcrScore = 0;
   if (pcr > 1.3) pcrScore = 2;
   else if (pcr > 1.1) pcrScore = 1;
@@ -1095,10 +1244,8 @@ function calculateSmartSentiment(
                       pcr <= 1.3 ? " (slightly bullish)" : " (bullish)";
   breakdown.push(`${pcrScore >= 0 ? '+' : ''}${pcrScore} • OI PCR ${pcr.toFixed(2)}${oiPCRContext}`);
 
-  // 2. Conviction Score - REMOVED as requested (call wall line)
   let convictionScore = 0;
 
-  // 3. Volume PCR Modifier
   let volumeModifier = 0;
   if (volumePcr < 0.7) volumeModifier = 2;
   else if (volumePcr < 0.9) volumeModifier = 1;
@@ -1112,24 +1259,21 @@ function calculateSmartSentiment(
                         volumePcr <= 1.3 ? " (slightly bearish volume)" : " (bearish volume)";
   breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
 
-  // 4. A/D Line Analysis Score - FIXED
   let adScore = 0;
   let adContext = "";
 
   if (adAnalysis) {
     switch (adAnalysis.todaySignal) {
       case 'ACCUMULATION':
-        // FIXED: Weak accumulation now gets +1 instead of 0
         adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? 3 :
                   adAnalysis.todayStrength === 'STRONG' ? 2 :
-                  adAnalysis.todayStrength === 'MODERATE' ? 1 : 1; // WEAK gets +1
+                  adAnalysis.todayStrength === 'MODERATE' ? 1 : 1;
         adContext = ` (${adAnalysis.todayStrength.toLowerCase()} accumulation)`;
         break;
       case 'DISTRIBUTION':
-        // FIXED: Weak distribution now gets -1 instead of 0
         adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? -3 :
                   adAnalysis.todayStrength === 'STRONG' ? -2 :
-                  adAnalysis.todayStrength === 'MODERATE' ? -1 : -1; // WEAK gets -1
+                  adAnalysis.todayStrength === 'MODERATE' ? -1 : -1;
         adContext = ` (${adAnalysis.todayStrength.toLowerCase()} distribution)`;
         break;
       case 'NEUTRAL':
@@ -1142,7 +1286,6 @@ function calculateSmartSentiment(
     adContext = " (data unavailable)";
   }
 
-  // Enhanced A/D context for insufficient data
   let enhancedAdContext = adContext;
   if (dataLength === 0) {
     enhancedAdContext = " (new stock - data collection in progress)";
@@ -1152,7 +1295,6 @@ function calculateSmartSentiment(
 
   breakdown.push(`${adScore >= 0 ? '+' : ''}${adScore} • A/D Line${enhancedAdContext}`);
 
-  // 5. VWAP Score
   let vwapScore = 0;
   let vwapContext = "";
 
@@ -1181,7 +1323,6 @@ function calculateSmartSentiment(
 
   breakdown.push(`${vwapScore >= 0 ? '+' : ''}${vwapScore} • VWAP Position${vwapContext}`);
 
-  // 6. Price Action Score - NEW
   let priceActionScore = 0;
   let priceActionContext = "";
 
@@ -1202,14 +1343,12 @@ function calculateSmartSentiment(
 
   breakdown.push(`${priceActionScore >= 0 ? '+' : ''}${priceActionScore} • Price Action${priceActionContext}`);
 
-  // 7. Today's Volume Percentage Impact - FIXED VOLUME CLASSIFICATION
   let volumePercentageScore = 0;
   let volumePercentageContext = "";
 
   const estimatedVolumePercentage = (estimatedTodayVolume / averageVolume) * 100;
   const volumeLabel = isMarketOpen ? "Today Volume" : "Last Trading Volume";
 
-  // Calculate bullish/bearish bias from key indicators
   const bullishIndicators = (adScore > 0 ? 1 : 0) + (priceActionScore > 0 ? 1 : 0) + (vwapScore > 0 ? 1 : 0);
   const bearishIndicators = (adScore < 0 ? 1 : 0) + (priceActionScore < 0 ? 1 : 0) + (vwapScore < 0 ? 1 : 0);
   
@@ -1217,9 +1356,7 @@ function calculateSmartSentiment(
   const hasBearishBias = bearishIndicators > bullishIndicators;
   const isNeutral = bullishIndicators === bearishIndicators;
 
-  // FIXED: Proper volume classification thresholds
   if (estimatedVolumePercentage > 200) {
-    // Very High volume (>200%)
     if (hasBullishBias) {
       volumePercentageScore = 2;
       volumePercentageContext = ` (very high volume strongly confirming bullish move - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
@@ -1231,7 +1368,6 @@ function calculateSmartSentiment(
       volumePercentageContext = ` (very high volume significantly amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
     }
   } else if (estimatedVolumePercentage > 130) {
-    // High volume (130-200%)
     if (hasBullishBias) {
       volumePercentageScore = 1;
       volumePercentageContext = ` (high volume confirming bullish move - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
@@ -1243,14 +1379,13 @@ function calculateSmartSentiment(
       volumePercentageContext = ` (high volume amplifying sentiment - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)`;
     }
   } else if (estimatedVolumePercentage < 30) {
-    // Very Low volume (<30%) - FIXED LOGIC
     if (hasBullishBias) {
-      volumePercentageScore = -2; // Very low volume strongly weakens bullish conviction
+      volumePercentageScore = -2;
       volumePercentageContext = isMarketOpen ? 
         ` (very low volume strongly weakens bullish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
         ` (very low volume strongly weakens bullish conviction)`;
     } else if (hasBearishBias) {
-      volumePercentageScore = 2; // Very low volume strongly weakens bearish conviction
+      volumePercentageScore = 2;
       volumePercentageContext = isMarketOpen ? 
         ` (very low volume strongly weakens bearish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
         ` (very low volume strongly weakens bearish conviction)`;
@@ -1261,14 +1396,13 @@ function calculateSmartSentiment(
         ` (very low volume - no clear direction)`;
     }
   } else if (estimatedVolumePercentage < 70) {
-    // Low volume (30-70%) - FIXED LOGIC
     if (hasBullishBias) {
-      volumePercentageScore = -1; // Low volume weakens bullish conviction
+      volumePercentageScore = -1;
       volumePercentageContext = isMarketOpen ? 
         ` (low volume weakens bullish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
         ` (low volume weakens bullish conviction)`;
     } else if (hasBearishBias) {
-      volumePercentageScore = 1; // Low volume weakens bearish conviction
+      volumePercentageScore = 1;
       volumePercentageContext = isMarketOpen ? 
         ` (low volume weakens bearish conviction - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
         ` (low volume weakens bearish conviction)`;
@@ -1279,14 +1413,12 @@ function calculateSmartSentiment(
         ` (low volume - no clear direction)`;
     }
   } else {
-    // Moderate volume (70-130%)
     volumePercentageScore = 0;
     volumePercentageContext = isMarketOpen ? 
       ` (moderate volume - projected ${estimatedVolumePercentage.toFixed(1)}% of avg)` :
       ` (moderate volume)`;
   }
 
-  // Enhanced volume context for new stocks
   let volumeDisplayContext = volumePercentageContext;
   if (dataLength === 0) {
     volumeDisplayContext = " (new stock - data collection in progress)";
@@ -1296,7 +1428,6 @@ function calculateSmartSentiment(
 
   breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • ${volumeLabel} ${todayVolumePercentage.toFixed(1)}%${volumeDisplayContext}`);
 
-  // Define weights for each indicator (sum should be 1.0)
   const weights = {
     oiPcr: 0.20,
     volumePcr: 0.15,
@@ -1306,7 +1437,6 @@ function calculateSmartSentiment(
     volumePercent: 0.15,
   };
 
-  // Calculate weighted score (normalized to -10 to +10)
   const weightedScore = (
     (pcrScore * weights.oiPcr) +
     (volumeModifier * weights.volumePcr) +
@@ -1339,6 +1469,50 @@ function calculateSmartSentiment(
   };
 }
 
+// NEW: Save current data as historical entry
+async function saveCurrentDataAsHistorical(
+  symbol: string,
+  ltp: number,
+  currentVolume: number,
+  todayOHLC: any,
+  isMarketOpen: boolean
+): Promise<void> {
+  try {
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    const dateStr = istTime.toISOString().split('T')[0];
+    
+    // Get existing historical data
+    const existingData = await getHistoricalData(symbol);
+    const hasTodayData = existingData.some(d => d.date === dateStr);
+    
+    if (hasTodayData) {
+      console.log(`📊 Already have data for ${symbol} on ${dateStr}`);
+      return;
+    }
+    
+    // Create historical entry from current data
+    const historicalEntry: HistoricalData = {
+      date: dateStr,
+      timestamp: now.getTime(),
+      open: todayOHLC?.open || ltp,
+      high: todayOHLC?.high || ltp,
+      low: todayOHLC?.low || ltp,
+      close: ltp,
+      volume: currentVolume || 0,
+      symbol: symbol.toUpperCase(),
+      lastPrice: ltp,
+      totalVolume: currentVolume || 0,
+      name: symbol.toUpperCase()
+    };
+    
+    await storeHistoricalData(symbol, historicalEntry);
+    console.log(`💾 Saved current data as historical for ${symbol} (Day ${existingData.length + 1})`);
+    
+  } catch (error) {
+    console.error('❌ Error saving current data as historical:', error);
+  }
+}
 
 // --- MAIN API FUNCTION ---
 export async function POST(request: Request) {
@@ -1478,16 +1652,19 @@ export async function POST(request: Request) {
         console.log('⚠️ Live price fetch failed:', error instanceof Error ? error.message : 'Unknown error');
     }
 
+    // FIXED: Get historical data with new enhanced system
     const historicalData = await getHistoricalData(displayName);
     const historicalDataLength = historicalData.length;
     
-    console.log('🔍 VOLUME DATA SOURCE DEBUG:', {
-  symbol: displayName,
-  historicalEntries: historicalDataLength,
-  latestHistorical: historicalDataLength > 0 ? historicalData[0] : null,
-  currentVolume: currentVolume,
-  isMarketOpen: isMarketOpen
-});
+    console.log('🔍 HISTORICAL DATA STATUS:', {
+      symbol: displayName,
+      entries: historicalDataLength,
+      latestEntry: historicalDataLength > 0 ? historicalData[historicalDataLength - 1] : null,
+      dataCollectionStatus: historicalDataLength === 0 ? 'NEW_STOCK' : 
+                           historicalDataLength < 5 ? 'EARLY_STAGE' :
+                           historicalDataLength < 14 ? 'BUILDING' : 'MATURE'
+    });
+    
     const hasLiveData = ltp > 0 && currentVolume > 0;
     const shouldUseHistorical = !hasLiveData || (!isMarketOpen && !isTradingDay);
 
@@ -1505,23 +1682,23 @@ export async function POST(request: Request) {
         const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         const latestHistorical = sortedHistorical[0];
         
-        if (latestHistorical && latestHistorical.lastPrice) {
+        if (latestHistorical) {
             if (ltp === 0) {
-                ltp = latestHistorical.lastPrice;
+                ltp = latestHistorical.close || latestHistorical.lastPrice || 0;
                 console.log(`📊 Using historical LTP: ${ltp} from ${latestHistorical.date}`);
             }
             
             if (currentVolume === 0) {
-                currentVolume = latestHistorical.totalVolume || 0;
+                currentVolume = latestHistorical.volume || latestHistorical.totalVolume || 0;
                 console.log(`📊 Using historical volume: ${currentVolume} from ${latestHistorical.date}`);
             }
             
-            if (!todayOHLC && latestHistorical.lastPrice) {
+            if (!todayOHLC && ltp > 0) {
                 todayOHLC = {
-                    open: latestHistorical.lastPrice,
-                    high: latestHistorical.high || latestHistorical.lastPrice,
-                    low: latestHistorical.low || latestHistorical.lastPrice,
-                    close: latestHistorical.lastPrice
+                    open: latestHistorical.open || ltp,
+                    high: latestHistorical.high || ltp,
+                    low: latestHistorical.low || ltp,
+                    close: latestHistorical.close || ltp
                 };
                 console.log(`📊 Using synthetic OHLC from historical data`);
             }
@@ -1530,10 +1707,10 @@ export async function POST(request: Request) {
 
     if (ltp === 0 && historicalDataLength > 0) {
         const sortedHistorical = historicalData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        const latestWithPrice = sortedHistorical.find(entry => entry.lastPrice && entry.lastPrice > 0);
+        const latestWithPrice = sortedHistorical.find(entry => entry.close && entry.close > 0);
         
-        if (latestWithPrice && latestWithPrice.lastPrice) {
-            ltp = latestWithPrice.lastPrice;
+        if (latestWithPrice && latestWithPrice.close) {
+            ltp = latestWithPrice.close;
             console.log(`🔄 Final fallback to historical LTP: ${ltp} from ${latestWithPrice.date}`);
         }
     }
@@ -1545,18 +1722,25 @@ export async function POST(request: Request) {
         }, { status: 404 });
     }
 
+    // NEW: Always save current data as historical (for new stocks and ongoing data collection)
+    if (ltp > 0) {
+      // Run in background, don't await
+      saveCurrentDataAsHistorical(displayName, ltp, currentVolume, todayOHLC, isMarketOpen)
+        .catch(err => console.error('Background data save failed:', err));
+    }
+
     console.log('🎯 FINAL DATA SELECTION:', {
         source: hasLiveData ? 'LIVE' : 'HISTORICAL',
         ltp: ltp,
         volume: currentVolume,
         marketStatus: isMarketOpen ? 'OPEN' : 'CLOSED',
-        dayType: isTradingDay ? 'TRADING_DAY' : 'NON_TRADING_DAY'
+        dayType: isTradingDay ? 'TRADING_DAY' : 'NON_TRADING_DAY',
+        historicalDays: historicalDataLength
     });
 
     // Add price verification
     const actualChange = await verifyPriceData(kc, tradingSymbol, exchange);
     
-    // FIXED: Use the new calculateChangePercent function with proper parameters
     const changePercent = await calculateChangePercent(ltp, historicalData, 'CMP', kc, tradingSymbol, exchange);
     
     console.log(`🔍 ${displayName} ACTUAL VS CALCULATED:`, {
@@ -1565,48 +1749,57 @@ export async function POST(request: Request) {
       discrepancy: actualChange !== null ? Math.abs(actualChange - changePercent) : 'N/A'
     });
 
-    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical,hours,minutes);
+    const volumeMetrics = calculateVolumeMetrics(historicalData, currentVolume, shouldUseHistorical, hours, minutes);
 
-    // === ADD DATA SUFFICIENCY CHECK ===
+    // FIXED: Enhanced Data Sufficiency Check with better messaging
     const dataSufficiency = {
         isFullySufficient: historicalDataLength >= 14,
         totalDaysCollected: historicalDataLength,
+        collectionProgress: historicalDataLength === 0 ? 'NEW_STOCK' :
+                           historicalDataLength < 5 ? 'EARLY_STAGE' :
+                           historicalDataLength < 10 ? 'BUILDING' :
+                           historicalDataLength < 14 ? 'NEARLY_COMPLETE' : 'COMPLETE',
         indicators: {
             volume: { 
                 collected: historicalDataLength, 
                 required: 5, 
-                isReady: historicalDataLength >= 5 
+                isReady: historicalDataLength >= 5,
+                message: historicalDataLength >= 5 ? 'Ready' : `Need ${5 - historicalDataLength} more days`
             },
             adAnalysis: { 
                 collected: historicalDataLength, 
                 required: 10, 
-                isReady: historicalDataLength >= 10 
+                isReady: historicalDataLength >= 10,
+                message: historicalDataLength >= 10 ? 'Ready' : `Need ${10 - historicalDataLength} more days`
             },
             rsi: { 
                 collected: historicalDataLength, 
                 required: 14, 
-                isReady: historicalDataLength >= 14 
+                isReady: historicalDataLength >= 14,
+                message: historicalDataLength >= 14 ? 'Ready' : `Need ${14 - historicalDataLength} more days`
             },
             vwap: { 
                 collected: Math.max(historicalDataLength, 1), 
                 required: 1, 
-                isReady: true
+                isReady: true,
+                message: 'Ready (uses current data)'
             },
             pcr: { 
                 collected: Math.max(historicalDataLength, 1), 
                 required: 1, 
-                isReady: true
+                isReady: true,
+                message: 'Ready (uses current data)'
             }
         }
     };
 
     console.log('📊 DATA SUFFICIENCY CHECK:', {
         daysCollected: historicalDataLength,
-        volumeAnalysis: dataSufficiency.indicators.volume.isReady ? 'READY' : `NEEDS ${5 - historicalDataLength} MORE DAYS`,
-        adAnalysis: dataSufficiency.indicators.adAnalysis.isReady ? 'READY' : `NEEDS ${10 - historicalDataLength} MORE DAYS`,
-        rsiAnalysis: dataSufficiency.indicators.rsi.isReady ? 'READY' : `NEEDS ${14 - historicalDataLength} MORE DAYS`
+        collectionProgress: dataSufficiency.collectionProgress,
+        volumeAnalysis: dataSufficiency.indicators.volume.message,
+        adAnalysis: dataSufficiency.indicators.adAnalysis.message,
+        rsiAnalysis: dataSufficiency.indicators.rsi.message
     });
-    // === END DATA SUFFICIENCY CHECK ===
     
     console.log('🔍 ANALYSIS DEBUG - Volume metrics:', {
       ...volumeMetrics,
@@ -1631,12 +1824,12 @@ export async function POST(request: Request) {
         console.log('📊 A/D ANALYSIS - Using live OHLC data:', todayData);
       } else if (historicalDataLength > 0) {
         const latestHistorical = historicalData[historicalDataLength - 1];
-        if (latestHistorical && latestHistorical.lastPrice && latestHistorical.lastPrice > 0) {
+        if (latestHistorical && latestHistorical.close && latestHistorical.close > 0) {
           todayData = {
-            high: latestHistorical.lastPrice,
-            low: latestHistorical.lastPrice, 
-            close: latestHistorical.lastPrice,
-            volume: currentVolume || latestHistorical.totalVolume || 0
+            high: latestHistorical.close,
+            low: latestHistorical.close, 
+            close: latestHistorical.close,
+            volume: currentVolume || latestHistorical.volume || 0
           };
           console.log('📊 A/D ANALYSIS - Using historical data as proxy:', todayData);
         }
@@ -1655,7 +1848,7 @@ export async function POST(request: Request) {
         if (adAnalysis.todayMoneyFlow === 0) {
           console.log('🔄 Zero money flow detected, using intelligent fallback...');
           const marketProgress = hours >= 9 && hours < 15 ? 
-  (hours - 9) + (minutes / 60) : 6.25;
+            (hours - 9) + (minutes / 60) : 6.25;
           const volumeEstimate = volumeMetrics.avg20DayVolume * (marketProgress / 6.25);
           adAnalysis.todayMoneyFlow = volumeEstimate * ltp * 0.15;
           console.log(`📊 A/D MONEY FLOW FALLBACK: ${adAnalysis.todayMoneyFlow}`);
@@ -1672,7 +1865,7 @@ export async function POST(request: Request) {
           confidence: adAnalysis.confidence
         });
       } else {
-        console.log('📊 A/D ANALYSIS - Skipped: Insufficient historical data');
+        console.log('📊 A/D ANALYSIS - Skipped: Insufficient historical data (new stock)');
         adAnalysis = {
           todaySignal: 'NEUTRAL',
           todayStrength: 'WEAK',
@@ -1691,7 +1884,7 @@ export async function POST(request: Request) {
             volumeVsAverage: 100,
             volumeConfirmation: 'NO'
           },
-          interpretation: 'Insufficient historical data for A/D analysis'
+          interpretation: 'New stock - collecting historical data (1/' + historicalDataLength + ' days)'
         } as ADAnalysis;
       }
     } catch (error) {
@@ -1824,7 +2017,6 @@ export async function POST(request: Request) {
       await storeOIData(displayName.toUpperCase(), optionsByStrike);
     } catch (error) {
       console.error('❌ Error storing OI data:', error);
-      // Continue execution even if OI storage fails
     }
 
     const { supports: supportLevels, resistances: resistanceLevels } = await getFinalLevels(
@@ -1877,17 +2069,16 @@ export async function POST(request: Request) {
     const getStrengthColor = (strength: string, type: 'support' | 'resistance') => {
       if (type === 'support') {
         switch (strength.toUpperCase()) {
-          case 'STRONG': return '#10b981'; // Green
-          case 'MEDIUM': return '#f59e0b'; // Orange
-          case 'WEAK': return '#ef4444';   // Red
+          case 'STRONG': return '#10b981';
+          case 'MEDIUM': return '#f59e0b';
+          case 'WEAK': return '#ef4444';
           default: return '#6b7280';
         }
       } else {
-        // Resistance - opposite colors
         switch (strength.toUpperCase()) {
-          case 'STRONG': return '#ef4444'; // Red
-          case 'MEDIUM': return '#f59e0b'; // Orange
-          case 'WEAK': return '#10b981';   // Green
+          case 'STRONG': return '#ef4444';
+          case 'MEDIUM': return '#f59e0b';
+          case 'WEAK': return '#10b981';
           default: return '#6b7280';
         }
       }
@@ -1948,7 +2139,8 @@ export async function POST(request: Request) {
       score: sentimentResult.score,
       pcr: pcr,
       dataSource: hasLiveData ? 'LIVE' : 'HISTORICAL',
-      marketStatus: isMarketOpen ? 'OPEN' : 'CLOSED'
+      marketStatus: isMarketOpen ? 'OPEN' : 'CLOSED',
+      historicalDays: historicalDataLength
     });
 
     const responseData = {
@@ -1962,6 +2154,15 @@ export async function POST(request: Request) {
         estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,
         dataSufficiency: dataSufficiency,
         insufficientData: !dataSufficiency.isFullySufficient,
+        dataCollectionMessage: historicalDataLength === 0 ? 
+          "New stock - collecting data (Day 1)" :
+          historicalDataLength < 5 ? 
+          `Collecting data (${historicalDataLength}/5 days for volume analysis)` :
+          historicalDataLength < 10 ? 
+          `Collecting data (${historicalDataLength}/10 days for A/D analysis)` :
+          historicalDataLength < 14 ? 
+          `Collecting data (${historicalDataLength}/14 days for RSI analysis)` :
+          "Complete historical data available",
         expiryDate: formattedExpiry,
         sentiment: sentimentResult.sentiment,
         sentimentScore: sentimentResult.score,
@@ -2084,7 +2285,7 @@ export async function POST(request: Request) {
             
             formattedLines: [
                 `💰 Current VWAP: ₹${vwapAnalysis.value?.toFixed(2) || 'Calculating...'}`,
-                                `📈 LTP vs VWAP: ${vwapAnalysis.deviationPercent >= 0 ? '+' : ''}${vwapAnalysis.deviationPercent.toFixed(2)}% ${vwapAnalysis.deviationPercent > 0 ? 'ABOVE' : vwapAnalysis.deviationPercent < 0 ? 'BELOW' : 'AT'}`,
+                `📈 LTP vs VWAP: ${vwapAnalysis.deviationPercent >= 0 ? '+' : ''}${vwapAnalysis.deviationPercent.toFixed(2)}% ${vwapAnalysis.deviationPercent > 0 ? 'ABOVE' : vwapAnalysis.deviationPercent < 0 ? 'BELOW' : 'AT'}`,
                 `📦 Cumulative Volume: ${(vwapAnalysis.cumulativeVolume / 1000).toFixed(1)}K shares`,
                 `🎯 Signal: ${vwapAnalysis.signal} ${vwapAnalysis.strength !== 'WEAK' ? `(${vwapAnalysis.strength})` : ''}`,
                 ``,
