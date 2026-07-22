@@ -322,78 +322,22 @@ async function checkIfMarketHoliday(date: Date): Promise<boolean> {
   }
 }
 
-async function getWeekendVolumePCR(symbol: string, currentTime: Date): Promise<number> {
-  try {
-    console.log(`🌅 WEEKEND PCR: Getting weekend-appropriate PCR for ${symbol}`);
-    
-    const fridayData = await getRedisData('friday_closing_data');
-    if (fridayData) {
-      const fridayPCRs: Record<string, number> = JSON.parse(fridayData);
-      const symbolPCR = fridayPCRs[symbol.toUpperCase()];
-      if (symbolPCR && symbolPCR !== 0 && symbolPCR !== 1.0) {
-        console.log(`🌅 WEEKEND PCR: Using Friday's stored PCR: ${symbolPCR}`);
-        return symbolPCR;
-      }
-    }
-    
-    const weekendPCR = 1.05 + (Math.random() * 0.1 - 0.05);
-    console.log(`🌅 WEEKEND PCR: Using weekend default PCR: ${weekendPCR}`);
-    return weekendPCR;
-  } catch (error) {
-    console.error('❌ Error getting weekend PCR:', error);
-    return 1.05;
-  }
-}
-
-async function getHolidayVolumePCR(symbol: string, currentTime: Date): Promise<number> {
-  try {
-    console.log(`🎄 HOLIDAY PCR: Getting holiday-appropriate PCR for ${symbol}`);
-    
-    const preHolidayData = await getRedisData('pre_holiday_data');
-    if (preHolidayData) {
-      const holidayPCRs: Record<string, number> = JSON.parse(preHolidayData);
-      const symbolPCR = holidayPCRs[symbol.toUpperCase()];
-      if (symbolPCR && symbolPCR !== 0 && symbolPCR !== 1.0) {
-        console.log(`🎄 HOLIDAY PCR: Using pre-holiday stored PCR: ${symbolPCR}`);
-        return symbolPCR;
-      }
-    }
-    
-    const holidayPCR = 1.1 + (Math.random() * 0.2 - 0.1);
-    console.log(`🎄 HOLIDAY PCR: Using holiday default PCR: ${holidayPCR}`);
-    return holidayPCR;
-  } catch (error) {
-    console.error('❌ Error getting holiday PCR:', error);
-    return 1.1;
-  }
-}
-
-async function getAfterHoursVolumePCR(symbol: string, oiPCR: number, currentTime: Date): Promise<number> {
-  try {
-    console.log(`🌙 AFTER-HOURS PCR: Getting after-hours PCR for ${symbol}`);
-    
-    if (oiPCR > 0 && oiPCR !== 1.0) {
-      console.log(`🌙 AFTER-HOURS PCR: Using OI PCR: ${oiPCR}`);
-      return oiPCR;
-    }
-    
-    const hour = currentTime.getHours();
-    let afterHoursPCR: number;
-    
-    if (hour >= 18 || hour < 9) {
-      afterHoursPCR = 1.0 + (Math.random() * 0.3 - 0.15);
-      console.log(`🌙 AFTER-HOURS PCR: Evening/overnight PCR: ${afterHoursPCR}`);
-    } else {
-      afterHoursPCR = 1.0 + (Math.random() * 0.2 - 0.1);
-      console.log(`🌙 AFTER-HOURS PCR: Close to market open/close PCR: ${afterHoursPCR}`);
-    }
-    
-    return afterHoursPCR;
-  } catch (error) {
-    console.error('❌ Error getting after-hours PCR:', error);
-    return 1.0;
-  }
-}
+// --- FIX: getWeekendVolumePCR, getHolidayVolumePCR, and getAfterHoursVolumePCR
+// used to live here. All three used Math.random() to fabricate a
+// plausible-looking PCR value whenever real weekend/holiday/after-hours
+// volume data wasn't available, and fed that synthetic number into the
+// same sentiment score as genuinely live data — with no way for the user
+// to tell the difference. They also depended on two Redis keys
+// ('friday_closing_data', 'pre_holiday_data') that were never written
+// anywhere in the codebase, so the "use real data first" branch could
+// never actually succeed — the random fallback fired 100% of the time.
+//
+// Replaced by a single honest rule at the call site below: use the
+// genuinely real, exchange-published OI-based `pcr` as a proxy for
+// `volumePcr` whenever live trading volume isn't available (which is
+// correct in ALL of these situations, not just "market open"), and
+// explicitly flag the result as estimated rather than inventing a number
+// when even that isn't usable.
 
 function calculatePriceTrend(historicalData: HistoricalData[]): 'BULLISH' | 'BEARISH' | 'NEUTRAL' {
   try {
@@ -1764,6 +1708,11 @@ export async function POST(request: Request) {
 
     let pcr = totalCallOI > 0 ? totalPutOI / totalCallOI : 0; 
     let volumePcr = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0;
+    // --- FIX: transparency flags so the UI can show when volumePcr is a
+    // real-OI-based proxy or a genuine no-data neutral, instead of silently
+    // blending estimated numbers in as if they were live trading volume.
+    let volumePcrIsEstimated = false;
+    let volumePcrEstimateReason = '';
 
     console.log('📊 PCR CALCULATION - Initial values:', { pcr, volumePcr, totalCallOI, totalPutOI });
 
@@ -1780,22 +1729,38 @@ export async function POST(request: Request) {
             }
         }
         
+        // --- FIX: removed random-number fallbacks (getWeekendVolumePCR,
+        // getHolidayVolumePCR, getAfterHoursVolumePCR all used Math.random()
+        // to fabricate a plausible-looking PCR when no real volume data was
+        // available — feeding synthetic numbers into the same sentiment
+        // score as real data, with no indication to the user which was which.
+        //
+        // The OI-based `pcr` is genuinely real in all these cases (Kite's
+        // quote API returns the last real exchange-published OI even when
+        // markets are closed) — so we now use that as an honest proxy for
+        // ALL non-trading-volume situations, not just "market open but
+        // volume missing". If OI itself isn't usable either, we mark the
+        // reading explicitly as estimated rather than inventing a number.
         if ((volumePcr === 0 || volumePcr === 1.0)) {
-            if (isMarketOpen && isTradingDay) {
-                if (pcr > 0 && pcr !== 1.0) {
-                    volumePcr = pcr;
-                    console.log(`📊 Market open - using OI PCR as proxy: ${volumePcr}`);
-                } else {
-                    const priceChange = changePercent || 0;
-                    volumePcr = priceChange > 0 ? 0.9 : 1.1;
-                    console.log(`📊 Market open - using price-action based PCR: ${volumePcr}`);
-                }
-            } else if (isWeekend) {
-                volumePcr = await getWeekendVolumePCR(displayName, istTime);
-            } else if (isMarketHoliday) {
-                volumePcr = await getHolidayVolumePCR(displayName, istTime);
+            if (pcr > 0 && pcr !== 1.0) {
+                volumePcr = pcr;
+                volumePcrIsEstimated = true;
+                volumePcrEstimateReason = isMarketOpen
+                    ? 'Live trading volume unavailable — using real OI-based PCR as proxy'
+                    : isWeekend
+                    ? 'Market closed (weekend) — using last real OI-based PCR as proxy'
+                    : isMarketHoliday
+                    ? 'Market closed (holiday) — using last real OI-based PCR as proxy'
+                    : 'Outside trading hours — using last real OI-based PCR as proxy';
+                console.log(`📊 Using real OI PCR as volume proxy: ${volumePcr} (${volumePcrEstimateReason})`);
             } else {
-                volumePcr = await getAfterHoursVolumePCR(displayName, pcr, istTime);
+                // No usable OI data either — be honest about it instead of
+                // guessing from price direction. Neutral (1.0) contributes
+                // zero to the sentiment score rather than fabricating a lean.
+                volumePcr = 1.0;
+                volumePcrIsEstimated = true;
+                volumePcrEstimateReason = 'No real volume or OI data available — showing neutral, not a guess';
+                console.log(`📊 No usable OI/volume data — defaulting to neutral (not randomized): ${volumePcr}`);
             }
         }
     }
@@ -1968,6 +1933,11 @@ export async function POST(request: Request) {
         sentimentBreakdown: sentimentResult.breakdown,
         pcr: parseFloat(pcr.toFixed(2)),
         volumePcr: parseFloat(volumePcr.toFixed(2)),
+        // --- FIX: exposes whether volumePcr is real live trading volume or
+        // an estimated proxy (real OI data or neutral fallback), instead of
+        // silently presenting estimated numbers as if they were live.
+        volumePcrIsEstimated,
+        volumePcrEstimateReason: volumePcrIsEstimated ? volumePcrEstimateReason : undefined,
         maxPain,
         support: finalSupport, 
         resistance: finalResistance,

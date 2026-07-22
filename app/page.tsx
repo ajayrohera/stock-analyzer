@@ -119,6 +119,11 @@ type AnalysisResult = {
   symbol: string; 
   pcr: number; 
   volumePcr: number;
+  // --- FIX: surfaces whether volumePcr is real live trading volume or an
+  // estimated proxy (real OI data or neutral fallback), instead of
+  // silently presenting estimated numbers as if they were live.
+  volumePcrIsEstimated?: boolean;
+  volumePcrEstimateReason?: string;
   maxPain: number; 
   resistance: number;
   support: number;
@@ -774,11 +779,16 @@ const VolumeCard = React.memo(({
 });
 VolumeCard.displayName = 'VolumeCard';
 
-const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: { 
+const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor, estimatedNote }: { 
   title: string; 
   value: number;
   sentiment?: string; 
   sentimentColor?: string; 
+  // --- FIX: optional note shown when this value is an estimated proxy
+  // (real OI data standing in, or a neutral no-data fallback) rather than
+  // genuinely live trading volume — so estimated numbers are never
+  // silently presented as if they were live.
+  estimatedNote?: string;
 }) => (
   <div className="bg-gray-900/50 p-4 rounded-lg text-center h-full flex flex-col justify-center min-h-[140px]">
     <div className="flex items-center justify-center text-sm text-gray-400">
@@ -793,6 +803,11 @@ const PCRStatCard = React.memo(({ title, value, sentiment, sentimentColor }: {
       </div>
     </div>
     <p className={`text-3xl font-bold text-white`}>{value.toFixed(2)}</p>
+    {estimatedNote && (
+      <p className="text-xs text-amber-400 mt-1 px-1" title={estimatedNote}>
+        ⚠ Estimated — {estimatedNote}
+      </p>
+    )}
     {sentiment && sentimentColor && (
       <p className={`text-sm font-semibold mt-1 ${sentimentColor}`}>{sentiment}</p>
     )}
@@ -1250,6 +1265,7 @@ export default function Home() {
                     value={results.volumePcr} 
                     sentiment={volumePcrSentiment?.sentiment} 
                     sentimentColor={volumePcrSentiment?.color} 
+                    estimatedNote={results.volumePcrIsEstimated ? results.volumePcrEstimateReason : undefined}
                   />
                 </ProgressiveDataCard>
 
