@@ -902,11 +902,28 @@ export default function Home() {
     try { 
       const response = await fetch(url, options); 
       if (response.status === 401) throw new Error('TOKEN_EXPIRED'); 
-      if (response.status === 404) throw new Error('SYMBOL_NOT_FOUND'); 
+      // --- FIX: previously every 404 was collapsed into a generic
+      // 'SYMBOL_NOT_FOUND' error, discarding the backend's actual message.
+      // Three genuinely different backend failures all return 404
+      // ("TradingSymbol not found", "No options found", "No price data
+      // available - market may be closed") and were all shown to the user
+      // as the same misleading "Symbol not found" text. Now we read the
+      // real error message from the response body and surface THAT
+      // instead, prefixed so we can still detect it's a 404-class error.
+      if (response.status === 404) {
+        let realMessage = 'Symbol not found.';
+        try {
+          const body = await response.clone().json();
+          if (body?.error) realMessage = body.error;
+        } catch {
+          // body wasn't JSON or was empty — fall back to generic message
+        }
+        throw new Error(`NOT_FOUND_404:${realMessage}`);
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`); 
       return response; 
     } catch (error) { 
-      if (retries > 0 && !(error instanceof Error && (error.message === 'TOKEN_EXPIRED' || error.message === 'SYMBOL_NOT_FOUND'))) { 
+      if (retries > 0 && !(error instanceof Error && (error.message === 'TOKEN_EXPIRED' || error.message.startsWith('NOT_FOUND_404:')))) { 
         await new Promise(resolve => setTimeout(resolve, 1000)); 
         return fetchWithRetry(url, options, retries - 1); 
       } 
@@ -1067,9 +1084,17 @@ export default function Home() {
       
       const errorMap: { [key: string]: { type: string; message: string } } = { 
         TOKEN_EXPIRED: { type: 'TOKEN_EXPIRED', message: 'API token has expired. Please contact support.' }, 
-        SYMBOL_NOT_FOUND: { type: 'SYMBOL_NOT_FOUND', message: `Symbol "${symbolToAnalyze}" not found.` }, 
       }; 
-      const errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER', message: error.message } : { type: 'UNKNOWN', message: 'Unknown error occurred' };
+      let errorDetails: { type: string; message: string };
+      if (error instanceof Error && error.message.startsWith('NOT_FOUND_404:')) {
+        // --- FIX: show the REAL backend reason instead of a generic
+        // "Symbol not found" — could be a genuine missing symbol, no
+        // options for this stock, or a price-fetch failure (e.g. market
+        // closed / Kite rate limit), which are very different problems.
+        errorDetails = { type: 'NOT_FOUND', message: error.message.replace('NOT_FOUND_404:', '') };
+      } else {
+        errorDetails = error instanceof Error ? errorMap[error.message] || { type: 'SERVER', message: error.message } : { type: 'UNKNOWN', message: 'Unknown error occurred' };
+      }
       setApiError(errorDetails.message); 
       addError(errorDetails.message, errorDetails.type); 
     } finally {
