@@ -26,6 +26,34 @@ import * as OTPAuth from 'otpauth';
 
 const KITE_BASE = 'https://kite.zerodha.com';
 
+// --- FIX: .headers.get('set-cookie') only returns ONE cookie even when
+// a server sends multiple Set-Cookie headers (very common — Kite's login
+// flow sets several: session id, CSRF token, etc.). This was silently
+// dropping cookies, leaving our session incomplete for the final OAuth
+// step even though login/TOTP appeared to succeed. getSetCookie() is the
+// correct modern API for retrieving ALL of them.
+function extractCookieString(headers: Headers): string {
+  const setCookies = (headers as any).getSetCookie?.() ?? [];
+  return setCookies
+    .map((c: string) => c.split(';')[0]) // keep only "name=value", drop attributes like Path/Expires
+    .join('; ');
+}
+
+function mergeCookieStrings(...cookieStrings: string[]): string {
+  const jar = new Map<string, string>();
+  for (const cs of cookieStrings) {
+    if (!cs) continue;
+    for (const pair of cs.split(';')) {
+      const trimmed = pair.trim();
+      if (!trimmed) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx === -1) continue;
+      jar.set(trimmed.slice(0, eqIdx), trimmed.slice(eqIdx + 1));
+    }
+  }
+  return Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
 async function loginAndGetRequestToken(): Promise<string> {
   const userId = process.env.KITE_USER_ID!;
   const password = process.env.KITE_PASSWORD!;
@@ -44,10 +72,10 @@ async function loginAndGetRequestToken(): Promise<string> {
   }
   const requestId = loginData.data.request_id;
 
-  // Capture session cookies from the login response — needed for the
+  // Capture ALL session cookies from the login response — needed for the
   // TOTP step and the final OAuth redirect to be recognized as "already
   // logged in".
-  const cookies = loginRes.headers.get('set-cookie') || '';
+  const cookies = extractCookieString(loginRes.headers);
 
   // --- Step 2: TOTP (External 2FA) ---
   const totp = new OTPAuth.TOTP({
@@ -74,8 +102,9 @@ async function loginAndGetRequestToken(): Promise<string> {
   if (twofaData?.status !== 'success') {
     throw new Error(`TOTP step failed: ${JSON.stringify(twofaData)}`);
   }
-  const twofaCookies = twofaRes.headers.get('set-cookie') || '';
-  const allCookies = `${cookies}; ${twofaCookies}`;
+  const twofaCookies = extractCookieString(twofaRes.headers);
+  const allCookies = mergeCookieStrings(cookies, twofaCookies);
+  console.log('🍪 [CRON] Captured cookie names:', allCookies.split(';').map(c => c.trim().split('=')[0]));
 
   // --- Step 3: hit the real Kite Connect OAuth URL with our authenticated
   // session cookies. Since we're already logged in, Zerodha should redirect
