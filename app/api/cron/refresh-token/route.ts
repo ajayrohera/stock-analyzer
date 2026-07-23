@@ -78,11 +78,18 @@ async function loginAndGetRequestToken(): Promise<string> {
   const allCookies = `${cookies}; ${twofaCookies}`;
 
   // --- Step 3: hit the real Kite Connect OAuth URL with our authenticated
-  // session cookies. Since we're already logged in, Zerodha redirects
-  // immediately to our registered redirect URL with request_token attached
-  // — no manual browser step needed.
+  // session cookies. Since we're already logged in, Zerodha should redirect
+  // immediately to our registered redirect URL with request_token attached.
+  //
+  // NOTE: skip_session=true is required here — without it, Kite sometimes
+  // redirects back to itself with only a sess_id param instead of actually
+  // completing the OAuth handoff with request_token. This is a documented
+  // quirk on Kite Connect's own developer forum (thread "Autoconnect now
+  // working"), not something we're inventing — the intermediate session
+  // confirmation step apparently expects this flag when driven outside a
+  // real browser.
   const loginUrlRes = await fetch(
-    `${KITE_BASE}/connect/login?api_key=${apiKey}&v=3`,
+    `${KITE_BASE}/connect/login?api_key=${apiKey}&v=3&skip_session=true`,
     { headers: { Cookie: allCookies }, redirect: 'manual' }
   );
 
