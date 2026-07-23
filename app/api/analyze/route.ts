@@ -1057,7 +1057,8 @@ function calculateSmartSentiment(
   vwapAnalysis?: VWAPAnalysis,
   isMarketOpen?: boolean,
   changePercent?: number,
-  historicalDataLength?: number
+  historicalDataLength?: number,
+  volumePcrIsEstimated?: boolean // --- FIX: true when volumePcr is a proxy/fallback, not genuinely live volume data
 ): { sentiment: string; score: number; breakdown: string[] } {
   console.log('🧠 SENTIMENT CALCULATION:', { 
     pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent, historicalDataLength
@@ -1281,8 +1282,42 @@ function calculateSmartSentiment(
 
   breakdown.push(`${volumePercentageScore >= 0 ? '+' : ''}${volumePercentageScore} • ${volumeLabel} ${todayVolumePercentage.toFixed(1)}%${volumeDisplayContext}`);
 
-  // Define weights for each indicator (sum should be 1.0)
-  const weights = {
+  // --- FIX (3 issues found on review):
+  //
+  // 1. UNEQUAL RANGES: raw scores had different max magnitudes (A/D: ±3,
+  //    Price Action: ±1, others: ±2) but weights were applied directly to
+  //    these raw numbers. This made A/D Line's REAL influence ~4x larger
+  //    than Price Action's despite similar weight values (0.20 vs 0.15) —
+  //    an unintended side effect, not a deliberate design choice. Fixed by
+  //    normalizing every component to a common -1..+1 scale BEFORE
+  //    applying weights, so a component's actual influence now matches
+  //    its stated weight.
+  //
+  // 2. UNREACHABLE THRESHOLDS: with the old raw-score math, the maximum
+  //    possible |weightedScore| was ~4.1 — but "Strongly Bullish/Bearish"
+  //    required |score| >= 5, which could NEVER trigger no matter how
+  //    extreme every indicator was simultaneously. Fixed as a natural
+  //    side effect of normalization: since weights sum to 1.0 and each
+  //    normalized component is bounded to [-1,1], the weighted sum is
+  //    naturally bounded to [-1,1] — multiplying by 10 (not 2) now gives
+  //    a genuinely reachable, symmetric -10..+10 range matching what the
+  //    sentiment thresholds actually expect.
+  //
+  // 3. DOUBLE-COUNTING: when volumePcr is an estimated PROXY using the
+  //    same real OI-based `pcr` value (see the timeout/fallback fix
+  //    earlier in this file), the identical underlying data point was
+  //    being counted TWICE — once as pcrScore (weight 0.20) and again as
+  //    volumeModifier (weight 0.15) — inflating apparent confirmation
+  //    from what is actually a single data source, not two independent
+  //    ones. Fixed by detecting this specific case (estimated AND equal
+  //    to pcr, distinguishing it from the neutral-fallback case which
+  //    sets volumePcr=1.0) and excluding it from the weighted score,
+  //    redistributing its weight proportionally across the remaining
+  //    genuinely-independent components.
+
+  const volumePcrIsDuplicateOfOI = !!volumePcrIsEstimated && Math.abs(volumePcr - pcr) < 0.001;
+
+  const baseWeights = {
     oiPcr: 0.20,
     volumePcr: 0.15,
     adLine: 0.20,
@@ -1291,15 +1326,40 @@ function calculateSmartSentiment(
     volumePercent: 0.15,
   };
 
-  // Calculate weighted score (normalized to -10 to +10)
+  const weights = { ...baseWeights };
+  if (volumePcrIsDuplicateOfOI) {
+    const removedWeight = weights.volumePcr;
+    weights.volumePcr = 0;
+    const remainingKeys = (Object.keys(weights) as (keyof typeof weights)[]).filter(k => k !== 'volumePcr');
+    const remainingSum = remainingKeys.reduce((s, k) => s + weights[k], 0);
+    remainingKeys.forEach(k => {
+      weights[k] = weights[k] + (weights[k] / remainingSum) * removedWeight;
+    });
+    breakdown.push(`ℹ️ Volume PCR excluded from score (duplicate of OI PCR — no independent data available); weight redistributed`);
+  }
+
+  // Normalize each raw score to -1..+1 by dividing by its own max possible
+  // magnitude, so weight now genuinely controls influence.
+  const normalized = {
+    oiPcr: pcrScore / 2,               // pcrScore range: -2..+2
+    volumePcr: volumeModifier / 2,     // volumeModifier range: -2..+2
+    adLine: adScore / 3,               // adScore range: -3..+3
+    vwap: vwapScore / 2,               // vwapScore range: -2..+2
+    priceAction: priceActionScore / 1, // priceActionScore range: -1..+1
+    volumePercent: volumePercentageScore / 2, // range: -2..+2
+  };
+
+  // Weighted sum is now naturally bounded to [-1, 1] since weights sum to
+  // 1.0 and every normalized component is bounded to [-1, 1]. Scaling by
+  // 10 (not 2) gives a genuinely reachable -10..+10 range.
   const weightedScore = (
-    (pcrScore * weights.oiPcr) +
-    (volumeModifier * weights.volumePcr) +
-    (adScore * weights.adLine) +
-    (vwapScore * weights.vwap) +
-    (priceActionScore * weights.priceAction) +
-    (volumePercentageScore * weights.volumePercent)
-  ) * 2;
+    (normalized.oiPcr * weights.oiPcr) +
+    (normalized.volumePcr * weights.volumePcr) +
+    (normalized.adLine * weights.adLine) +
+    (normalized.vwap * weights.vwap) +
+    (normalized.priceAction * weights.priceAction) +
+    (normalized.volumePercent * weights.volumePercent)
+  ) * 10;
 
   const finalScore = Math.max(-10, Math.min(10, Math.round(weightedScore * 10) / 10));
 
@@ -1873,7 +1933,8 @@ export async function POST(request: Request) {
         vwapAnalysis,
         isMarketOpen,
         changePercent,
-        historicalDataLength
+        historicalDataLength,
+        volumePcrIsEstimated // --- FIX: needed to detect and avoid double-counting when volumePcr is just a copy of pcr
     );
     
     console.log('📊 MAX PAIN - Calculating...');
