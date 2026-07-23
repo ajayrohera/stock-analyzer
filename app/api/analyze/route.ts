@@ -88,6 +88,47 @@ async function getRedisData(key: string): Promise<string | null> {
   }
 }
 
+// --- FIX: cache the NFO instrument list for 24 hours instead of
+// re-downloading Kite's entire options universe (tens of thousands of
+// rows) on EVERY single analysis. This is purely a metadata list (which
+// contracts exist — symbol/strike/expiry/token), NOT live price data, so
+// caching it has zero effect on data freshness. Kite's own docs recommend
+// fetching this once a day, not per-request. Re-fetching it repeatedly
+// was also likely contributing to intermittent rate-limit-style failures
+// (like the "Live price fetch failed: Unknown error" seen on ANGELONE),
+// since it fires immediately before the live getQuote() call each time.
+const INSTRUMENTS_CACHE_KEY = 'nfo_instruments_cache';
+const INSTRUMENTS_CACHE_TTL_SECONDS = 24 * 60 * 60; // 24 hours
+
+async function getCachedInstruments(kc: any): Promise<any[]> {
+  const cached = await getRedisData(INSTRUMENTS_CACHE_KEY);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      console.log(`📋 Using cached NFO instruments (${parsed.length} instruments)`);
+      return parsed;
+    } catch (e) {
+      console.error('❌ Failed to parse cached instruments, will re-fetch:', e);
+    }
+  }
+
+  console.log('📋 No valid cache — fetching fresh instrument list from Kite...');
+  const fresh = await kc.getInstruments('NFO');
+
+  const client = createClient({ url: process.env.REDIS_URL });
+  try {
+    await client.connect();
+    await client.set(INSTRUMENTS_CACHE_KEY, JSON.stringify(fresh), { EX: INSTRUMENTS_CACHE_TTL_SECONDS });
+    console.log(`💾 Cached ${fresh.length} NFO instruments for ${INSTRUMENTS_CACHE_TTL_SECONDS / 3600}h`);
+  } catch (error) {
+    console.error('❌ Error caching instruments (continuing anyway):', error);
+  } finally {
+    await client.quit().catch(err => console.error('Redis quit error:', err));
+  }
+
+  return fresh;
+}
+
 // ADDED: Store OI data in Redis
 async function storeOIData(symbol: string, optionsByStrike: Record<number, { ce_oi: number, pe_oi: number }>): Promise<void> {
   const client = createClient({ url: process.env.REDIS_URL });
@@ -1378,7 +1419,7 @@ export async function POST(request: Request) {
     kc.setAccessToken(JSON.parse(tokenData).accessToken);
 
     console.log('📋 Fetching instruments from Kite...');
-    const allInstruments = await kc.getInstruments('NFO');
+    const allInstruments = await getCachedInstruments(kc);
     const unfilteredOptionsChain = allInstruments.filter(instrument => 
       instrument.name === tradingSymbol.toUpperCase() && (instrument.instrument_type === 'CE' || instrument.instrument_type === 'PE')
     );
