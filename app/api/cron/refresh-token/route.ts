@@ -103,33 +103,55 @@ async function loginAndGetRequestToken(): Promise<string> {
     throw new Error(`TOTP step failed: ${JSON.stringify(twofaData)}`);
   }
   const twofaCookies = extractCookieString(twofaRes.headers);
-  const allCookies = mergeCookieStrings(cookies, twofaCookies);
+  let allCookies = mergeCookieStrings(cookies, twofaCookies);
   console.log('🍪 [CRON] Captured cookie names:', allCookies.split(';').map(c => c.trim().split('=')[0]));
 
   // --- Step 3: hit the real Kite Connect OAuth URL with our authenticated
-  // session cookies. Since we're already logged in, Zerodha should redirect
-  // immediately to our registered redirect URL with request_token attached.
+  // session cookies, then FOLLOW THE FULL REDIRECT CHAIN manually.
   //
-  // NOTE: skip_session=true is required here — without it, Kite sometimes
-  // redirects back to itself with only a sess_id param instead of actually
-  // completing the OAuth handoff with request_token. This is a documented
-  // quirk on Kite Connect's own developer forum (thread "Autoconnect now
-  // working"), not something we're inventing — the intermediate session
-  // confirmation step apparently expects this flag when driven outside a
-  // real browser.
-  const loginUrlRes = await fetch(
-    `${KITE_BASE}/connect/login?api_key=${apiKey}&v=3&skip_session=true`,
-    { headers: { Cookie: allCookies }, redirect: 'manual' }
-  );
+  // Kite's OAuth flow isn't a single redirect — it chains through multiple
+  // hops (e.g. connect/login -> connect/finish -> our actual redirect URI),
+  // each still on kite.zerodha.com until the final one. Following only the
+  // first hop (as earlier versions of this script did) stops mid-chain at
+  // an intermediate kite.zerodha.com URL that itself has no request_token
+  // yet — we have to keep following Location headers, with cookies
+  // attached each time, until we land on OUR OWN redirect URI, which is
+  // where request_token actually appears.
+  let currentUrl = `${KITE_BASE}/connect/login?api_key=${apiKey}&v=3&skip_session=true`;
+  let requestToken: string | null = null;
+  const maxHops = 6;
 
-  const location = loginUrlRes.headers.get('location');
-  if (!location) {
-    throw new Error('No redirect received from Kite Connect OAuth URL — login may have failed');
+  for (let hop = 0; hop < maxHops; hop++) {
+    const res = await fetch(currentUrl, {
+      headers: { Cookie: allCookies },
+      redirect: 'manual',
+    });
+
+    const location = res.headers.get('location');
+    console.log(`🔀 [CRON] Redirect hop ${hop + 1}: ${currentUrl} -> ${location}`);
+
+    if (!location) {
+      throw new Error(`No redirect at hop ${hop + 1} — chain ended unexpectedly at: ${currentUrl}`);
+    }
+
+    const parsed = new URL(location, KITE_BASE);
+    const tokenFromThisHop = parsed.searchParams.get('request_token');
+    if (tokenFromThisHop) {
+      requestToken = tokenFromThisHop;
+      break;
+    }
+
+    // Not there yet — follow this redirect and keep going, carrying
+    // cookies along (in case this hop itself set additional ones).
+    const hopCookies = extractCookieString(res.headers);
+    if (hopCookies) {
+      allCookies = mergeCookieStrings(allCookies, hopCookies);
+    }
+    currentUrl = parsed.toString();
   }
 
-  const requestToken = new URL(location).searchParams.get('request_token');
   if (!requestToken) {
-    throw new Error(`No request_token found in redirect: ${location}`);
+    throw new Error(`No request_token found after following ${maxHops} redirect hops. Last URL: ${currentUrl}`);
   }
 
   return requestToken;
