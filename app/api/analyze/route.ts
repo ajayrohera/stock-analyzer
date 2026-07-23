@@ -1418,8 +1418,25 @@ export async function POST(request: Request) {
             hasOHLC: !!todayOHLC,
             success: ltp > 0 
         });
-    } catch (error) {
-        console.log('⚠️ Live price fetch failed:', error instanceof Error ? error.message : 'Unknown error');
+    } catch (error: any) {
+        // --- FIX: was only logging error.message, which showed "Unknown
+        // error" — likely because Kite Connect's SDK sometimes throws a
+        // plain response object rather than a real Error instance, so
+        // .message was empty/undefined. Log everything available so the
+        // ACTUAL reason (rate limit, invalid instrument key, permission
+        // issue, network timeout, etc.) is visible in the logs instead of
+        // being silently swallowed.
+        console.log('⚠️ Live price fetch failed. Full error details:', {
+            instrumentKey: `${exchange}:${tradingSymbol}`,
+            message: error?.message,
+            errorType: error?.error_type,
+            responseData: error?.response?.data,
+            responseStatus: error?.response?.status,
+            stringified: (() => {
+                try { return JSON.stringify(error); } catch { return 'could not stringify'; }
+            })(),
+            errorObject: error,
+        });
     }
 
     const historicalData = await getHistoricalData(displayName);
