@@ -874,6 +874,13 @@ export default function Home() {
   const [errors, setErrors] = useState<AppError[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>('IDLE');
   const [lastRequestTime, setLastRequestTime] = useState(0);
+  // --- FIX: state for the contact form, which previously had no state
+  // management at all (uncontrolled inputs, no submit handling).
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactMessage, setContactMessage] = useState('');
+  const [contactStatus, setContactStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [contactErrorMessage, setContactErrorMessage] = useState('');
   const [cooldownMessage, setCooldownMessage] = useState('');
   const [apiError, setApiError] = useState('');
 
@@ -1008,6 +1015,50 @@ export default function Home() {
     const interval = setInterval(checkMarketStatus, 60000); 
     return () => clearInterval(interval);
   }, [addError, getNextMarketOpenTime, selectedSymbol]);
+
+  // --- FIX: real submit handler for the contact form. Previously the form
+  // had none at all, so clicking "Send Message" triggered the browser's
+  // default native submission — a full page reload that wiped all
+  // analysis data and never actually delivered the message anywhere.
+  const handleContactSubmit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault(); // stops the native reload that was wiping all data
+
+    if (!contactName.trim() || !contactEmail.trim() || !contactMessage.trim()) {
+      setContactStatus('error');
+      setContactErrorMessage('Please fill in all fields.');
+      return;
+    }
+
+    setContactStatus('sending');
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: contactName,
+          email: contactEmail,
+          message: contactMessage,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send message.');
+      }
+
+      setContactStatus('success');
+      setContactName('');
+      setContactEmail('');
+      setContactMessage('');
+
+      // Clear the success message after a few seconds so it doesn't linger forever
+      setTimeout(() => setContactStatus('idle'), 5000);
+    } catch (error: any) {
+      setContactStatus('error');
+      setContactErrorMessage(error.message || 'Something went wrong. Please try again.');
+    }
+  }, [contactName, contactEmail, contactMessage]);
 
   const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
     if (!symbolToAnalyze) return;
@@ -1356,11 +1407,57 @@ export default function Home() {
 
         <section className="w-full max-w-2xl mx-auto mt-24 p-8 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10"  style={{ marginTop: '3rem' }}>
           <h2 className="text-3xl font-bold text-center mb-6">Get In Touch</h2>
-          <form className="flex flex-col gap-4">
-            <div className="relative"><Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="text" placeholder="Your Name" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
-            <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input type="email" placeholder="Your Email" className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan" /></div>
-            <textarea placeholder="Your Message" rows={4} className="p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan"></textarea>
-            <button type="submit" className="bg-brand-cyan hover:bg-cyan-5 text-brand-dark font-bold py-3 px-6 rounded-lg transition-all duration-300">Send Message</button>
+          {/* --- FIX: this form previously had no onSubmit handler at all,
+              causing a native browser form submission on click — a full
+              page reload that wiped all analysis data/indicators and never
+              actually sent the message anywhere (no backend existed to
+              receive it). Now: controlled inputs, e.preventDefault(),
+              a real API call to /api/contact, and visible success/error
+              feedback instead of silence. */}
+          <form className="flex flex-col gap-4" onSubmit={handleContactSubmit}>
+            <div className="relative">
+              <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/>
+              <input
+                type="text"
+                placeholder="Your Name"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                disabled={contactStatus === 'sending'}
+                className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan disabled:opacity-50"
+              />
+            </div>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/>
+              <input
+                type="email"
+                placeholder="Your Email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                disabled={contactStatus === 'sending'}
+                className="w-full pl-10 p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan disabled:opacity-50"
+              />
+            </div>
+            <textarea
+              placeholder="Your Message"
+              rows={4}
+              value={contactMessage}
+              onChange={(e) => setContactMessage(e.target.value)}
+              disabled={contactStatus === 'sending'}
+              className="p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan disabled:opacity-50"
+            ></textarea>
+            <button
+              type="submit"
+              disabled={contactStatus === 'sending'}
+              className="bg-brand-cyan hover:bg-cyan-5 text-brand-dark font-bold py-3 px-6 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {contactStatus === 'sending' ? 'Sending...' : 'Send Message'}
+            </button>
+            {contactStatus === 'success' && (
+              <p className="text-green-400 text-center text-sm">✅ Message sent successfully!</p>
+            )}
+            {contactStatus === 'error' && (
+              <p className="text-red-400 text-center text-sm">❌ {contactErrorMessage}</p>
+            )}
           </form>
         </section>
       </main>
