@@ -20,7 +20,7 @@
     },
     {
       "path": "/api/cron/refresh-token",
-      "schedule": "0 3 * * *"
+      "schedule": "0 1 * * *"
     }
   ],
   "routes": [
