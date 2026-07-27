@@ -169,8 +169,9 @@ export async function GET(request: NextRequest) {
         console.error(`❌ Failed to backfill ${symbol.displayName}:`, error.message);
       }
 
-      // Kite rate limit is ~3 req/sec — stay safely under that
-      await sleep(350);
+      // Kite rate limit is ~3 req/sec — using 1 full second between calls
+      // for a comfortable safety margin, since there's no rush here.
+      await sleep(1000);
     }
 
     await redisClient.set('volume_history', JSON.stringify(history));
