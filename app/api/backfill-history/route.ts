@@ -87,7 +87,13 @@ export async function GET(request: NextRequest) {
     const allInstruments = await kc.getInstruments('NSE');
     const instrumentMap = new Map<string, number>();
     for (const inst of allInstruments) {
-      instrumentMap.set(inst.tradingsymbol.toUpperCase(), inst.instrument_token);
+      // --- FIX: guard against any malformed entries in Kite's full NSE
+      // instrument list (tens of thousands of rows) that might be missing
+      // a tradingsymbol — one bad entry was crashing the ENTIRE route
+      // before it even reached the per-symbol loop below.
+      if (inst && inst.tradingsymbol) {
+        instrumentMap.set(inst.tradingsymbol.toUpperCase(), inst.instrument_token);
+      }
     }
 
     // 4. Load existing history to merge into (don't overwrite what's already there)
@@ -114,6 +120,12 @@ export async function GET(request: NextRequest) {
     const failedSymbols: string[] = [];
 
     for (const symbol of symbols) {
+      // --- FIX: same defensive guard as the instrument map above
+      if (!symbol.tradingSymbol || !symbol.displayName) {
+        failCount++;
+        failedSymbols.push(`(malformed sheet row, skipped)`);
+        continue;
+      }
       const instrumentToken = instrumentMap.get(symbol.tradingSymbol.toUpperCase());
       if (!instrumentToken) {
         failCount++;
