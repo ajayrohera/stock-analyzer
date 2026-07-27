@@ -125,6 +125,8 @@ type AnalysisResult = {
   volumePcrIsEstimated?: boolean;
   volumePcrEstimateReason?: string;
   maxPain: number; 
+  // --- NEW: bullish/bearish label for Max Pain, computed server-side
+  maxPainSentiment?: { label: string; color: string };
   resistance: number;
   support: number;
   sentiment: string;
@@ -1366,7 +1368,9 @@ export default function Home() {
                 <DataCard 
                   title="Max Pain" 
                   value={results.maxPain} 
-                  tooltip="The strike price at which the maximum number of option buyers would lose money at expiry."
+                  tooltip="The strike price at which the maximum number of option buyers would lose money at expiry. Above CMP is theorized to favor bulls; below CMP favors bears."
+                  subValue={results.maxPainSentiment?.label}
+                  sentimentColor={results.maxPainSentiment?.color}
                 />
                 
                 {/* A/D Analysis - Progressive */}

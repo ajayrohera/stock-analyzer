@@ -1058,8 +1058,10 @@ function calculateSmartSentiment(
   isMarketOpen?: boolean,
   changePercent?: number,
   historicalDataLength?: number,
-  volumePcrIsEstimated?: boolean // --- FIX: true when volumePcr is a proxy/fallback, not genuinely live volume data
-): { sentiment: string; score: number; breakdown: string[] } {
+  volumePcrIsEstimated?: boolean, // --- FIX: true when volumePcr is a proxy/fallback, not genuinely live volume data
+  maxPain?: number,      // --- NEW: strike price of max pain, for the 7th weighted component
+  currentPrice?: number  // --- NEW: LTP, needed to compare against maxPain
+): { sentiment: string; score: number; breakdown: string[]; maxPainSentiment?: { label: string; color: string } } {
   console.log('🧠 SENTIMENT CALCULATION:', { 
     pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent, historicalDataLength
   });
@@ -1317,16 +1319,53 @@ function calculateSmartSentiment(
 
   const volumePcrIsDuplicateOfOI = !!volumePcrIsEstimated && Math.abs(volumePcr - pcr) < 0.001;
 
+  // --- NEW: Max Pain component. Theory: if Max Pain sits ABOVE current
+  // price, the theorized "pull toward Max Pain" works in favor of a long
+  // position (bullish); if BELOW, it works against one (bearish). Scaled
+  // by % distance between the two — a bigger gap means a stronger
+  // theorized pull. Same -2..+2 raw range convention as OI PCR/VWAP/etc
+  // for consistency before normalization.
+  let maxPainScore = 0;
+  let maxPainPercentDiff = 0;
+  const hasValidMaxPainData = !!maxPain && maxPain > 0 && !!currentPrice && currentPrice > 0;
+  if (hasValidMaxPainData) {
+    maxPainPercentDiff = ((maxPain! - currentPrice!) / currentPrice!) * 100;
+    if (maxPainPercentDiff >= 5) maxPainScore = 2;
+    else if (maxPainPercentDiff >= 2) maxPainScore = 1;
+    else if (maxPainPercentDiff <= -5) maxPainScore = -2;
+    else if (maxPainPercentDiff <= -2) maxPainScore = -1;
+    else maxPainScore = 0; // within +-2% is treated as too close to call
+  }
+  const maxPainLabel = !hasValidMaxPainData
+    ? null
+    : maxPainScore > 0 ? 'Bullish' : maxPainScore < 0 ? 'Bearish' : 'Neutral';
+  const maxPainColorClass = maxPainLabel === 'Bullish' ? 'text-green-400' : maxPainLabel === 'Bearish' ? 'text-red-400' : 'text-gray-400';
+  if (hasValidMaxPainData) {
+    breakdown.push(`Max Pain: ${maxPainScore > 0 ? '+' : ''}${maxPainScore} (${maxPain} vs CMP ${currentPrice}, ${maxPainPercentDiff >= 0 ? '+' : ''}${maxPainPercentDiff.toFixed(1)}%, ${maxPainLabel})`);
+  }
+
   const baseWeights = {
-    oiPcr: 0.20,
-    volumePcr: 0.15,
-    adLine: 0.20,
-    vwap: 0.15,
-    priceAction: 0.15,
-    volumePercent: 0.15,
+    oiPcr: 0.17,
+    volumePcr: 0.1275,
+    adLine: 0.17,
+    vwap: 0.1275,
+    priceAction: 0.1275,
+    volumePercent: 0.1275,
+    maxPain: 0.15, // --- NEW: sums to 1.0 with the six above
   };
 
   const weights = { ...baseWeights };
+  if (!hasValidMaxPainData) {
+    // No max pain data available this call — exclude it and redistribute
+    // its weight, same pattern already used for the volumePcr duplicate case.
+    const removedWeight = weights.maxPain;
+    weights.maxPain = 0;
+    const remainingKeys = (Object.keys(weights) as (keyof typeof weights)[]).filter(k => k !== 'maxPain');
+    const remainingSum = remainingKeys.reduce((s, k) => s + weights[k], 0);
+    remainingKeys.forEach(k => {
+      weights[k] = weights[k] + (weights[k] / remainingSum) * removedWeight;
+    });
+  }
   if (volumePcrIsDuplicateOfOI) {
     const removedWeight = weights.volumePcr;
     weights.volumePcr = 0;
@@ -1347,6 +1386,7 @@ function calculateSmartSentiment(
     vwap: vwapScore / 2,               // vwapScore range: -2..+2
     priceAction: priceActionScore / 1, // priceActionScore range: -1..+1
     volumePercent: volumePercentageScore / 2, // range: -2..+2
+    maxPain: maxPainScore / 2,         // maxPainScore range: -2..+2
   };
 
   // Weighted sum is now naturally bounded to [-1, 1] since weights sum to
@@ -1358,7 +1398,8 @@ function calculateSmartSentiment(
     (normalized.adLine * weights.adLine) +
     (normalized.vwap * weights.vwap) +
     (normalized.priceAction * weights.priceAction) +
-    (normalized.volumePercent * weights.volumePercent)
+    (normalized.volumePercent * weights.volumePercent) +
+    (normalized.maxPain * weights.maxPain)
   ) * 10;
 
   const finalScore = Math.max(-10, Math.min(10, Math.round(weightedScore * 10) / 10));
@@ -1380,7 +1421,8 @@ function calculateSmartSentiment(
   return {
     sentiment,
     score: finalScore,
-    breakdown
+    breakdown,
+    maxPainSentiment: maxPainLabel ? { label: maxPainLabel, color: maxPainColorClass } : undefined
   };
 }
 
@@ -1920,7 +1962,25 @@ export async function POST(request: Request) {
 
     const finalSupport = supportLevels.length > 0 ? supportLevels[0].price : 0;
     const finalResistance = resistanceLevels.length > 0 ? resistanceLevels[0].price : 0;
-    
+
+    // --- FIX: Max Pain calculation MOVED to before the sentiment call
+    // (was previously calculated AFTER calculateSmartSentiment ran, so it
+    // could never be included in the score — it was purely a display-only
+    // number with zero weight in the composite sentiment, even though the
+    // theory behind it is directly relevant to directional bias).
+    console.log('📊 MAX PAIN - Calculating...');
+    let minLoss = Infinity, maxPain = 0;
+    for (const expiryStrike of strikePrices) {
+        let totalLoss = 0;
+        for (const strike of strikePrices) {
+            const option = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
+            if (option.ce_oi > 0 && expiryStrike > strike) totalLoss += (expiryStrike - strike) * option.ce_oi;
+            if (option.pe_oi > 0 && expiryStrike < strike) totalLoss += (strike - expiryStrike) * option.pe_oi;
+        }
+        if (totalLoss < minLoss) { minLoss = totalLoss; maxPain = expiryStrike; }
+    }
+    console.log(`📊 MAX PAIN: ${maxPain} (Min Loss: ${minLoss})`);
+
     const sentimentResult = calculateSmartSentiment(
         pcr,
         volumePcr,
@@ -1934,21 +1994,10 @@ export async function POST(request: Request) {
         isMarketOpen,
         changePercent,
         historicalDataLength,
-        volumePcrIsEstimated // --- FIX: needed to detect and avoid double-counting when volumePcr is just a copy of pcr
+        volumePcrIsEstimated, // --- FIX: needed to detect and avoid double-counting when volumePcr is just a copy of pcr
+        maxPain, // --- NEW: 7th weighted component
+        ltp      // --- NEW: current price, to compare against maxPain
     );
-    
-    console.log('📊 MAX PAIN - Calculating...');
-    let minLoss = Infinity, maxPain = 0;
-    for (const expiryStrike of strikePrices) {
-        let totalLoss = 0;
-        for (const strike of strikePrices) {
-            const option = optionsByStrike[strike] || { ce_oi: 0, pe_oi: 0 };
-            if (option.ce_oi > 0 && expiryStrike > strike) totalLoss += (expiryStrike - strike) * option.ce_oi;
-            if (option.pe_oi > 0 && expiryStrike < strike) totalLoss += (strike - expiryStrike) * option.pe_oi;
-        }
-        if (totalLoss < minLoss) { minLoss = totalLoss; maxPain = expiryStrike; }
-    }
-    console.log(`📊 MAX PAIN: ${maxPain} (Min Loss: ${minLoss})`);
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
@@ -2058,6 +2107,7 @@ export async function POST(request: Request) {
         volumePcrIsEstimated,
         volumePcrEstimateReason: volumePcrIsEstimated ? volumePcrEstimateReason : undefined,
         maxPain,
+        maxPainSentiment: sentimentResult.maxPainSentiment, // --- NEW: {label, color} for the UI card, or undefined if no valid data
         support: finalSupport, 
         resistance: finalResistance,
         supports: supportLevels.map(level => ({
