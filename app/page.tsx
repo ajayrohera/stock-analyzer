@@ -871,6 +871,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState<AnalysisResult | null>(null);
   const [marketStatus, setMarketStatus] = useState<MarketStatus>('UNKNOWN');
+  // --- NEW: one-per-session popup nudging users toward market hours
+  const [showMarketHoursPopup, setShowMarketHoursPopup] = useState(false);
   const [marketMessage, setMarketMessage] = useState('');
   const [refreshingCard, setRefreshingCard] = useState(false);
   const [errors, setErrors] = useState<AppError[]>([]);
@@ -955,6 +957,19 @@ export default function Home() {
     if (symbolList.length === 0) return <option>Loading symbols...</option>; 
     return symbolList.map(s => <option key={s} value={s}>{s}</option>); 
   }, [symbolList]);
+
+  // --- NEW: show the market-hours popup once per session, only when the
+  // market is genuinely closed (not on OPEN, PRE_MARKET, or the initial
+  // UNKNOWN state before status is determined).
+  useEffect(() => {
+    if (marketStatus === 'CLOSED') {
+      const alreadyShown = sessionStorage.getItem('marketHoursPopupShown');
+      if (!alreadyShown) {
+        setShowMarketHoursPopup(true);
+        sessionStorage.setItem('marketHoursPopupShown', 'true');
+      }
+    }
+  }, [marketStatus]);
 
   useEffect(() => {
     const checkMarketStatus = () => { 
@@ -1191,6 +1206,35 @@ export default function Home() {
 
   return (
     <div className="bg-brand-dark min-h-screen text-gray-300">
+      {/* --- NEW: Market hours popup — shown once per session when market
+          is closed. Clicking the backdrop (anywhere outside the card)
+          closes it, same as the explicit close button — works naturally
+          as a tap-to-dismiss on mobile too, since the whole backdrop is
+          one click target. */}
+      {showMarketHoursPopup && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+          onClick={() => setShowMarketHoursPopup(false)}
+        >
+          <div
+            className="relative bg-brand-light-dark border border-white/10 rounded-xl shadow-2xl max-w-sm w-full p-6 text-center"
+            onClick={(e) => e.stopPropagation()} // prevent backdrop click from firing when tapping inside the card itself
+          >
+            <button
+              onClick={() => setShowMarketHoursPopup(false)}
+              aria-label="Close"
+              className="absolute top-3 right-3 text-gray-400 hover:text-white transition-colors"
+            >
+              ✕
+            </button>
+            <div className="text-3xl mb-3">⏰</div>
+            <h3 className="text-lg font-bold text-white mb-2">Market is Closed</h3>
+            <p className="text-sm text-gray-300">
+              Use or visit during market hours (9:15 AM – 3:30 PM IST) for the best, most up-to-date results.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-brand-dark via-brand-dark to-slate-900 -z-10"></div>
       {errorToasts}
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-12" >
@@ -1226,6 +1270,16 @@ export default function Home() {
               {isLoading ? 'Analyzing...' : 'Analyze'}
             </button>
           </div>
+
+          {/* --- NEW: auto-updating count, driven directly by symbolList.length
+              (the same array populated from /api/get-symbols) — so it always
+              reflects the real current list with zero extra maintenance
+              whenever a stock is added or removed from that array. */}
+          {symbolList.length > 0 && (
+            <p className="text-center text-xs text-gray-500 mt-2">
+              {symbolList.length} F&O stocks
+            </p>
+          )}
           
           {cooldownMessage && (
             <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-700/50 rounded-lg text-center">
