@@ -6,6 +6,12 @@
     },
     "app/api/cron/refresh-token/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/backfill-history/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/verify-fno-list/route.ts": {
+      "maxDuration": 60
     }
   },
   "build": {
