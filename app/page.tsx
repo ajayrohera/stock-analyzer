@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Script from 'next/script';
 import { ShieldCheck, TrendingUp, BarChart, Briefcase, Mail, Clock, CheckCircle2, XCircle, Info, RefreshCw, ArrowUp, ArrowDown, Calendar, Target, AlertTriangle, CandlestickChart } from 'lucide-react';
 import SpeedMeter from '../components/SpeedMeter';
 
@@ -885,6 +886,12 @@ export default function Home() {
   const [contactMessage, setContactMessage] = useState('');
   const [contactStatus, setContactStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
   const [contactErrorMessage, setContactErrorMessage] = useState('');
+  // --- NEW: scroll-to-top button visibility, based on scroll position
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  // --- NEW: Cloudflare Turnstile token, set by the widget's callback once
+  // the visitor passes verification. Sent to the server on submit, where
+  // it's verified against Cloudflare's own API before accepting the message.
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [cooldownMessage, setCooldownMessage] = useState('');
   const [apiError, setApiError] = useState('');
 
@@ -971,6 +978,35 @@ export default function Home() {
     }
   }, [marketStatus]);
 
+  // --- NEW: track scroll position to show/hide the scroll-to-top button
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 300);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  // --- NEW: global callback Cloudflare's Turnstile script calls once a
+  // visitor passes verification. Attached to window so the widget (loaded
+  // via the script tag below) can reach it via data-callback.
+  useEffect(() => {
+    (window as any).onTurnstileSuccess = (token: string) => {
+      setTurnstileToken(token);
+    };
+    (window as any).onTurnstileExpired = () => {
+      setTurnstileToken(null);
+    };
+    return () => {
+      delete (window as any).onTurnstileSuccess;
+      delete (window as any).onTurnstileExpired;
+    };
+  }, []);
+
   useEffect(() => {
     const checkMarketStatus = () => { 
       const now = new Date(); 
@@ -1046,6 +1082,13 @@ export default function Home() {
       return;
     }
 
+    // --- NEW: Turnstile check, before hitting the API at all
+    if (!turnstileToken) {
+      setContactStatus('error');
+      setContactErrorMessage('Please complete the verification check before sending.');
+      return;
+    }
+
     setContactStatus('sending');
     try {
       const response = await fetch('/api/contact', {
@@ -1055,6 +1098,7 @@ export default function Home() {
           name: contactName,
           email: contactEmail,
           message: contactMessage,
+          turnstileToken, // --- NEW: sent for server-side verification
         }),
       });
 
@@ -1068,14 +1112,18 @@ export default function Home() {
       setContactName('');
       setContactEmail('');
       setContactMessage('');
+      setTurnstileToken(null);
+      if ((window as any).turnstile) (window as any).turnstile.reset(); // fresh widget for next time
 
       // Clear the success message after a few seconds so it doesn't linger forever
       setTimeout(() => setContactStatus('idle'), 5000);
     } catch (error: any) {
       setContactStatus('error');
       setContactErrorMessage(error.message || 'Something went wrong. Please try again.');
+      setTurnstileToken(null);
+      if ((window as any).turnstile) (window as any).turnstile.reset(); // fresh widget after any failure too
     }
-  }, [contactName, contactEmail, contactMessage]);
+  }, [contactName, contactEmail, contactMessage, turnstileToken]);
 
   const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
     if (!symbolToAnalyze) return;
@@ -1206,6 +1254,10 @@ export default function Home() {
 
   return (
     <div className="bg-brand-dark min-h-screen text-gray-300">
+      {/* --- NEW: Cloudflare Turnstile script, loaded once. The widget div
+          in the contact form (further down) is what actually renders the
+          checkbox/challenge once this script loads and scans the page. */}
+      <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" strategy="afterInteractive" async defer />
       {/* --- NEW: Market hours popup — shown once per session when market
           is closed. Clicking the backdrop (anywhere outside the card)
           closes it, same as the explicit close button — works naturally
@@ -1236,6 +1288,17 @@ export default function Home() {
         </div>
       )}
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-brand-dark via-brand-dark to-slate-900 -z-10"></div>
+      {/* --- NEW: scroll-to-top button, mobile-only (hidden on desktop
+          via md:hidden), shown once the user has scrolled down a bit */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          aria-label="Scroll to top"
+          className="md:hidden fixed bottom-6 right-6 z-40 bg-brand-cyan hover:bg-cyan-500 text-brand-dark rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-all duration-300"
+        >
+          ↑
+        </button>
+      )}
       {errorToasts}
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-12" >
         <section className="text-center py-16"  style={{ paddingTop: 0 }}>
@@ -1503,6 +1566,15 @@ export default function Home() {
               disabled={contactStatus === 'sending'}
               className="p-3 bg-gray-900/50 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-cyan disabled:opacity-50"
             ></textarea>
+            {/* --- NEW: Cloudflare Turnstile widget (Managed mode) — the
+                script tag is loaded once near the top of this component;
+                this div is what the script scans for and renders into. */}
+            <div
+              className="cf-turnstile"
+              data-sitekey="0x4AAAAAAD_8M1cYRd5T5WXi"
+              data-callback="onTurnstileSuccess"
+              data-expired-callback="onTurnstileExpired"
+            ></div>
             <button
               type="submit"
               disabled={contactStatus === 'sending'}
