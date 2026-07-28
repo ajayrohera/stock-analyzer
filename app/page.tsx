@@ -1568,13 +1568,17 @@ export default function Home() {
             ></textarea>
             {/* --- NEW: Cloudflare Turnstile widget (Managed mode) — the
                 script tag is loaded once near the top of this component;
-                this div is what the script scans for and renders into. */}
-            <div
-              className="cf-turnstile"
-              data-sitekey="0x4AAAAAAD_8M1cYRd5T5WXi"
-              data-callback="onTurnstileSuccess"
-              data-expired-callback="onTurnstileExpired"
-            ></div>
+                this div is what the script scans for and renders into.
+                Wrapped in a centered flex container since the widget has
+                no layout styling of its own. */}
+            <div className="flex justify-center">
+              <div
+                className="cf-turnstile"
+                data-sitekey="0x4AAAAAAD_8M1cYRd5T5WXi"
+                data-callback="onTurnstileSuccess"
+                data-expired-callback="onTurnstileExpired"
+              ></div>
+            </div>
             <button
               type="submit"
               disabled={contactStatus === 'sending'}
