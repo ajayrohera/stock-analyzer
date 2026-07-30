@@ -442,9 +442,13 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
   const interpretation = adAnalysis.interpretation || 'Analysis data not available';
 
   const displayLines = adAnalysis.formattedLines || [
-    `💰 Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} average`,
+    `💰 Today's Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} (20 days average)`,
     `📊 20-Day Trend: ${trend}`,
-    `🎯 Confidence: ${confidence}`,
+    // --- FIX: "Confidence" hidden per request — it's derived from the
+    // exact same number driving "trend" (its magnitude, not an
+    // independent signal), which made it confusing alongside "Today's
+    // Signal" strength.
+    // `🎯 Trend Confidence: ${confidence}`,
     ``,
     `💡 ${interpretation}`
   ];
@@ -461,8 +465,8 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
             <br />Shows institutional buying/selling pressure.
             <br /><br />
             Signal: {adAnalysis.todaySignal || 'NEUTRAL'} ({adAnalysis.todayStrength || 'WEAK'})
-            <br />Money Flow: {todayMoneyFlow >= 0 ? '+' : ''}{formatMoneyFlow(todayMoneyFlow)}
-            <br />Trend: {trend} ({confidence} confidence)
+            <br />Today's Money Flow: {todayMoneyFlow >= 0 ? '+' : ''}{formatMoneyFlow(todayMoneyFlow)}
+            <br />Trend: {trend}
           </div>
         </div>
       </div>

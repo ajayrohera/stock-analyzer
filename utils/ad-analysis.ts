@@ -61,10 +61,14 @@ export function analyzeADTrend(historicalData: HistoricalData[]): {
   trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 } {
-  if (historicalData.length < 5) return { trend: 'SIDEWAYS', confidence: 'LOW' };
+  // --- FIX: widened from 5-day-vs-prior-5-day (10 days total) to
+  // 10-day-vs-prior-10-day (20 days total), so this genuinely matches
+  // the "20-Day Trend" label shown in the UI instead of silently only
+  // examining the last 10 days while claiming to look at 20.
+  if (historicalData.length < 10) return { trend: 'SIDEWAYS', confidence: 'LOW' };
   
-  const recentAD = calculateADLine(historicalData.slice(-5));
-  const previousAD = calculateADLine(historicalData.slice(-10, -5));
+  const recentAD = calculateADLine(historicalData.slice(-10));
+  const previousAD = calculateADLine(historicalData.slice(-20, -10));
   
   // Avoid division by zero
   if (Math.abs(previousAD) < 0.001) return { trend: 'SIDEWAYS', confidence: 'LOW' };
