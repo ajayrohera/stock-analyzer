@@ -1745,6 +1745,10 @@ export async function POST(request: Request) {
     console.log('📊 A/D ANALYSIS - Starting calculation...');
     
     let adAnalysis: ADAnalysis;
+    // --- FIX: shared flag, set in either the "zero money flow" branch or
+    // the "insufficient data" branch below, so the API response can be
+    // honest about when today's A/D signal isn't based on real live data.
+    let adTodaySignalUnavailable = false;
     try {
       let todayData: { high: number; low: number; close: number; volume: number } | undefined = undefined;
       
@@ -1780,16 +1784,26 @@ export async function POST(request: Request) {
       if (historicalDataLength >= 1) {
         adAnalysis = generateADAnalysis(displayName.toUpperCase(), historicalData, todayData);
         
+        // --- FIX: this used to fabricate a money flow value whenever the
+        // real calculation legitimately returned zero (which happens when
+        // live intraday OHLC is unavailable, forcing high===low). The old
+        // fallback (`volumeEstimate * ltp * 0.15`) was ALWAYS POSITIVE —
+        // every single time it fired, it forced "ACCUMULATION" regardless
+        // of what was actually happening with the stock, a deterministic
+        // bullish bias, not just noise. Now we're honest instead: mark
+        // today's signal as unavailable, and lean on the multi-day
+        // `trend` field, which is built from genuine historical EOD data
+        // with no fabrication at all.
+        // (uses the shared adTodaySignalUnavailable flag declared above)
         if (adAnalysis.todayMoneyFlow === 0) {
-          console.log('🔄 Zero money flow detected, using intelligent fallback...');
-          const marketProgress = hours >= 9 && hours < 15 ? 
-  (hours - 9) + (minutes / 60) : 6.25;
-          const volumeEstimate = volumeMetrics.avg20DayVolume * (marketProgress / 6.25);
-          adAnalysis.todayMoneyFlow = volumeEstimate * ltp * 0.15;
-          console.log(`📊 A/D MONEY FLOW FALLBACK: ${adAnalysis.todayMoneyFlow}`);
+          console.log('⚠️ A/D: today\'s live intraday data unavailable — marking as unavailable, not fabricating a signal');
+          adTodaySignalUnavailable = true;
+          adAnalysis.todaySignal = 'NEUTRAL';
+          adAnalysis.todayStrength = 'WEAK';
+          adAnalysis.interpretation = "Today's signal unavailable (live intraday data missing) — see multi-day trend instead";
         }
         if (adAnalysis.twentyDayAverage === 0) {
-          adAnalysis.twentyDayAverage = volumeMetrics.avg20DayVolume * ltp * 0.1;
+          adAnalysis.twentyDayAverage = 0; // honest zero, not a fabricated estimate
         }
         
         console.log('📊 A/D ANALYSIS - Result:', {
@@ -1801,25 +1815,32 @@ export async function POST(request: Request) {
         });
       } else {
         console.log('📊 A/D ANALYSIS - Skipped: Insufficient historical data');
+        // --- FIX: previously fabricated todayMoneyFlow, twentyDayAverage,
+        // currentADLine, and previousADLine using avg20DayVolume * ltp *
+        // a fixed multiplier — invented numbers dressed up as real
+        // analysis when there simply isn't enough data yet. Now honestly
+        // zeroed out instead, with adTodaySignalUnavailable flagging this
+        // to the response/UI.
+        adTodaySignalUnavailable = true;
         adAnalysis = {
           todaySignal: 'NEUTRAL',
           todayStrength: 'WEAK',
-          todayMoneyFlow: volumeMetrics.avg20DayVolume * ltp * 0.1,
-          twentyDayAverage: volumeMetrics.avg20DayVolume * ltp * 0.1,
+          todayMoneyFlow: 0,
+          twentyDayAverage: 0,
           trend: 'SIDEWAYS',
           confidence: 'LOW',
           breakdown: {
-            currentADLine: volumeMetrics.avg20DayVolume * ltp * 0.01,
-            previousADLine: volumeMetrics.avg20DayVolume * ltp * 0.01,
+            currentADLine: 0,
+            previousADLine: 0,
             change: 0,
             changePercent: 0
           },
           volumeAnalysis: {
-            todayVolume: currentVolume || 1000,
-            volumeVsAverage: 100,
+            todayVolume: currentVolume || 0,
+            volumeVsAverage: 0,
             volumeConfirmation: 'NO'
           },
-          interpretation: 'Insufficient historical data for A/D analysis'
+          interpretation: 'Insufficient historical data for A/D analysis — signal unavailable'
         } as ADAnalysis;
       }
     } catch (error) {
@@ -2014,6 +2035,7 @@ export async function POST(request: Request) {
         volumeMetrics.estimatedTodayVolume, 
         volumeMetrics.avg20DayVolume,
         adAnalysis,
+        adTodaySignalUnavailable, // --- NEW: true when today's A/D signal isn't based on real live data
         vwapAnalysis,
         isMarketOpen,
         changePercent,
