@@ -2195,16 +2195,22 @@ export async function POST(request: Request) {
             
             display: {
                 signal: `${adAnalysis.todaySignal} (${adAnalysis.todayStrength})`,
-                moneyFlow: `${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} average`,
+                moneyFlow: `${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} (20 days average)`,
                 trend: `${adAnalysis.trend}`,
                 confidence: `${adAnalysis.confidence}`,
                 interpretation: `${adAnalysis.interpretation}`
             },
             
+            // --- FIX: this backend-generated array was the ACTUAL source
+            // of the displayed A/D text — the frontend's own fallback
+            // array in page.tsx was never being used at all, since
+            // `adAnalysis.formattedLines || [...]` always picks THIS one
+            // whenever it's present. All three requested changes applied
+            // here instead: label format fixed, Confidence line removed.
             formattedLines: [
-                `💰 Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} average`,
+                `💰 Today's Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} (20 days average)`,
                 `📊 20-Day Trend: ${adAnalysis.trend}`,
-                `🎯 Confidence: ${adAnalysis.confidence}`,
+                // `🎯 Confidence: ${adAnalysis.confidence}`, // hidden per request
                 ``,
                 `💡 ${adAnalysis.interpretation}`
             ],
