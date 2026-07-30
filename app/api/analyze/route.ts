@@ -1341,7 +1341,7 @@ function calculateSmartSentiment(
     : maxPainScore > 0 ? 'Bullish' : maxPainScore < 0 ? 'Bearish' : 'Neutral';
   const maxPainColorClass = maxPainLabel === 'Bullish' ? 'text-green-400' : maxPainLabel === 'Bearish' ? 'text-red-400' : 'text-gray-400';
   if (hasValidMaxPainData) {
-    breakdown.push(`Max Pain: ${maxPainScore > 0 ? '+' : ''}${maxPainScore} (${maxPain} vs CMP ${currentPrice}, ${maxPainPercentDiff >= 0 ? '+' : ''}${maxPainPercentDiff.toFixed(1)}%, ${maxPainLabel})`);
+    breakdown.push(`${maxPainScore >= 0 ? '+' : ''}${maxPainScore} • Max Pain ${maxPain} vs CMP ${currentPrice} (${maxPainPercentDiff >= 0 ? '+' : ''}${maxPainPercentDiff.toFixed(1)}%, ${maxPainLabel!.toLowerCase()})`);
   }
 
   const baseWeights = {
