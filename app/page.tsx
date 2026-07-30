@@ -444,13 +444,6 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
   const displayLines = adAnalysis.formattedLines || [
     `💰 Today's Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} (20 days average)`,
     `📊 20-Day Trend: ${trend}`,
-    // --- FIX: "Confidence" hidden per request — it's derived from the
-    // exact same number driving "trend" (its magnitude, not an
-    // independent signal), which made it confusing alongside "Today's
-    // Signal" strength.
-    // `🎯 Trend Confidence: ${confidence}`,
-    ``,
-    `💡 ${interpretation}`
   ];
 
   return (
@@ -490,10 +483,10 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
           </div>
         ))}
       </div>
-      
-      <div className="text-xs mt-2 text-gray-400 text-left" style={{ textAlign: 'center' }}>
-        {interpretation}
-      </div>
+      {/* --- FIX: removed the standalone interpretation div that used to
+          be here — it just restated the "Today's Signal: X (Y)" badge
+          already shown above in sentence form, redundant with it and
+          with formattedLines. */}
     </div>
   );
 });

@@ -2207,12 +2207,15 @@ export async function POST(request: Request) {
             // `adAnalysis.formattedLines || [...]` always picks THIS one
             // whenever it's present. All three requested changes applied
             // here instead: label format fixed, Confidence line removed.
+            // --- FIX: removed the interpretation line entirely — it was
+            // pure repetition of the "Today's Signal: X (Y)" badge
+            // already shown above this box, just in sentence form
+            // ("Weak distribution signal detected" = same info as
+            // "DISTRIBUTION (WEAK)"). No need to say the same thing
+            // three times (badge + this list + the standalone div below).
             formattedLines: [
                 `💰 Today's Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} (20 days average)`,
                 `📊 20-Day Trend: ${adAnalysis.trend}`,
-                // `🎯 Confidence: ${adAnalysis.confidence}`, // hidden per request
-                ``,
-                `💡 ${adAnalysis.interpretation}`
             ],
             
             raw: {
