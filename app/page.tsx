@@ -1304,6 +1304,13 @@ export default function Home() {
         <section className="text-center py-16"  style={{ paddingTop: 0 }}>
           <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 mb-4">Insight Engine</h1>
           <p className="text-lg md:text-xl text-gray-400 max-w-3xl mx-auto">Leverage options data to uncover market sentiment, identify key support and resistance levels, and make smarter trading decisions.</p>
+          {/* --- NEW: visible disclaimer, important now that this is a
+              public tool for real users, not just personal testing */}
+          <p className="text-xs text-gray-500 max-w-2xl mx-auto mt-4">
+            ⚠ For informational and educational purposes only. This is not financial advice. 
+            Trading and investing in the stock market involves risk, including the risk of loss. 
+            Please consult a registered financial advisor before making investment decisions.
+          </p>
         </section>
 
         <section className="w-full max-w-2xl mx-auto p-6 bg-brand-light-dark/50 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10">

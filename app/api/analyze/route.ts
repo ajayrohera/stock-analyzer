@@ -1446,6 +1446,30 @@ export async function POST(request: Request) {
 
     console.log(`📈 PROCESSING SYMBOL: ${displayName}`);
 
+    // --- NEW: short-lived cache on the FULL analysis response. Kite
+    // Connect enforces roughly 3 requests/sec across the whole API key,
+    // not per-user — with real concurrent traffic (multiple people
+    // checking the same stock within a short window), that limit gets
+    // hit fast and causes real failures, not graceful degradation.
+    // Caching each symbol's complete result for 45s means only the FIRST
+    // request in that window hits Kite live; everyone else checking the
+    // same stock shortly after gets an instant cached response — both
+    // protects against rate-limiting AND makes popular stocks feel
+    // faster. 45s is short enough that "live" data still feels live for
+    // this kind of options/sentiment analysis (not tick-by-tick trading).
+    const cacheKey = `analysis_cache_${displayName.toUpperCase()}`;
+    try {
+      const cachedResponse = await getRedisData(cacheKey);
+      if (cachedResponse) {
+        console.log(`⚡ CACHE HIT for ${displayName} — returning cached result, no Kite call needed`);
+        const parsed = JSON.parse(cachedResponse);
+        return NextResponse.json({ ...parsed, servedFromCache: true });
+      }
+    } catch (cacheError) {
+      console.error('⚠️ Cache read failed (continuing with live fetch):', cacheError);
+    }
+    console.log(`🔄 CACHE MISS for ${displayName} — proceeding with live Kite fetch`);
+
     const now = new Date();
     const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
     const hours = istTime.getHours();
@@ -2232,6 +2256,19 @@ export async function POST(request: Request) {
         }
     };
     
+    // --- NEW: save this result to the short-lived cache (45s TTL) before
+    // returning it, so the next request for this same symbol within that
+    // window gets an instant cached response instead of hitting Kite again.
+    try {
+      const client = createClient({ url: process.env.REDIS_URL });
+      await client.connect();
+      await client.setEx(cacheKey, 45, JSON.stringify(responseData));
+      await client.quit();
+      console.log(`💾 Cached analysis for ${displayName} (45s TTL)`);
+    } catch (cacheError) {
+      console.error('⚠️ Cache write failed (non-fatal, response still returned normally):', cacheError);
+    }
+
     console.log('✅ API CALL COMPLETED SUCCESSFULLY ========================');
     return NextResponse.json(responseData);
 
