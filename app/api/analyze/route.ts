@@ -2035,7 +2035,15 @@ export async function POST(request: Request) {
         volumeMetrics.estimatedTodayVolume, 
         volumeMetrics.avg20DayVolume,
         adAnalysis,
-        adTodaySignalUnavailable, // --- NEW: true when today's A/D signal isn't based on real live data
+        // --- FIX: adTodaySignalUnavailable removed from here — it was
+        // never actually used inside calculateSmartSentiment's body, and
+        // passing it as a positional argument silently shifted EVERY
+        // parameter after it by one slot, which is what broke maxPain
+        // and currentPrice (they were receiving volumePcrIsEstimated's
+        // and maxPain's values respectively, instead of their own). The
+        // API response already gets adTodaySignalUnavailable directly
+        // from the outer-scope variable — no need to route it through
+        // this function at all.
         vwapAnalysis,
         isMarketOpen,
         changePercent,
