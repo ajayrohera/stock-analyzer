@@ -150,10 +150,22 @@ async function updateVolumeHistory() {
         if (data && data.volume !== undefined && data.last_price !== undefined) {
           // UPDATED CRON JOB LOGIC: Only store data when market is CLOSED
           if (marketStatus === 'CLOSED' && data.volume > 0) {
+            // --- FIX: previously only stored totalVolume + lastPrice,
+            // never high/low. Since A/D Line needs to know where the
+            // close sits WITHIN a day's high-low range, every stored day
+            // was structurally forced to high===low===close, making the
+            // multi-day A/D average always exactly zero — permanently,
+            // no matter how much history accumulated. Kite's getQuote()
+            // already returns real high/low via the `ohlc` object; it
+            // was just never being saved. Falls back to last_price only
+            // if ohlc is genuinely missing (shouldn't normally happen).
             const newEntry = {
               date: today,
               totalVolume: data.volume,
               lastPrice: data.last_price,
+              high: data.ohlc?.high || data.last_price,
+              low: data.ohlc?.low || data.last_price,
+              close: data.ohlc?.close || data.last_price,
               timestamp: timestamp,
             };
 

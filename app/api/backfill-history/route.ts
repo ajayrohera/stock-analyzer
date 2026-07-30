@@ -149,10 +149,17 @@ export async function GET(request: NextRequest) {
           const dateStr = new Date(candle.date).toISOString().split('T')[0];
           // Remove any existing entry for this date before adding, to avoid duplicates
           history[key] = history[key].filter((e: any) => e.date !== dateStr);
+          // --- FIX: candle.high and candle.low were already available
+          // right here from Kite's real historical data — just never
+          // saved. Same root cause as the daily cron: without high/low,
+          // A/D Line's multi-day average is structurally forced to zero.
           history[key].push({
             date: dateStr,
             totalVolume: candle.volume,
             lastPrice: candle.close,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
             timestamp: new Date(candle.date).getTime(),
           });
         }
