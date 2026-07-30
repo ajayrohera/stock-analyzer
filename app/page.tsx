@@ -37,8 +37,10 @@ type ADAnalysis = {
   todayStrength: 'VERY_STRONG' | 'STRONG' | 'MODERATE' | 'WEAK';
   todayMoneyFlow: number;
   twentyDayAverage: number;
+  avgDaysUsed?: number; // --- NEW: actual days used for the average
   trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  trendDaysUsed?: number; // --- NEW: actual days used for the trend
   breakdown: {
     currentADLine: number;
     previousADLine: number;
@@ -442,8 +444,12 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
   const interpretation = adAnalysis.interpretation || 'Analysis data not available';
 
   const displayLines = adAnalysis.formattedLines || [
-    `💰 Today's Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} (20 days average)`,
-    `📊 20-Day Trend: ${trend}`,
+    (adAnalysis.avgDaysUsed ?? 0) >= 20
+      ? `💰 Today's Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} (20 days average)`
+      : `💰 Today's Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)}`,
+    (adAnalysis.trendDaysUsed ?? 0) >= 20
+      ? `📊 20-Day Trend: ${trend}`
+      : `📊 20-Day Trend: Data collection underway (${adAnalysis.trendDaysUsed ?? 0}/20 days)`,
   ];
 
   return (

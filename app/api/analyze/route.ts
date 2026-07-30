@@ -1827,8 +1827,10 @@ export async function POST(request: Request) {
           todayStrength: 'WEAK',
           todayMoneyFlow: 0,
           twentyDayAverage: 0,
+          avgDaysUsed: 0,
           trend: 'SIDEWAYS',
           confidence: 'LOW',
+          trendDaysUsed: 0,
           breakdown: {
             currentADLine: 0,
             previousADLine: 0,
@@ -1845,22 +1847,29 @@ export async function POST(request: Request) {
       }
     } catch (error) {
       console.error('❌ A/D ANALYSIS - Error:', error);
+      // --- FIX: found a THIRD fabrication instance here — same
+      // avg20DayVolume * ltp * 0.1 pattern as the other two we already
+      // fixed. An error genuinely occurred; honestly zero instead of
+      // inventing plausible-looking numbers.
+      adTodaySignalUnavailable = true;
       adAnalysis = {
         todaySignal: 'NEUTRAL',
         todayStrength: 'WEAK', 
-        todayMoneyFlow: volumeMetrics.avg20DayVolume * ltp * 0.1,
-        twentyDayAverage: volumeMetrics.avg20DayVolume * ltp * 0.1,
+        todayMoneyFlow: 0,
+        twentyDayAverage: 0,
+        avgDaysUsed: 0,
         trend: 'SIDEWAYS',
         confidence: 'LOW',
+        trendDaysUsed: 0,
         breakdown: {
-          currentADLine: volumeMetrics.avg20DayVolume * ltp * 0.01,
-          previousADLine: volumeMetrics.avg20DayVolume * ltp * 0.01,
+          currentADLine: 0,
+          previousADLine: 0,
           change: 0,
           changePercent: 0
         },
         volumeAnalysis: {
-          todayVolume: currentVolume || 1000,
-          volumeVsAverage: 100,
+          todayVolume: currentVolume || 0,
+          volumeVsAverage: 0,
           volumeConfirmation: 'NO'
         },
         interpretation: 'A/D analysis failed: ' + (error instanceof Error ? error.message : 'Unknown error')
@@ -2195,7 +2204,9 @@ export async function POST(request: Request) {
             
             display: {
                 signal: `${adAnalysis.todaySignal} (${adAnalysis.todayStrength})`,
-                moneyFlow: `${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} (20 days average)`,
+                moneyFlow: adAnalysis.avgDaysUsed >= 20
+                  ? `${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} (20 days average)`
+                  : `${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)}`,
                 trend: `${adAnalysis.trend}`,
                 confidence: `${adAnalysis.confidence}`,
                 interpretation: `${adAnalysis.interpretation}`
@@ -2214,8 +2225,20 @@ export async function POST(request: Request) {
             // "DISTRIBUTION (WEAK)"). No need to say the same thing
             // three times (badge + this list + the standalone div below).
             formattedLines: [
-                `💰 Today's Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} (20 days average)`,
-                `📊 20-Day Trend: ${adAnalysis.trend}`,
+                // --- FIX: both lines now require a genuine FULL 20 days
+                // before showing the average/trend comparison. Below
+                // that threshold, showing "vs X average" or a confident
+                // BULLISH/BEARISH/SIDEWAYS verdict would be misleading —
+                // an "average" of a couple of days isn't meaningful, and
+                // a trend comparison run on too little data isn't a real
+                // finding. Show today's raw value / a clear "still
+                // collecting" message instead until 20 real days exist.
+                adAnalysis.avgDaysUsed >= 20
+                  ? `💰 Today's Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} (20 days average)`
+                  : `💰 Today's Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)}`,
+                adAnalysis.trendDaysUsed >= 20
+                  ? `📊 20-Day Trend: ${adAnalysis.trend}`
+                  : `📊 20-Day Trend: Data collection underway (${adAnalysis.trendDaysUsed}/20 days)`,
             ],
             
             raw: {

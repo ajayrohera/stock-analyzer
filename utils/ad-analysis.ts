@@ -16,8 +16,10 @@ export interface ADAnalysis {
   todayStrength: 'VERY_STRONG' | 'STRONG' | 'MODERATE' | 'WEAK';
   todayMoneyFlow: number;
   twentyDayAverage: number;
+  avgDaysUsed: number; // --- NEW: actual number of days used for the average (may be < 20 if less history exists)
   trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  trendDaysUsed: number; // --- NEW: actual total days used for the trend comparison (may be < 20 if less history exists)
   breakdown: {
     currentADLine: number;
     previousADLine: number;
@@ -60,29 +62,36 @@ export function calculateADLine(historicalData: HistoricalData[]): number {
 export function analyzeADTrend(historicalData: HistoricalData[]): {
   trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  daysUsed: number; // --- NEW: actual total days used (recent window + previous window combined)
 } {
   // --- FIX: widened from 5-day-vs-prior-5-day (10 days total) to
-  // 10-day-vs-prior-10-day (20 days total), so this genuinely matches
-  // the "20-Day Trend" label shown in the UI instead of silently only
-  // examining the last 10 days while claiming to look at 20.
-  if (historicalData.length < 10) return { trend: 'SIDEWAYS', confidence: 'LOW' };
+  // 10-day-vs-prior-10-day (20 days total) when full history is
+  // available. Also now HONESTLY reports how many days were actually
+  // used — if fewer than 20 total days exist, the previous window may
+  // silently be smaller than 10, and the UI should say so rather than
+  // claim "20-Day" regardless of real data availability.
+  if (historicalData.length < 10) return { trend: 'SIDEWAYS', confidence: 'LOW', daysUsed: historicalData.length };
   
-  const recentAD = calculateADLine(historicalData.slice(-10));
-  const previousAD = calculateADLine(historicalData.slice(-20, -10));
+  const recentWindow = historicalData.slice(-10);
+  const previousWindow = historicalData.slice(-20, -10);
+  const daysUsed = recentWindow.length + previousWindow.length;
+
+  const recentAD = calculateADLine(recentWindow);
+  const previousAD = calculateADLine(previousWindow);
   
   // Avoid division by zero
-  if (Math.abs(previousAD) < 0.001) return { trend: 'SIDEWAYS', confidence: 'LOW' };
+  if (Math.abs(previousAD) < 0.001) return { trend: 'SIDEWAYS', confidence: 'LOW', daysUsed };
   
   const change = recentAD - previousAD;
   const changePercent = (change / Math.abs(previousAD)) * 100;
   
   if (Math.abs(changePercent) > 10) {
-    return { trend: change > 0 ? 'BULLISH' : 'BEARISH', confidence: 'HIGH' };
+    return { trend: change > 0 ? 'BULLISH' : 'BEARISH', confidence: 'HIGH', daysUsed };
   } else if (Math.abs(changePercent) > 5) {
-    return { trend: change > 0 ? 'BULLISH' : 'BEARISH', confidence: 'MEDIUM' };
+    return { trend: change > 0 ? 'BULLISH' : 'BEARISH', confidence: 'MEDIUM', daysUsed };
   }
   
-  return { trend: 'SIDEWAYS', confidence: 'LOW' };
+  return { trend: 'SIDEWAYS', confidence: 'LOW', daysUsed };
 }
 
 export function generateADAnalysis(
@@ -179,8 +188,10 @@ export function generateADAnalysis(
     todayStrength,
     todayMoneyFlow,
     twentyDayAverage,
+    avgDaysUsed: availableData.length, // --- NEW: real count, not assumed 20
     trend: trendAnalysis.trend,
     confidence: trendAnalysis.confidence,
+    trendDaysUsed: trendAnalysis.daysUsed, // --- NEW: real count, not assumed 20
     breakdown: {
       currentADLine,
       previousADLine,
@@ -202,8 +213,10 @@ function getNeutralAnalysis(reason: string): ADAnalysis {
     todayStrength: 'WEAK',
     todayMoneyFlow: 0,
     twentyDayAverage: 0,
+    avgDaysUsed: 0,
     trend: 'SIDEWAYS',
     confidence: 'LOW',
+    trendDaysUsed: 0,
     breakdown: {
       currentADLine: 0,
       previousADLine: 0,
