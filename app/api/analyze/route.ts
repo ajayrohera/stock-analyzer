@@ -1831,6 +1831,13 @@ export async function POST(request: Request) {
           trend: 'SIDEWAYS',
           confidence: 'LOW',
           trendDaysUsed: 0,
+          // --- FIX: these 4 fields were missing entirely, causing a
+          // runtime crash (500 error) whenever this fallback path ran —
+          // adAnalysis.trendStrengthPct.toFixed(1) throws on undefined.
+          overallTrend: 'NEUTRAL',
+          trendStrengthPct: 0,
+          trendStrengthLabel: 'Neutral',
+          overallTrendDaysUsed: 0,
           breakdown: {
             currentADLine: 0,
             previousADLine: 0,
@@ -1861,6 +1868,11 @@ export async function POST(request: Request) {
         trend: 'SIDEWAYS',
         confidence: 'LOW',
         trendDaysUsed: 0,
+        // --- FIX: same missing fields, same crash, second location
+        overallTrend: 'NEUTRAL',
+        trendStrengthPct: 0,
+        trendStrengthLabel: 'Neutral',
+        overallTrendDaysUsed: 0,
         breakdown: {
           currentADLine: 0,
           previousADLine: 0,
@@ -2210,7 +2222,7 @@ export async function POST(request: Request) {
                 trend: `${adAnalysis.trend}`,
                 confidence: `${adAnalysis.confidence}`,
                 // --- NEW: EMA-based overall trend, from the n8n flow's methodology
-                overallTrend: `${adAnalysis.overallTrend} (${adAnalysis.trendStrengthPct.toFixed(1)}%, ${adAnalysis.trendStrengthLabel})`,
+                overallTrend: `${adAnalysis.overallTrend} (${(adAnalysis.trendStrengthPct ?? 0).toFixed(1)}%, ${adAnalysis.trendStrengthLabel})`,
                 interpretation: `${adAnalysis.interpretation}`
             },
             
@@ -2239,9 +2251,9 @@ export async function POST(request: Request) {
                   ? `📊 Recent 10-Day Momentum: ${adAnalysis.trend}`
                   : `📊 Recent 10-Day Momentum: Data collection underway (${adAnalysis.trendDaysUsed}/20 days)`,
                 // --- NEW: EMA-based overall trend line
-                adAnalysis.overallTrendDaysUsed >= 20
-                  ? `📈 Overall Trend vs. Baseline: ${adAnalysis.overallTrend} (${adAnalysis.trendStrengthPct >= 0 ? '+' : ''}${adAnalysis.trendStrengthPct.toFixed(1)}%, ${adAnalysis.trendStrengthLabel})`
-                  : `📈 Overall Trend vs. Baseline: Data collection underway (${adAnalysis.overallTrendDaysUsed}/20 days)`,
+                (adAnalysis.overallTrendDaysUsed ?? 0) >= 20
+                  ? `📈 Overall Trend vs. Baseline: ${adAnalysis.overallTrend} (${(adAnalysis.trendStrengthPct ?? 0) >= 0 ? '+' : ''}${(adAnalysis.trendStrengthPct ?? 0).toFixed(1)}%, ${adAnalysis.trendStrengthLabel})`
+                  : `📈 Overall Trend vs. Baseline: Data collection underway (${adAnalysis.overallTrendDaysUsed ?? 0}/20 days)`,
                 ``,
                 `💡 ${adAnalysis.interpretation}`,
             ],
