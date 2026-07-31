@@ -596,7 +596,7 @@ const VWAPAnalysisCard = React.memo(({ vwapAnalysis }: { vwapAnalysis?: VWAPAnal
           <span>VWAP Analysis</span>
           <div className="relative group ml-1">
             <Info size={14} className="cursor-pointer" />
-            <div className="absolute bottom-full mb-2 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+            <div className="absolute bottom-full mb-2 right-0 w-64 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
               Volume Weighted Average Price (VWAP) tracks the average price weighted by volume.
               <br />Trading above VWAP suggests bullish bias, below suggests bearish bias.
               <br />Used by institutions to identify fair value.
@@ -639,7 +639,7 @@ const VWAPAnalysisCard = React.memo(({ vwapAnalysis }: { vwapAnalysis?: VWAPAnal
         <span>VWAP Analysis</span>
         <div className="relative group ml-1">
           <Info size={14} className="cursor-pointer" />
-          <div className="absolute bottom-full mb-2 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+          <div className="absolute bottom-full mb-2 right-0 w-72 p-2 text-xs text-left text-white bg-gray-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
             Volume Weighted Average Price (VWAP) tracks the average price weighted by volume.
             <br />Trading above VWAP suggests bullish bias, below suggests bearish bias.
             <br /><br />
@@ -1131,8 +1131,13 @@ export default function Home() {
   const performAnalysis = useCallback(async (symbolToAnalyze: string) => { 
     if (!symbolToAnalyze) return;
     const currentTime = Date.now();
-    if (lastRequestTime > 0 && currentTime - lastRequestTime < 10000) {
-      setCooldownMessage('Please wait 10 seconds before another request.');
+    // --- FIX: reduced from 10s to 5s. The 45-second server-side analysis
+    // cache already protects against Kite's rate limit for repeated
+    // requests — this client-side cooldown is now just a lighter,
+    // supplementary guard against rapid clicking, not the primary
+    // protection.
+    if (lastRequestTime > 0 && currentTime - lastRequestTime < 5000) {
+      setCooldownMessage('Please wait 5 seconds before another request.');
       setTimeout(() => setCooldownMessage(''), 3000);
       return; 
     } 
