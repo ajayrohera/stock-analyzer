@@ -2209,21 +2209,17 @@ export async function POST(request: Request) {
                   : `${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)}`,
                 trend: `${adAnalysis.trend}`,
                 confidence: `${adAnalysis.confidence}`,
+                // --- NEW: EMA-based overall trend, from the n8n flow's methodology
+                overallTrend: `${adAnalysis.overallTrend} (${adAnalysis.trendStrengthPct.toFixed(1)}%, ${adAnalysis.trendStrengthLabel})`,
                 interpretation: `${adAnalysis.interpretation}`
             },
             
-            // --- FIX: this backend-generated array was the ACTUAL source
-            // of the displayed A/D text — the frontend's own fallback
-            // array in page.tsx was never being used at all, since
-            // `adAnalysis.formattedLines || [...]` always picks THIS one
-            // whenever it's present. All three requested changes applied
-            // here instead: label format fixed, Confidence line removed.
-            // --- FIX: removed the interpretation line entirely — it was
-            // pure repetition of the "Today's Signal: X (Y)" badge
-            // already shown above this box, just in sentence form
-            // ("Weak distribution signal detected" = same info as
-            // "DISTRIBUTION (WEAK)"). No need to say the same thing
-            // three times (badge + this list + the standalone div below).
+            // --- FIX: re-added the interpretation line, but this time it's
+            // the NEW 3-input combined synthesis (Recent Momentum + Overall
+            // Trend + Today's Flow), not the old sentence that was purely
+            // redundant with the "Today's Signal" badge above. This one
+            // genuinely adds new information — specifically whether the
+            // two trend measures agree or disagree with each other.
             formattedLines: [
                 // --- FIX: both lines now require a genuine FULL 20 days
                 // before showing the average/trend comparison. Below
@@ -2236,9 +2232,18 @@ export async function POST(request: Request) {
                 adAnalysis.avgDaysUsed >= 20
                   ? `💰 Today's Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)} vs ${formatMoneyFlow(adAnalysis.twentyDayAverage)} (20 days average)`
                   : `💰 Today's Money Flow: ${adAnalysis.todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(adAnalysis.todayMoneyFlow)}`,
+                // --- FIX: relabeled from "20-Day Trend" to "Recent 10-Day
+                // Momentum" — this is a 10-vs-10 day comparison, genuinely
+                // distinct from the new EMA-based "Overall Trend" line below.
                 adAnalysis.trendDaysUsed >= 20
-                  ? `📊 20-Day Trend: ${adAnalysis.trend}`
-                  : `📊 20-Day Trend: Data collection underway (${adAnalysis.trendDaysUsed}/20 days)`,
+                  ? `📊 Recent 10-Day Momentum: ${adAnalysis.trend}`
+                  : `📊 Recent 10-Day Momentum: Data collection underway (${adAnalysis.trendDaysUsed}/20 days)`,
+                // --- NEW: EMA-based overall trend line
+                adAnalysis.overallTrendDaysUsed >= 20
+                  ? `📈 Overall Trend vs. Baseline: ${adAnalysis.overallTrend} (${adAnalysis.trendStrengthPct >= 0 ? '+' : ''}${adAnalysis.trendStrengthPct.toFixed(1)}%, ${adAnalysis.trendStrengthLabel})`
+                  : `📈 Overall Trend vs. Baseline: Data collection underway (${adAnalysis.overallTrendDaysUsed}/20 days)`,
+                ``,
+                `💡 ${adAnalysis.interpretation}`,
             ],
             
             raw: {

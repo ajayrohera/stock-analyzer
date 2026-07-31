@@ -38,9 +38,14 @@ type ADAnalysis = {
   todayMoneyFlow: number;
   twentyDayAverage: number;
   avgDaysUsed?: number; // --- NEW: actual days used for the average
-  trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+  trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS'; // "Recent 10-Day Momentum"
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   trendDaysUsed?: number; // --- NEW: actual days used for the trend
+  // --- NEW: EMA-based "Overall Trend vs. Baseline"
+  overallTrend?: 'ACCUMULATION' | 'DISTRIBUTION' | 'NEUTRAL';
+  trendStrengthPct?: number;
+  trendStrengthLabel?: string;
+  overallTrendDaysUsed?: number;
   breakdown: {
     currentADLine: number;
     previousADLine: number;
@@ -58,6 +63,7 @@ type ADAnalysis = {
     moneyFlow: string;
     trend: string;
     confidence: string;
+    overallTrend?: string;
     interpretation: string;
   };
   formattedLines?: string[];
@@ -448,8 +454,13 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
       ? `💰 Today's Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)} vs ${formatMoneyFlow(twentyDayAverage)} (20 days average)`
       : `💰 Today's Money Flow: ${todayMoneyFlow >= 0 ? '+' : ''}${formatMoneyFlow(todayMoneyFlow)}`,
     (adAnalysis.trendDaysUsed ?? 0) >= 20
-      ? `📊 20-Day Trend: ${trend}`
-      : `📊 20-Day Trend: Data collection underway (${adAnalysis.trendDaysUsed ?? 0}/20 days)`,
+      ? `📊 Recent 10-Day Momentum: ${trend}`
+      : `📊 Recent 10-Day Momentum: Data collection underway (${adAnalysis.trendDaysUsed ?? 0}/20 days)`,
+    (adAnalysis.overallTrendDaysUsed ?? 0) >= 20
+      ? `📈 Overall Trend vs. Baseline: ${adAnalysis.overallTrend} (${(adAnalysis.trendStrengthPct ?? 0) >= 0 ? '+' : ''}${(adAnalysis.trendStrengthPct ?? 0).toFixed(1)}%, ${adAnalysis.trendStrengthLabel})`
+      : `📈 Overall Trend vs. Baseline: Data collection underway (${adAnalysis.overallTrendDaysUsed ?? 0}/20 days)`,
+    ``,
+    `💡 ${interpretation}`,
   ];
 
   return (
@@ -482,7 +493,7 @@ const ADLineAnalysisCard = React.memo(({ adAnalysis, marketStatus }: { adAnalysi
 
       
       <div className="text-xs space-y-1 mt-2 text-left">
-        {displayLines.slice(0, 4).map((line, index) => (
+        {displayLines.slice(0, 6).map((line, index) => (
           <div key={index} className="flex items-start">
             <span className="flex-shrink-0 mr-1">{line.split(' ')[0]}</span>
             <span>{line.substring(line.indexOf(' ') + 1)}</span>
