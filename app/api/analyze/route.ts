@@ -1060,7 +1060,9 @@ function calculateSmartSentiment(
   historicalDataLength?: number,
   volumePcrIsEstimated?: boolean, // --- FIX: true when volumePcr is a proxy/fallback, not genuinely live volume data
   maxPain?: number,      // --- NEW: strike price of max pain, for the 7th weighted component
-  currentPrice?: number  // --- NEW: LTP, needed to compare against maxPain
+  currentPrice?: number, // --- NEW: LTP, needed to compare against maxPain
+  relativeStrengthGap?: number, // --- NEW: 8th component. Added strictly at the END of the parameter list this time, per the lesson learned earlier tonight (adding a param in the MIDDLE silently shifted every argument after it).
+  niftyDataAvailable?: boolean
 ): { sentiment: string; score: number; breakdown: string[]; maxPainSentiment?: { label: string; color: string } } {
   console.log('🧠 SENTIMENT CALCULATION:', { 
     pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent, historicalDataLength
@@ -1100,32 +1102,52 @@ function calculateSmartSentiment(
                         volumePcr <= 1.3 ? " (slightly bearish volume)" : " (bearish volume)";
   breakdown.push(`${volumeModifier >= 0 ? '+' : ''}${volumeModifier} • Volume PCR ${volumePcr.toFixed(2)}${volumePCRContext}`);
 
-  // 4. A/D Line Analysis Score - FIXED
+  // 4. A/D Line Analysis Score
+  // --- FIX: replaced with a 3-signal VOTING system, incorporating the two
+  // new signals we added (Recent 10-Day Momentum, Overall Trend/EMA)
+  // alongside Today's Signal — previously only Today's Signal fed the
+  // score at all, leaving the two new calculations as display-only, real
+  // analysis that never actually influenced the composite verdict.
+  //
+  // Each of the 3 signals votes +1 (bullish), -1 (bearish), or 0
+  // (neutral/weak/sideways). Summing them naturally produces the exact
+  // "agreement strengthens, disagreement dampens" behavior we wanted:
+  // all 3 bullish = +3, all 3 bearish = -3, mixed = something in between.
+  // Deliberately simple (not weighted by strength level) per explicit
+  // preference — this does mean STRONG vs VERY_STRONG etc. aren't
+  // distinguished in the SCORE specifically, though they remain visible
+  // in the displayed badges/labels.
   let adScore = 0;
   let adContext = "";
+  const adVoteParts: string[] = [];
 
   if (adAnalysis) {
-    switch (adAnalysis.todaySignal) {
-      case 'ACCUMULATION':
-        // FIXED: Weak accumulation now gets +1 instead of 0
-        adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? 3 :
-                  adAnalysis.todayStrength === 'STRONG' ? 2 :
-                  adAnalysis.todayStrength === 'MODERATE' ? 1 : 1; // WEAK gets +1
-        adContext = ` (${adAnalysis.todayStrength.toLowerCase()} accumulation)`;
-        break;
-      case 'DISTRIBUTION':
-        // FIXED: Weak distribution now gets -1 instead of 0
-        adScore = adAnalysis.todayStrength === 'VERY_STRONG' ? -3 :
-                  adAnalysis.todayStrength === 'STRONG' ? -2 :
-                  adAnalysis.todayStrength === 'MODERATE' ? -1 : -1; // WEAK gets -1
-        adContext = ` (${adAnalysis.todayStrength.toLowerCase()} distribution)`;
-        break;
-      case 'NEUTRAL':
-      default:
-        adScore = 0;
-        adContext = " (neutral money flow)";
-        break;
+    // Vote 1: Today's Signal (MODERATE or stronger required to vote; WEAK counts as neutral)
+    let todayVote = 0;
+    if (adAnalysis.todaySignal === 'ACCUMULATION' && adAnalysis.todayStrength !== 'WEAK') todayVote = 1;
+    else if (adAnalysis.todaySignal === 'DISTRIBUTION' && adAnalysis.todayStrength !== 'WEAK') todayVote = -1;
+    adVoteParts.push(`Today ${adAnalysis.todaySignal}`);
+
+    // Vote 2: Recent 10-Day Momentum (only if it's had enough days to be meaningful)
+    let momentumVote = 0;
+    if (adAnalysis.trendDaysUsed >= 20) {
+      if (adAnalysis.trend === 'BULLISH') momentumVote = 1;
+      else if (adAnalysis.trend === 'BEARISH') momentumVote = -1;
     }
+    adVoteParts.push(`Momentum ${adAnalysis.trend}`);
+
+    // Vote 3: Overall Trend (EMA-based) — only if it's had enough days AND isn't Neutral
+    let overallVote = 0;
+    if (adAnalysis.overallTrendDaysUsed >= 20 && adAnalysis.trendStrengthLabel !== 'Neutral') {
+      if (adAnalysis.overallTrend === 'ACCUMULATION') overallVote = 1;
+      else if (adAnalysis.overallTrend === 'DISTRIBUTION') overallVote = -1;
+    }
+    adVoteParts.push(`Overall ${adAnalysis.overallTrend}`);
+
+    adScore = todayVote + momentumVote + overallVote;
+
+    const agreeCount = [todayVote, momentumVote, overallVote].filter(v => v !== 0 && Math.sign(v) === Math.sign(adScore || 1)).length;
+    adContext = ` (${adVoteParts.join(', ')})`;
   } else {
     adContext = " (data unavailable)";
   }
@@ -1344,17 +1366,43 @@ function calculateSmartSentiment(
     breakdown.push(`${maxPainScore >= 0 ? '+' : ''}${maxPainScore} • Max Pain ${maxPain} vs CMP ${currentPrice} (${maxPainPercentDiff >= 0 ? '+' : ''}${maxPainPercentDiff.toFixed(1)}%, ${maxPainLabel!.toLowerCase()})`);
   }
 
+  // --- NEW: Relative Strength vs Nifty (8th component). Same threshold
+  // pattern as Max Pain: >2pts = strong signal, 1-2pts = mild, within
+  // +-1pt = too close to call either way.
+  let relativeStrengthScore = 0;
+  if (niftyDataAvailable && relativeStrengthGap !== undefined) {
+    if (relativeStrengthGap > 2) relativeStrengthScore = 2;
+    else if (relativeStrengthGap > 1) relativeStrengthScore = 1;
+    else if (relativeStrengthGap < -2) relativeStrengthScore = -2;
+    else if (relativeStrengthGap < -1) relativeStrengthScore = -1;
+    else relativeStrengthScore = 0;
+    const relativeStrengthLabelForScore = relativeStrengthScore > 0 ? 'Outperforming' : relativeStrengthScore < 0 ? 'Underperforming' : 'In line with market';
+    breakdown.push(`${relativeStrengthScore >= 0 ? '+' : ''}${relativeStrengthScore} • Relative Strength: ${relativeStrengthLabelForScore} Nifty by ${Math.abs(relativeStrengthGap).toFixed(2)} pts`);
+  }
+
   const baseWeights = {
-    oiPcr: 0.17,
-    volumePcr: 0.1275,
-    adLine: 0.17,
-    vwap: 0.1275,
-    priceAction: 0.1275,
-    volumePercent: 0.1275,
-    maxPain: 0.15, // --- NEW: sums to 1.0 with the six above
+    oiPcr: 0.153,
+    volumePcr: 0.11475,
+    adLine: 0.153,
+    vwap: 0.11475,
+    priceAction: 0.11475,
+    volumePercent: 0.11475,
+    maxPain: 0.135,
+    relativeStrength: 0.10, // --- NEW: 8th component, sums to 1.0 with the seven above. Weighted lighter than the core signals since this is more of a market-context adjuster than a direct signal about the stock's own options positioning or money flow.
   };
 
   const weights = { ...baseWeights };
+  if (!niftyDataAvailable) {
+    // No Nifty data available this call — exclude it and redistribute,
+    // same pattern already used for maxPain/volumePcr above.
+    const removedWeight = weights.relativeStrength;
+    weights.relativeStrength = 0;
+    const remainingKeys = (Object.keys(weights) as (keyof typeof weights)[]).filter(k => k !== 'relativeStrength');
+    const remainingSum = remainingKeys.reduce((s, k) => s + weights[k], 0);
+    remainingKeys.forEach(k => {
+      weights[k] = weights[k] + (weights[k] / remainingSum) * removedWeight;
+    });
+  }
   if (!hasValidMaxPainData) {
     // No max pain data available this call — exclude it and redistribute
     // its weight, same pattern already used for the volumePcr duplicate case.
@@ -1387,6 +1435,7 @@ function calculateSmartSentiment(
     priceAction: priceActionScore / 1, // priceActionScore range: -1..+1
     volumePercent: volumePercentageScore / 2, // range: -2..+2
     maxPain: maxPainScore / 2,         // maxPainScore range: -2..+2
+    relativeStrength: relativeStrengthScore / 2, // --- NEW: range -2..+2
   };
 
   // Weighted sum is now naturally bounded to [-1, 1] since weights sum to
@@ -1399,7 +1448,8 @@ function calculateSmartSentiment(
     (normalized.vwap * weights.vwap) +
     (normalized.priceAction * weights.priceAction) +
     (normalized.volumePercent * weights.volumePercent) +
-    (normalized.maxPain * weights.maxPain)
+    (normalized.maxPain * weights.maxPain) +
+    (normalized.relativeStrength * weights.relativeStrength)
   ) * 10;
 
   const finalScore = Math.max(-10, Math.min(10, Math.round(weightedScore * 10) / 10));
@@ -1572,18 +1622,32 @@ export async function POST(request: Request) {
     let ltp = 0;
     let currentVolume = 0;
     let todayOHLC = null;
+    // --- NEW: Relative Strength vs Nifty. Piggybacked onto the SAME
+    // getQuote() call as the stock itself (Kite supports multiple
+    // instruments in one request) — zero extra Kite API calls, same
+    // rate-limit discipline as everything else we protected tonight.
+    let niftyChangePercent = 0;
+    let niftyDataAvailable = false;
 
     try {
-        const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`]);
+        const quoteDataForSymbol: QuoteData = await kc.getQuote([`${exchange}:${tradingSymbol}`, 'NSE:NIFTY 50']);
         ltp = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.last_price || 0;
         currentVolume = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.volume || 0;
         todayOHLC = quoteDataForSymbol[`${exchange}:${tradingSymbol}`]?.ohlc;
+
+        const niftyQuote = quoteDataForSymbol['NSE:NIFTY 50'];
+        if (niftyQuote && niftyQuote.ohlc?.close && niftyQuote.last_price) {
+            niftyChangePercent = ((niftyQuote.last_price - niftyQuote.ohlc.close) / niftyQuote.ohlc.close) * 100;
+            niftyDataAvailable = true;
+        }
         
         console.log('💰 LIVE PRICE FETCH:', { 
             ltp, 
             currentVolume, 
             hasOHLC: !!todayOHLC,
-            success: ltp > 0 
+            success: ltp > 0,
+            niftyChangePercent,
+            niftyDataAvailable
         });
     } catch (error: any) {
         // --- FIX: was only logging error.message, which showed "Unknown
@@ -1686,6 +1750,18 @@ export async function POST(request: Request) {
     
     // FIXED: Use the new calculateChangePercent function with proper parameters
     const changePercent = await calculateChangePercent(ltp, historicalData, 'CMP', kc, tradingSymbol, exchange);
+
+    // --- NEW: Relative Strength vs Nifty — the gap between the stock's
+    // own % move and the index's % move on the same day. A stock down
+    // 0.5% reads very differently if Nifty is down 2% (relative strength)
+    // vs if Nifty is up 1% (genuine underperformance) — this metric
+    // makes that distinction explicit instead of leaving it invisible.
+    const relativeStrengthGap = niftyDataAvailable ? (changePercent - niftyChangePercent) : 0;
+    const relativeStrengthLabel = !niftyDataAvailable
+      ? null
+      : relativeStrengthGap > 1 ? 'Outperforming'
+      : relativeStrengthGap < -1 ? 'Underperforming'
+      : 'In line with market';
     
     console.log(`🔍 ${displayName} ACTUAL VS CALCULATED:`, {
       actualZerodhaChange: actualChange,
@@ -2071,7 +2147,9 @@ export async function POST(request: Request) {
         historicalDataLength,
         volumePcrIsEstimated, // --- FIX: needed to detect and avoid double-counting when volumePcr is just a copy of pcr
         maxPain, // --- NEW: 7th weighted component
-        ltp      // --- NEW: current price, to compare against maxPain
+        ltp,     // --- NEW: current price, to compare against maxPain
+        relativeStrengthGap, // --- NEW: 8th weighted component, added at the END per lesson learned
+        niftyDataAvailable
     );
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
@@ -2165,6 +2243,10 @@ export async function POST(request: Request) {
         priceType: 'CMP',
         lastRefreshed: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
         changePercent: parseFloat(changePercent.toFixed(2)),
+        // --- NEW: Relative Strength vs Nifty, for header display (Option B)
+        niftyChangePercent: niftyDataAvailable ? parseFloat(niftyChangePercent.toFixed(2)) : null,
+        relativeStrengthGap: niftyDataAvailable ? parseFloat(relativeStrengthGap.toFixed(2)) : null,
+        relativeStrengthLabel: relativeStrengthLabel,
         avg20DayVolume: volumeMetrics.avg20DayVolume,
         todayVolumePercentage: volumeMetrics.todayVolumePercentage,
         estimatedTodayVolume: volumeMetrics.estimatedTodayVolume,

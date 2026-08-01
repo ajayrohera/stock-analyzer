@@ -145,6 +145,10 @@ type AnalysisResult = {
   ltp: number;
   lastRefreshed: string;
   priceType: string;
+  // --- NEW: Relative Strength vs Nifty
+  niftyChangePercent?: number | null;
+  relativeStrengthGap?: number | null;
+  relativeStrengthLabel?: string | null;
   avg20DayVolume?: number;
   todayVolumePercentage?: number;
   estimatedTodayVolume?: number;
@@ -1428,6 +1432,21 @@ export default function Home() {
                         </span>
                     )}
                     </span>
+                    {/* --- NEW: Relative Strength vs Nifty, Option B —
+                        compact header placement next to CMP rather than a
+                        separate full card, per our discussion about page
+                        density. */}
+                    {results.relativeStrengthLabel && typeof results.niftyChangePercent === 'number' && (
+                        <span className="text-sm ml-2 text-gray-400">
+                          | vs Nifty: {results.niftyChangePercent > 0 ? '+' : ''}{results.niftyChangePercent.toFixed(2)}%
+                          <span className={
+                            results.relativeStrengthLabel === 'Outperforming' ? 'text-green-400' :
+                            results.relativeStrengthLabel === 'Underperforming' ? 'text-red-400' : 'text-gray-400'
+                          }>
+                            {' '}({results.relativeStrengthLabel})
+                          </span>
+                        </span>
+                    )}
                     <span className="text-gray-500 ml-2 text-sm">(last refreshed {results.lastRefreshed})</span>
                     <button 
                         onClick={handleRefreshCard} 
