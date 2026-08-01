@@ -1062,7 +1062,8 @@ function calculateSmartSentiment(
   maxPain?: number,      // --- NEW: strike price of max pain, for the 7th weighted component
   currentPrice?: number, // --- NEW: LTP, needed to compare against maxPain
   relativeStrengthGap?: number, // --- NEW: 8th component. Added strictly at the END of the parameter list this time, per the lesson learned earlier tonight (adding a param in the MIDDLE silently shifted every argument after it).
-  niftyDataAvailable?: boolean
+  niftyDataAvailable?: boolean,
+  relativeStrengthLabel?: string | null // --- NEW: reuse the same corrected label (handles the "Diverging from market" case) instead of recomputing a separate one here
 ): { sentiment: string; score: number; breakdown: string[]; maxPainSentiment?: { label: string; color: string } } {
   console.log('🧠 SENTIMENT CALCULATION:', { 
     pcr, volumePcr, highestPutOI, highestCallOI, todayVolumePercentage, changePercent, historicalDataLength
@@ -1376,8 +1377,7 @@ function calculateSmartSentiment(
     else if (relativeStrengthGap < -2) relativeStrengthScore = -2;
     else if (relativeStrengthGap < -1) relativeStrengthScore = -1;
     else relativeStrengthScore = 0;
-    const relativeStrengthLabelForScore = relativeStrengthScore > 0 ? 'Outperforming' : relativeStrengthScore < 0 ? 'Underperforming' : 'In line with market';
-    breakdown.push(`${relativeStrengthScore >= 0 ? '+' : ''}${relativeStrengthScore} • Relative Strength: ${relativeStrengthLabelForScore} Nifty by ${Math.abs(relativeStrengthGap).toFixed(2)} pts`);
+    breakdown.push(`${relativeStrengthScore >= 0 ? '+' : ''}${relativeStrengthScore} • Relative Strength: ${relativeStrengthLabel} Nifty by ${Math.abs(relativeStrengthGap).toFixed(2)} pts`);
   }
 
   const baseWeights = {
@@ -1757,10 +1757,24 @@ export async function POST(request: Request) {
     // vs if Nifty is up 1% (genuine underperformance) — this metric
     // makes that distinction explicit instead of leaving it invisible.
     const relativeStrengthGap = niftyDataAvailable ? (changePercent - niftyChangePercent) : 0;
+    // --- FIX: previously, "In line with market" only checked the raw
+    // point-gap (<1pt = "in line"), which produced misleading labels like
+    // "-0.66% vs +0.27% = In line" — the stock and index were actually
+    // moving in OPPOSITE directions, which shouldn't read as "in line"
+    // regardless of how small the gap happens to be. Now opposite-
+    // direction moves get their own honest label. The underlying SCORE
+    // is unchanged (still purely gap-magnitude-based) — this is a
+    // labeling fix, not a scoring change, since a genuinely tiny gap
+    // still doesn't deserve extra scoring weight either way.
+    const movingOppositeDirections = niftyDataAvailable && (
+      (changePercent > 0 && niftyChangePercent < 0) ||
+      (changePercent < 0 && niftyChangePercent > 0)
+    );
     const relativeStrengthLabel = !niftyDataAvailable
       ? null
       : relativeStrengthGap > 1 ? 'Outperforming'
       : relativeStrengthGap < -1 ? 'Underperforming'
+      : movingOppositeDirections ? 'Diverging from market'
       : 'In line with market';
     
     console.log(`🔍 ${displayName} ACTUAL VS CALCULATED:`, {
@@ -2149,7 +2163,8 @@ export async function POST(request: Request) {
         maxPain, // --- NEW: 7th weighted component
         ltp,     // --- NEW: current price, to compare against maxPain
         relativeStrengthGap, // --- NEW: 8th weighted component, added at the END per lesson learned
-        niftyDataAvailable
+        niftyDataAvailable,
+        relativeStrengthLabel
     );
     
     const formattedExpiry = new Date(nearestExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
