@@ -102,16 +102,15 @@ export async function GET(request: NextRequest) {
 
     const toDate = new Date();
     const fromDate = new Date();
-    // --- FIX: 15 calendar days only contains ~10-11 actual TRADING days
-    // (weekends have no data), which would satisfy Volume (needs 5) and
-    // A/D Line (needs 10) but fall short of RSI's 14-day requirement.
-    // All three indicators share the SAME underlying day count in this
-    // app (confirmed in the dataSufficiency code — they just check
-    // different thresholds against one shared historicalDataLength), so
-    // satisfying the highest requirement (RSI's 14) automatically
-    // satisfies the other two. 25 calendar days comfortably covers 14+
-    // trading days even accounting for a holiday or two in the window.
-    fromDate.setDate(fromDate.getDate() - 25);
+    // --- FIX: was 25 calendar days, sized for the OLDER 14-day RSI
+    // requirement. Since then, A/D's Recent Momentum and Overall Trend
+    // were both raised to require a genuine 20 TRADING days — and 25
+    // calendar days only reliably yields ~17-19 trading days (weekends
+    // alone remove 2 of every 7), which is exactly why backfill was
+    // landing at "19/20" instead of a full 20. Widened to 35 calendar
+    // days, which comfortably covers 20+ real trading days even
+    // accounting for a market holiday or two within the window.
+    fromDate.setDate(fromDate.getDate() - 35);
 
     const fmt = (d: Date) => d.toISOString().split('T')[0];
 
