@@ -1423,7 +1423,7 @@ export default function Home() {
                 <p className="text-gray-400 text-sm">
                   Expiry Date: {results.expiryDate}
                 </p>
-                <div className="flex items-center justify-center mt-2">
+                <div className="flex flex-col sm:flex-row items-center justify-center mt-2 gap-1 sm:gap-0">
                     <span className="text-white font-bold text-lg">
                     {results.priceType}: {results.ltp}
                     {typeof results.changePercent === 'number' && (
@@ -1432,30 +1432,37 @@ export default function Home() {
                         </span>
                     )}
                     </span>
-                    {/* --- NEW: Relative Strength vs Nifty, Option B —
-                        compact header placement next to CMP rather than a
-                        separate full card, per our discussion about page
-                        density. */}
+                    {/* --- FIX: mobile-responsive layout — on mobile
+                        (below sm breakpoint), each piece stacks on its
+                        own line (CMP / vs Nifty % / label), since the
+                        combined "|"-separated single line was
+                        overflowing and misaligning on small screens. On
+                        desktop (sm and up), it flows back into one
+                        inline line as before, with the "|" separator
+                        restored. */}
                     {results.relativeStrengthLabel && typeof results.niftyChangePercent === 'number' && (
-                        <span className="text-sm ml-2 text-gray-400">
-                          | vs Nifty: {results.niftyChangePercent > 0 ? '+' : ''}{results.niftyChangePercent.toFixed(2)}%
+                        <span className="text-sm text-gray-400 flex flex-col sm:flex-row sm:items-center">
+                          <span className="hidden sm:inline sm:ml-2 sm:mr-1">|</span>
+                          <span>vs Nifty: {results.niftyChangePercent > 0 ? '+' : ''}{results.niftyChangePercent.toFixed(2)}%</span>
                           <span className={
-                            results.relativeStrengthLabel === 'Outperforming' ? 'text-green-400' :
-                            results.relativeStrengthLabel === 'Underperforming' ? 'text-red-400' : 'text-gray-400'
+                            (results.relativeStrengthLabel === 'Outperforming' ? 'text-green-400' :
+                            results.relativeStrengthLabel === 'Underperforming' ? 'text-red-400' : 'text-gray-400') + ' sm:ml-1'
                           }>
-                            {' '}({results.relativeStrengthLabel})
+                            ({results.relativeStrengthLabel})
                           </span>
                         </span>
                     )}
-                    <span className="text-gray-500 ml-2 text-sm">(last refreshed {results.lastRefreshed})</span>
-                    <button 
-                        onClick={handleRefreshCard} 
-                        disabled={refreshingCard} 
-                        className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50" 
-                        title="Refresh data"
-                    >
-                    <RefreshCw size={14} className={refreshingCard ? 'animate-spin' : ''} />
-                    </button>
+                    <span className="flex items-center text-gray-500 text-sm sm:ml-2">
+                      (last refreshed {results.lastRefreshed})
+                      <button 
+                          onClick={handleRefreshCard} 
+                          disabled={refreshingCard} 
+                          className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50" 
+                          title="Refresh data"
+                      >
+                      <RefreshCw size={14} className={refreshingCard ? 'animate-spin' : ''} />
+                      </button>
+                    </span>
                 </div>
               </div>
               
